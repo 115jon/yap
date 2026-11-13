@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  gifSearchMediaFilter,
   appendUniqueGifPickerItems,
   DEFAULT_GIF_PROVIDER,
   buildTenorCacheKey,
@@ -13,9 +14,11 @@ import {
   normalizeGifPickerContentType,
   normalizeKlipyCategory,
   normalizeKlipyGifResult,
+  normalizeKlipyNativeResult,
   normalizeTenorCategory,
   normalizeTenorGifResult,
   parseStoredGifFavorites,
+  pickGifThumb,
   toggleGifFavorite,
 } from "@/lib/gif-picker";
 
@@ -547,5 +550,243 @@ describe("gif-picker helpers", () => {
     ])("is null for %s", (_label, value) => {
       expect(extractTenorConfigFromHtml(html(value))).toBeNull();
     });
+  });
+});
+
+describe("picker tile renditions", () => {
+  const big = {
+    url: "https://m.test/full.gif",
+    dims: [498, 476],
+    size: 22_700_000,
+  };
+  const tiny = {
+    url: "https://m.test/tiny.gif",
+    dims: [220, 210],
+    size: 180_000,
+  };
+  const nano = { url: "https://m.test/nano.gif", dims: [94, 90], size: 40_000 };
+  const tinymp4 = {
+    url: "https://m.test/tiny.mp4",
+    dims: [220, 210],
+    size: 60_000,
+  };
+
+  it("gives KLIPY and Tenor GIFs a tinygif thumb and keeps the full send", () => {
+    for (const normalize of [
+      normalizeKlipyGifResult,
+      normalizeTenorGifResult,
+    ]) {
+      const item = normalize({
+        id: "1",
+        title: "cat",
+        media_formats: { gif: big, tinygif: tiny, nanogif: nano, tinymp4 },
+      })!;
+      expect(item.preview.url).toBe(tinymp4.url);
+      expect(item.thumb).toEqual({
+        url: tiny.url,
+        width: 220,
+        height: 210,
+        sizeBytes: 180_000,
+        contentType: "image/gif",
+      });
+      expect(item.send.url).toBe(big.url);
+    }
+  });
+
+  it("prefers Tenor's lighter tinywebp over tinygif", () => {
+    const item = normalizeTenorGifResult({
+      id: "w",
+      media_formats: {
+        gif: big,
+        tinygif: tiny,
+        tinymp4,
+        tinywebp: {
+          url: "https://m.test/tiny.webp",
+          dims: [200, 192],
+          size: 120_000,
+        },
+      },
+    })!;
+    expect(item.thumb).toMatchObject({
+      url: "https://m.test/tiny.webp",
+      contentType: "image/webp",
+    });
+  });
+
+  it("prefers KLIPY's lighter webp over its tinygif", () => {
+    const item = normalizeKlipyGifResult({
+      id: "k",
+      media_formats: {
+        gif: big,
+        tinygif: {
+          url: "https://m.test/tiny.gif",
+          dims: [220, 123],
+          size: 636_095,
+        },
+        tinymp4,
+        webp: {
+          url: "https://m.test/full.webp",
+          dims: [478, 332],
+          size: 53_490,
+        },
+      },
+    })!;
+    expect(item.thumb).toMatchObject({
+      url: "https://m.test/full.webp",
+      contentType: "image/webp",
+    });
+    expect(item.preview.url).toBe(tinymp4.url);
+    expect(item.send.url).toBe(big.url);
+  });
+
+  it("asks each provider for its light tile picture", () => {
+    expect(gifSearchMediaFilter("tenor").split(",")).toContain("tinywebp");
+    expect(gifSearchMediaFilter("klipy").split(",")).toContain("webp");
+    for (const provider of ["tenor", "klipy"] as const) {
+      expect(gifSearchMediaFilter(provider).split(",")).toEqual(
+        expect.arrayContaining(["gif", "tinygif", "mp4", "tinymp4"]),
+      );
+    }
+  });
+
+  it("falls back to the biggest small picture when none is tile sized", () => {
+    const item = normalizeKlipyGifResult({
+      id: "2",
+      media_formats: { nanogif: nano, tinymp4 },
+    })!;
+    expect(item.thumb?.url).toBe(nano.url);
+  });
+
+  it("leaves the thumb out when there is no picture", () => {
+    const item = normalizeTenorGifResult({
+      id: "3",
+      media_formats: { mp4: tinymp4, tinymp4 },
+    })!;
+    expect(item.thumb).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(item))).not.toHaveProperty("thumb");
+  });
+
+  it("picks the lightest tile-sized rendition, by area when a size is unknown", () => {
+    const asset = (url: string, edge: number, sizeBytes: number) => ({
+      url,
+      width: edge,
+      height: edge,
+      sizeBytes,
+      contentType: "image/webp" as const,
+    });
+    expect(
+      pickGifThumb([
+        asset("md", 320, 1_400_000),
+        asset("hd", 480, 1_000_000),
+        asset("xs", 100, 2_000),
+        asset("sm", 240, 0),
+        { ...asset("mp4", 240, 10), contentType: "video/mp4" as const },
+      ])?.url,
+    ).toBe("sm");
+    expect(
+      pickGifThumb([asset("md", 320, 1_400_000), asset("hd", 480, 1_000_000)])
+        ?.url,
+    ).toBe("hd");
+    // A sizeless tile rendition beats the full file whose size is known.
+    expect(
+      pickGifThumb([asset("gif", 498, 5_000_000), asset("tiny", 220, 0)])?.url,
+    ).toBe("tiny");
+    expect(pickGifThumb([asset("a", 240, 0), asset("b", 300, 0)])?.url).toBe(
+      "a",
+    );
+    expect(pickGifThumb([])).toBeUndefined();
+  });
+
+  it("previews KLIPY stickers with the lightest tier, not md", () => {
+    const tier = (name: string, edge: number, size: number) => ({
+      webp: {
+        url: `https://static.klipy.com/${name}.webp`,
+        width: edge,
+        height: edge,
+        size,
+      },
+    });
+    const item = normalizeKlipyNativeResult(
+      {
+        id: "s1",
+        title: "cat sticker",
+        file: {
+          hd: tier("hd", 480, 1_056_000),
+          md: tier("md", 320, 1_406_000),
+          sm: tier("sm", 240, 90_000),
+          xs: tier("xs", 120, 20_000),
+        },
+      },
+      "stickers",
+    )!;
+    expect(item.send.url).toBe("https://static.klipy.com/hd.webp");
+    expect(item.preview.url).toBe("https://static.klipy.com/sm.webp");
+    expect(item.thumb).toEqual(item.preview);
+    expect(item.preview.contentType).toBe("image/webp");
+    expect(item.mediaType).toBe("stickers");
+  });
+
+  it("previews a KLIPY clip with its smallest picture and sends the mp4", () => {
+    const item = normalizeKlipyNativeResult(
+      {
+        id: "c1",
+        duration: "4.5",
+        file: {
+          mp4: "https://static.klipy.com/clip.mp4",
+          webp: "https://static.klipy.com/clip-hd.webp",
+          gif: "https://static.klipy.com/clip.gif",
+          sm: {
+            webp: {
+              url: "https://static.klipy.com/clip-sm.webp",
+              width: 320,
+              height: 180,
+              size: 70_000,
+            },
+          },
+        },
+        file_meta: {
+          mp4: { width: 1280, height: 720, size: 350_000 },
+          webp: { width: 640, height: 360, size: 1_800_000 },
+          gif: { width: 640, height: 360, size: 3_000_000 },
+        },
+      },
+      "clips",
+    )!;
+    expect(item.send).toMatchObject({
+      url: "https://static.klipy.com/clip.mp4",
+      contentType: "video/mp4",
+    });
+    expect(item.preview.url).toBe("https://static.klipy.com/clip-sm.webp");
+    expect(item.duration).toBe(4.5);
+  });
+
+  it("keeps the old preview when KLIPY gives no sizes to compare", () => {
+    const item = normalizeKlipyNativeResult(
+      {
+        id: "m1",
+        file: { md: { png: { url: "https://static.klipy.com/m.png" } } },
+      },
+      "memes",
+    )!;
+    expect(item.preview).toMatchObject({
+      url: "https://static.klipy.com/m.png",
+      contentType: "image/png",
+    });
+    expect(item.send.url).toBe("https://static.klipy.com/m.png");
+  });
+
+  it("reads a saved favorite's thumb back", () => {
+    const [item] = parseStoredGifFavorites(
+      JSON.stringify([
+        {
+          id: "1",
+          provider: "klipy",
+          preview: { url: "https://m.test/a.mp4", contentType: "video/mp4" },
+          thumb: { url: "https://m.test/a.gif", width: 220, height: 200 },
+          send: { url: "https://m.test/full.gif" },
+        },
+      ]),
+    );
+    expect(item.thumb?.url).toBe("https://m.test/a.gif");
   });
 });

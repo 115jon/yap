@@ -467,8 +467,9 @@ rows! {
     pub struct GifRow / GifRole {
         id: String => Id "gifId",
         title: String => Title "title",
-        /// The picture the tile shows (video previews fall back to the
-        /// `send` image); a clip's poster when it has one, else empty.
+        /// The picture the tile shows: the server's small `thumb`, an
+        /// image preview, or a light `send` image; empty when the tile
+        /// loops `video` instead.
         preview: String => Preview "preview",
         /// The mp4 the tile loops: a clip, or an item with no picture.
         video: String => Video "video",

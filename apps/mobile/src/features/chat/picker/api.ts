@@ -56,6 +56,8 @@ const GifSchema = Schema.Struct({
   altText: Schema.optional(Schema.String),
   query: Schema.optional(Schema.String),
   preview: GifAssetSchema,
+  /** The lightest picture for a tile (newer servers; not on favorites). */
+  thumb: Schema.optional(GifAssetSchema),
   send: GifAssetSchema,
   sourceUrl: Schema.String,
   aspectRatio: Schema.Number,
@@ -91,13 +93,18 @@ export function gifKey(gif: Pick<Gif, "provider" | "id">): string {
   return `${gif.provider}:${gif.id}`;
 }
 
-/** A GIF previewed as a moving image heavier than this plays as video. */
-const MAX_IMAGE_PREVIEW_BYTES = 4_000_000;
+/**
+ * The sent GIF stands in for a video preview only when it is this light:
+ * KLIPY's full GIFs run to tens of MB, so a heavier one plays the small
+ * preview video instead.
+ */
+const MAX_IMAGE_PREVIEW_BYTES = 1_000_000;
 
 /**
- * What a picker tile draws. KLIPY previews GIFs as tiny mp4s, but a small
- * GIF as an image costs no video decoder (a few can play at once), so the
- * sent GIF stands in when it is light enough.
+ * What a picker tile draws. The server's `thumb` is a small picture
+ * (tinygif, a small webp) made for this; older servers and saved favorites
+ * lack it, and their KLIPY GIF previews are tiny mp4s. A picture costs no
+ * video decoder (a few can play at once), so a light sent GIF stands in.
  */
 export interface GifPreview {
   readonly kind: "image" | "video";
@@ -105,10 +112,13 @@ export interface GifPreview {
 }
 
 export function gifPreview(gif: Gif): GifPreview {
+  if (gif.thumb && gif.thumb.contentType.startsWith("image/"))
+    return { kind: "image", url: gif.thumb.url };
   if (gif.preview.contentType.startsWith("image/"))
     return { kind: "image", url: gif.preview.url };
   if (
     gif.send.contentType.startsWith("image/") &&
+    gif.send.sizeBytes > 0 &&
     gif.send.sizeBytes <= MAX_IMAGE_PREVIEW_BYTES
   )
     return { kind: "image", url: gif.send.url };
