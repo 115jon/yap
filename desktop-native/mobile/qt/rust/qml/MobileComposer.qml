@@ -148,6 +148,20 @@ Rectangle {
             root.pickMedia()
         }
     }
+    // A photo the camera took after Android killed the app behind it goes
+    // to the tray once a channel's composer can take it.
+    readonly property bool takesLeftover: root.enabled && Nav.activeChannelId.length > 0
+    onTakesLeftoverChanged: takeLeftoverPhoto()
+    Component.onCompleted: takeLeftoverPhoto()
+    function takeLeftoverPhoto() {
+        if (!root.takesLeftover)
+            return
+        const path = Native.takeLeftoverPhoto()
+        if (path.length === 0)
+            return
+        Chat.addFiles([path])
+        root.showNotice(qsTr("Your camera photo is in the tray, ready to send."))
+    }
     // A paste's files are being copied in.
     property bool pasting: false
     Connections {

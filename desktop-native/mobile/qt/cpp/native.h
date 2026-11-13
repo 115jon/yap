@@ -141,6 +141,9 @@ public:
   // opened; 1: no camera app; 2: the camera permission was asked for (try
   // again); 3: another pick is under way, or it could not start.
   Q_INVOKABLE int takePhoto();
+  // A photo the camera took after Android killed the app behind it (its
+  // path, once; empty when there is none), for the composer's tray.
+  Q_INVOKABLE QString takeLeftoverPhoto();
   // Paste: whether the clipboard holds files or a picture, and copying them
   // in (their paths arrive as contentReceived; false: none, a text paste).
   Q_INVOKABLE bool clipboardHasFiles() const;

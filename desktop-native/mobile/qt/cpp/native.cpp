@@ -377,6 +377,15 @@ int Native::takePhoto()
 #endif
 }
 
+QString Native::takeLeftoverPhoto()
+{
+#ifdef Q_OS_ANDROID
+  return QJniObject::callStaticObjectMethod(kShim, "takeLeftoverPhoto", "()Ljava/lang/String;").toString();
+#else
+  return {};
+#endif
+}
+
 bool Native::clipboardHasFiles() const
 {
 #ifdef Q_OS_ANDROID

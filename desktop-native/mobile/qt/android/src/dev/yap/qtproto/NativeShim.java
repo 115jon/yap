@@ -123,14 +123,21 @@ public final class NativeShim {
         activity = a;
         density = a.getResources().getDisplayMetrics().density;
         a.runOnUiThread(NativeShim::installOnUi);
+        // A photo the camera took while the app was gone (killed behind
+        // the camera) stays for the composer (takeLeftoverPhoto).
+        final File capture = new File(a.getCacheDir(), CAPTURE);
+        final File leftover = leftoverPhoto(a, capture);
+        leftoverPhoto = leftover == null ? null : leftover.getAbsolutePath();
         // Nothing uploads before the app is up: last run's copies can go.
         final File uploads = new File(a.getCacheDir(), UPLOADS);
         final File saves = new File(a.getCacheDir(), SAVES);
-        final File capture = new File(a.getCacheDir(), CAPTURE);
         new Thread(() -> {
             deleteTree(uploads);
             deleteTree(saves);
-            deleteTree(capture);
+            File[] shots = capture.listFiles();
+            for (int i = 0; shots != null && i < shots.length; i++) {
+                if (leftover == null || !shots[i].equals(leftover.getParentFile())) deleteTree(shots[i]);
+            }
         }, "yap-uploads-clean").start();
     }
 
@@ -608,6 +615,50 @@ public final class NativeShim {
 
     /** The photo the camera is taking (takePhotoIntent), until photoTaken. */
     private static File pendingPhoto;
+    /**
+     * pendingPhoto, kept across a process death: Android may kill the app
+     * behind the camera, and the camera's result then reaches no one.
+     */
+    private static final String CAPTURE_PREFS = "yap-capture";
+    private static final String CAPTURE_PENDING = "pending";
+    /** Last run's photo, found at this start, until the composer takes it. */
+    private static volatile String leftoverPhoto;
+
+    private static void rememberPhoto(File photo) {
+        activity.getSharedPreferences(CAPTURE_PREFS, Context.MODE_PRIVATE).edit()
+                .putString(CAPTURE_PENDING, photo == null ? null : photo.getAbsolutePath())
+                .commit();
+    }
+
+    /**
+     * The photo a camera wrote for the last run, if that run ended before
+     * the result came back: a non-empty file in our capture folder. The
+     * preference is cleared either way.
+     */
+    private static File leftoverPhoto(Activity a, File capture) {
+        SharedPreferences prefs = a.getSharedPreferences(CAPTURE_PREFS, Context.MODE_PRIVATE);
+        String path = prefs.getString(CAPTURE_PENDING, null);
+        if (path == null) return null;
+        prefs.edit().remove(CAPTURE_PENDING).commit();
+        File photo = new File(path);
+        try {
+            File parent = photo.getCanonicalFile().getParentFile();
+            if (parent == null || !capture.getCanonicalFile().equals(parent.getParentFile())) return null;
+        } catch (IOException e) {
+            return null;
+        }
+        return photo.isFile() && photo.length() > 0 ? photo : null;
+    }
+
+    /**
+     * The photo last run's camera took (its path, once; "" when none), for
+     * the composer's tray. Native.takeLeftoverPhoto.
+     */
+    public static String takeLeftoverPhoto() {
+        String path = leftoverPhoto;
+        leftoverPhoto = null;
+        return path == null ? "" : path;
+    }
 
     /**
      * Can the composer's Camera start: CAMERA_OK, CAMERA_NONE (no camera
@@ -663,6 +714,7 @@ public final class NativeShim {
             return null;
         }
         pendingPhoto = photo;
+        rememberPhoto(photo);
         Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE)
                 .putExtra(MediaStore.EXTRA_OUTPUT, uri)
                 .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -677,6 +729,7 @@ public final class NativeShim {
     public static void photoTaken(int resultCode) {
         final File photo = pendingPhoto;
         pendingPhoto = null;
+        if (activity != null) rememberPhoto(null);
         if (photo != null && resultCode == Activity.RESULT_OK && photo.isFile() && photo.length() > 0) {
             nativeMediaPicked(new String[] {photo.getAbsolutePath()}, 0);
             return;
