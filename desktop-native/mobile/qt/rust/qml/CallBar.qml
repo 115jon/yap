@@ -3,8 +3,8 @@ import Yap.Mobile
 import com.yap.mobile
 import Yap.Ui
 
-// The call in progress, along the drawer above your account: the talk LED
-// (lit while you speak), the call's state in silkscreen and the channel.
+// The call in progress, along the drawer above your account: Yap.Ui's
+// CallStatusLine (the talk LED, the call's state in silkscreen, the channel).
 // A tap opens the call page, where its controls are (no second dock here).
 Rectangle {
     id: root
@@ -17,15 +17,11 @@ Rectangle {
     property real rightInset: 0
 
     readonly property bool shown: Voice.channelId.length > 0
-    readonly property bool settled: Voice.live && Voice.status === "Connected"
-    readonly property string word: settled ? qsTr("Voice connected")
-        : Voice.status.length > 0 ? Voice.status : qsTr("Connecting")
-
-    height: shown ? 48 : 0
+    height: shown ? Math.max(48, line.implicitHeight + 16) : 0
     visible: shown
     color: Theme.ply2
     Accessible.role: Accessible.Button
-    Accessible.name: qsTr("%1, %2. Open the call").arg(word).arg(Voice.channelName)
+    Accessible.name: qsTr("%1, %2. Open the call").arg(line.word).arg(Voice.channelName)
     Accessible.onPressAction: root.callRequested()
 
     Rectangle {
@@ -38,36 +34,14 @@ Rectangle {
         height: 1
         color: Theme.line
     }
-    Led {
-        id: led
-        x: 12 + 15 + root.leftInset
-        anchors.verticalCenter: parent.verticalCenter
-        lit: root.settled ? Voice.speaking && !Voice.muted : true
-        color: root.settled ? Theme.talk : Theme.idle
-    }
-    Column {
-        anchors.left: led.right
-        anchors.leftMargin: 12 + 15
+    CallStatusLine {
+        id: line
+        anchors.left: parent.left
+        anchors.leftMargin: 24 + root.leftInset
         anchors.right: glyphs.left
         anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
-        spacing: 2
-        Text {
-            width: parent.width
-            textFormat: Text.PlainText
-            text: root.word
-            elide: Text.ElideRight
-            color: root.settled ? Theme.successInk : Theme.warningInk
-            font: Theme.type.silk
-        }
-        Text {
-            width: parent.width
-            textFormat: Text.PlainText
-            text: Voice.channelName
-            elide: Text.ElideRight
-            color: Theme.ink2
-            font: Theme.type.caption
-        }
+        clockShown: false
     }
     Row {
         id: glyphs
