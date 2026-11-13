@@ -28,12 +28,18 @@ FocusScope {
     signal applied(string filePath, var crop)
 
     property bool up: false
-    readonly property bool ready: picture.status === Image.Ready && picture.sourceSize.width > 0
+    // A GIF or WebP may move: it plays at its own size. Anything else is a
+    // still, decoded at most 2048 px on its long side (a 108 MP photo would
+    // not fit in memory); the crop is in percent, so the scale is free.
+    readonly property bool animated: /\.(gif|webp)($|[?#])/i.test(source)
+    readonly property Image picture: animated ? moving : still
+    // The picture as decoded (EXIF orientation applied), in pixels.
+    readonly property bool ready: picture.status === Image.Ready && picture.implicitWidth > 0
     readonly property AvatarCropState framing: AvatarCropState {
         viewport: Math.max(160, Math.min(page.width - 32, page.height - 320, 420))
         ready: page.ready
-        naturalW: picture.sourceSize.width
-        naturalH: picture.sourceSize.height
+        naturalW: page.picture.implicitWidth
+        naturalH: page.picture.implicitHeight
     }
 
     function open(path, url, startCrop) {
@@ -149,15 +155,31 @@ FocusScope {
                 anchors.fill: parent
                 color: Theme.tint2
             }
-            AnimatedImage {
-                id: picture
+            Image {
+                id: still
                 x: page.framing.pictureX
                 y: page.framing.pictureY
                 width: page.framing.shownW
                 height: page.framing.shownH
-                visible: page.ready
-                source: page.up ? page.source : ""
+                visible: page.ready && !page.animated
+                source: page.up && !page.animated ? page.source : ""
+                sourceSize: Qt.size(2048, 2048)
+                autoTransform: true
+                fillMode: Image.Stretch
+                asynchronous: true
+                smooth: true
+                mipmap: true
+            }
+            AnimatedImage {
+                id: moving
+                x: page.framing.pictureX
+                y: page.framing.pictureY
+                width: page.framing.shownW
+                height: page.framing.shownH
+                visible: page.ready && page.animated
+                source: page.up && page.animated ? page.source : ""
                 playing: page.up && !Theme.reducedMotion
+                autoTransform: true
                 fillMode: Image.Stretch
                 asynchronous: true
                 smooth: true
@@ -170,7 +192,7 @@ FocusScope {
                 visible: !page.ready
                 textFormat: Text.PlainText
                 wrapMode: Text.Wrap
-                text: picture.status === Image.Error ? qsTr("The image could not be loaded.") : qsTr("Loading image…")
+                text: page.picture.status === Image.Error ? qsTr("The image could not be loaded.") : qsTr("Loading image…")
                 color: Theme.ink2
                 font: Theme.type.description
             }
