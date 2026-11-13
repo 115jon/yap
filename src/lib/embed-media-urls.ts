@@ -9,19 +9,24 @@ import type { EmbedInfo, EmbedMedia } from "@/lib/types";
 /** What a field holds: a video (may be an HLS playlist) or other media. */
 export type EmbedMediaField = "video" | "media";
 
-/** Maps one media URL; `sourceUrl` is the post or page it came from. */
+/**
+ * Maps one media URL; `sourceUrl` is the post or page it came from. Null
+ * drops the media: an optional URL is removed, and a picture, video or
+ * media item that needs one is removed with it.
+ */
 export type EmbedMediaUrlMap = (
   url: string,
   sourceUrl?: string,
   field?: EmbedMediaField,
-) => string;
+) => string | null;
 
 function mapOptional(
   value: string | undefined,
   map: EmbedMediaUrlMap,
   sourceUrl?: string,
 ): string | undefined {
-  return typeof value === "string" && value ? map(value, sourceUrl) : value;
+  if (typeof value !== "string" || !value) return value;
+  return map(value, sourceUrl) ?? undefined;
 }
 
 function mapMedia(
@@ -30,14 +35,21 @@ function mapMedia(
   sourceUrl: string,
 ): EmbedMedia[] | undefined {
   if (!Array.isArray(media)) return media;
-  return media.map((item) => ({
-    ...item,
-    url:
+  const mapped: EmbedMedia[] = [];
+  for (const item of media) {
+    if (!item || typeof item !== "object") continue;
+    const url =
       typeof item.url === "string" && item.url
         ? map(item.url, sourceUrl, item.type === "video" ? "video" : "media")
-        : item.url,
-    thumbnailUrl: mapOptional(item.thumbnailUrl, map, sourceUrl),
-  }));
+        : item.url;
+    if (url === null) continue;
+    mapped.push({
+      ...item,
+      url,
+      thumbnailUrl: mapOptional(item.thumbnailUrl, map, sourceUrl),
+    });
+  }
+  return mapped;
 }
 
 export function mapEmbedMediaUrls(
@@ -55,18 +67,16 @@ export function mapEmbedMediaUrls(
     };
   }
   if (embed.thumbnail?.url) {
-    next.thumbnail = {
-      ...embed.thumbnail,
-      url: map(embed.thumbnail.url, source),
-    };
+    const url = map(embed.thumbnail.url, source);
+    if (url === null) delete next.thumbnail;
+    else next.thumbnail = { ...embed.thumbnail, url };
   }
   if (embed.media) next.media = mapMedia(embed.media, map, source);
   // Only a "direct" video is a file; a "player" one is an iframe page.
   if (embed.video?.url && embed.video.kind === "direct") {
-    next.video = {
-      ...embed.video,
-      url: map(embed.video.url, source, "video"),
-    };
+    const url = map(embed.video.url, source, "video");
+    if (url === null) delete next.video;
+    else next.video = { ...embed.video, url };
   }
   if (embed.audio) {
     next.audio = {
@@ -76,13 +86,7 @@ export function mapEmbedMediaUrls(
     };
   }
   if (embed.externalCard?.image?.url) {
-    next.externalCard = {
-      ...embed.externalCard,
-      image: {
-        ...embed.externalCard.image,
-        url: map(embed.externalCard.image.url, source),
-      },
-    };
+    next.externalCard = withCardImage(embed.externalCard, map, source);
   }
   if (embed.referencedTweet) {
     const quoted = embed.referencedTweet;
@@ -97,21 +101,32 @@ export function mapEmbedMediaUrls(
         : quoted.author,
       media: mapMedia(quoted.media, map, quotedSource),
       externalCard: quoted.externalCard?.image?.url
-        ? {
-            ...quoted.externalCard,
-            image: {
-              ...quoted.externalCard.image,
-              url: map(quoted.externalCard.image.url, quotedSource),
-            },
-          }
+        ? withCardImage(quoted.externalCard, map, quotedSource)
         : quoted.externalCard,
     };
   }
   if (embed.footer?.iconURL) {
     next.footer = {
       ...embed.footer,
-      iconURL: map(embed.footer.iconURL, source),
+      iconURL: mapOptional(embed.footer.iconURL, map, source),
     };
   }
   return next;
+}
+
+type ExternalCard = NonNullable<EmbedInfo["externalCard"]>;
+
+function withCardImage(
+  card: ExternalCard,
+  map: EmbedMediaUrlMap,
+  source: string,
+): ExternalCard {
+  const image = card.image;
+  if (!image?.url) return card;
+  const url = map(image.url, source);
+  if (url === null) {
+    const { image: _dropped, ...rest } = card;
+    return rest as ExternalCard;
+  }
+  return { ...card, image: { ...image, url } };
 }

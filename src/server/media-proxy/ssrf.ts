@@ -11,6 +11,8 @@
 // addresses), which closes that gap in production; the check here keeps the
 // proxy honest anywhere else it runs (local dev, tests).
 
+import { isOwnZoneHostname } from "@/lib/media-url-class";
+
 export type ResolveHost = (hostname: string) => Promise<string[]>;
 
 export type TargetCheck =
@@ -193,7 +195,10 @@ export async function checkMediaTarget(
   if (
     hostname === "localhost" ||
     !hostname.includes(".") ||
-    BLOCKED_SUFFIXES.some((suffix) => hostname.endsWith(suffix))
+    BLOCKED_SUFFIXES.some((suffix) => hostname.endsWith(suffix)) ||
+    // Our own zones: never fetched through the proxy (loops, and hosts
+    // that trust requests from our Worker).
+    isOwnZoneHostname(hostname)
   ) {
     return { ok: false, reason: "hostname" };
   }

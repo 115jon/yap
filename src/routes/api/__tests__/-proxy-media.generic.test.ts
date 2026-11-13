@@ -53,7 +53,7 @@ afterEach(() => {
 
 describe("authorizeGenericMediaRequest", () => {
   const target = "https://cdn.example.com/og.png";
-  const noBearer = async () => false;
+  const noBearer = async () => null;
 
   it("accepts the server's signature for exactly that URL", async () => {
     const request = new Request(
@@ -61,7 +61,43 @@ describe("authorizeGenericMediaRequest", () => {
     );
     expect(
       await authorizeGenericMediaRequest(request, target, key, noBearer),
-    ).toBe("signature");
+    ).toEqual({ via: "signature" });
+  });
+
+  it("accepts an expiring signature only until it expires", async () => {
+    const future = String(Math.floor(Date.now() / 1000) + 3600);
+    const past = String(Math.floor(Date.now() / 1000) - 1);
+    const fresh = new Request(
+      proxyUrl({
+        url: target,
+        exp: future,
+        sig: signMediaUrl(target, key, Number(future)),
+      }),
+    );
+    expect(
+      await authorizeGenericMediaRequest(fresh, target, key, noBearer),
+    ).toEqual({ via: "signature" });
+    const expired = new Request(
+      proxyUrl({
+        url: target,
+        exp: past,
+        sig: signMediaUrl(target, key, Number(past)),
+      }),
+    );
+    expect(
+      await authorizeGenericMediaRequest(expired, target, key, noBearer),
+    ).toBeNull();
+    // Moving `exp` breaks the signature.
+    const moved = new Request(
+      proxyUrl({
+        url: target,
+        exp: String(Number(future) + 86_400),
+        sig: signMediaUrl(target, key, Number(future)),
+      }),
+    );
+    expect(
+      await authorizeGenericMediaRequest(moved, target, key, noBearer),
+    ).toBeNull();
   });
 
   it("refuses a signature made for another URL", async () => {
@@ -74,29 +110,35 @@ describe("authorizeGenericMediaRequest", () => {
     ).toBeNull();
     // A pass holder may proxy any public URL anyway, so a bad signature
     // falls through to it (the SSRF guard still decides what is fetched).
-    const pass = issueMediaPass(key).value;
+    const pass = issueMediaPass(key, "user-1").value;
     const withPass = new Request(request, {
       headers: { Cookie: `${MEDIA_PASS_COOKIE}=${pass}` },
     });
     expect(
       await authorizeGenericMediaRequest(withPass, other, key, noBearer),
-    ).toBe("pass");
+    ).toEqual({ via: "pass", userId: "user-1" });
   });
 
-  it("accepts the media pass cookie", async () => {
-    const pass = issueMediaPass(key).value;
+  it("accepts the media pass cookie, with its user", async () => {
+    const pass = issueMediaPass(key, "user-1").value;
     const request = new Request(proxyUrl({ url: target }), {
       headers: { Cookie: `other=1; ${MEDIA_PASS_COOKIE}=${pass}` },
     });
     expect(
       await authorizeGenericMediaRequest(request, target, key, noBearer),
-    ).toBe("pass");
+    ).toEqual({ via: "pass", userId: "user-1" });
   });
 
   it("refuses an expired or forged pass", async () => {
-    const expired = issueMediaPass(key, Date.now() - 120_000, 60).value;
+    const expired = issueMediaPass(
+      key,
+      "user-1",
+      Date.now() - 120_000,
+      60,
+    ).value;
     const forged = issueMediaPass(
       mediaProxyKey({ MEDIA_PROXY_SECRET: "attacker" })!,
+      "user-1",
     ).value;
     for (const pass of [expired, forged]) {
       const request = new Request(proxyUrl({ url: target }), {
@@ -108,7 +150,7 @@ describe("authorizeGenericMediaRequest", () => {
     }
   });
 
-  it("falls back to a signed-in bearer", async () => {
+  it("falls back to a signed-in bearer, with its user", async () => {
     const request = new Request(proxyUrl({ url: target }), {
       headers: { Authorization: "Bearer session" },
     });
@@ -117,9 +159,9 @@ describe("authorizeGenericMediaRequest", () => {
         request,
         target,
         key,
-        async () => true,
+        async () => "user-2",
       ),
-    ).toBe("bearer");
+    ).toEqual({ via: "bearer", userId: "user-2" });
     expect(
       await authorizeGenericMediaRequest(request, target, key, noBearer),
     ).toBeNull();
@@ -163,7 +205,7 @@ describe("handleProxyMedia", () => {
       target,
       mediaProxyKey({ MEDIA_PROXY_SECRET: "old-secret" })!,
     );
-    const pass = issueMediaPass(key).value;
+    const pass = issueMediaPass(key, "user-1").value;
     const response = await handleProxyMedia(
       new Request(proxyUrl({ url: target, sig: stale }), {
         headers: { Cookie: `${MEDIA_PASS_COOKIE}=${pass}` },
@@ -238,6 +280,93 @@ describe("handleProxyMedia", () => {
     expect(
       fetchMock.mock.calls.some(([input]) => String(input) === target),
     ).toBe(true);
+  });
+
+  it("limits unsigned requests per user, not signed ones", async () => {
+    const target = "https://cdn.example.com/og.png";
+    stubNetwork({
+      [target]: () =>
+        new Response(PNG, { headers: { "Content-Type": "image/png" } }),
+    });
+    const limited = vi.fn(async (userId: string) =>
+      userId === "user-1"
+        ? Response.json({ error: "Rate limit exceeded" }, { status: 429 })
+        : null,
+    );
+    const pass = issueMediaPass(key, "user-1").value;
+    const unsigned = await handleProxyMedia(
+      new Request(proxyUrl({ url: target }), {
+        headers: { Cookie: `${MEDIA_PASS_COOKIE}=${pass}` },
+      }),
+      true,
+      false,
+      limited,
+    );
+    expect(unsigned.status).toBe(429);
+    expect(limited).toHaveBeenCalledWith("user-1");
+
+    limited.mockClear();
+    const signed = await handleProxyMedia(
+      new Request(proxyUrl({ url: target, sig: signMediaUrl(target, key) })),
+      true,
+      false,
+      limited,
+    );
+    expect(signed.status).toBe(200);
+    expect(limited).not.toHaveBeenCalled();
+  });
+
+  it("refuses non-default ports on unsigned requests only", async () => {
+    const target = "https://cdn.example.com:8443/og.png";
+    stubNetwork({
+      [target]: () =>
+        new Response(PNG, { headers: { "Content-Type": "image/png" } }),
+    });
+    const allow = async () => null;
+    const pass = issueMediaPass(key, "user-1").value;
+    const unsigned = await handleProxyMedia(
+      new Request(proxyUrl({ url: target }), {
+        headers: { Cookie: `${MEDIA_PASS_COOKIE}=${pass}` },
+      }),
+      true,
+      false,
+      allow,
+    );
+    expect(unsigned.status).toBe(400);
+    const signed = await handleProxyMedia(
+      new Request(proxyUrl({ url: target, sig: signMediaUrl(target, key) })),
+      true,
+      false,
+      allow,
+    );
+    expect(signed.status).toBe(200);
+  });
+
+  it("refuses our own zones and the trailing-dot form of its host", async () => {
+    const fetchMock = stubNetwork({});
+    for (const target of [
+      "https://yap.example./api/avatars/u.png",
+      "https://YAP.EXAMPLE/api/avatars/u.png",
+      "https://cdn.115jon.com/a.png",
+      "https://Cdn.115Jon.Com./a.png",
+      "https://meet.115jon.site/a.png",
+      "https://other.example/api/proxy-media/?url=x",
+      "https://other.example/API/Proxy-Media",
+    ]) {
+      const response = await handleProxyMedia(
+        new Request(proxyUrl({ url: target, sig: signMediaUrl(target, key) })),
+        true,
+        false,
+        async () => null,
+      );
+      expect(response.status, target).toBeGreaterThanOrEqual(400);
+      expect(response.status, target).toBeLessThan(500);
+    }
+    expect(
+      fetchMock.mock.calls.some(
+        ([input]) => new URL(String(input)).hostname !== "cloudflare-dns.com",
+      ),
+    ).toBe(false);
   });
 
   it("is off (allowlist only) when no secret is configured", async () => {

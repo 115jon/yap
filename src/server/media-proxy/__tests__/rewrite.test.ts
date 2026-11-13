@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { EmbedInfo } from "@/lib/types";
 import {
+  proxiedClientMediaUrl,
   proxiedMediaUrl,
   proxyArtworkUrlsForDelivery,
   proxyAttachmentUrlForDelivery,
   rewriteEmbedsMedia,
   rewriteGifItemMedia,
-  unwrapEmbedsMedia,
   unwrapProxiedMediaUrl,
   type MediaRewriteContext,
 } from "../rewrite";
@@ -19,8 +19,8 @@ import {
 const key = mediaProxyKey({ MEDIA_PROXY_SECRET: "rewrite-test" })!;
 const ctx: MediaRewriteContext = { key, origin: "https://yap.example" };
 
-function parse(url: string) {
-  const parsed = new URL(url);
+function parse(url: string | null) {
+  const parsed = new URL(url ?? "about:blank");
   return {
     origin: parsed.origin,
     path: parsed.pathname,
@@ -53,24 +53,84 @@ describe("proxiedMediaUrl", () => {
     });
   });
 
-  it("leaves our own URLs, paths and non-http values alone", () => {
+  it("leaves our own URLs and paths alone", () => {
     for (const value of [
       "https://yap.example/api/avatars/u1.png",
       "/api/attachments/c/a/b.png",
-      "data:image/png;base64,AAAA",
       "",
     ]) {
       expect(proxiedMediaUrl(value, ctx)).toBe(value);
     }
+    // The host's root-dot form and any case are still ours.
+    expect(proxiedMediaUrl("https://YAP.example./a.png", ctx)).toBe(
+      "https://yap.example./a.png",
+    );
   });
 
-  it("keeps a proxy URL of ours on another host only when we signed it", () => {
+  it("loads our own zones directly", () => {
+    for (const value of [
+      "https://cdn.115jon.com/f/a.png",
+      "https://115jon.com/a.png",
+      "https://CDN.115JON.COM./a.png",
+      "https://meet.115jon.site/a.png",
+    ]) {
+      expect(proxiedMediaUrl(value, ctx)).toBe(new URL(value).href);
+    }
+    // A look-alike name is someone else's.
+    expect(
+      parse(proxiedMediaUrl("https://x115jon.com/a.png", ctx)).target,
+    ).toBe("https://x115jon.com/a.png");
+  });
+
+  it("drops values no client may load", () => {
+    for (const value of [
+      "data:image/png;base64,AAAA",
+      "javascript:alert(1)",
+      "relative/a.png",
+      // A browser reads these against the page, other parsers as a host.
+      "https:evil.example/a.png",
+      "http:/evil.example/a.png",
+      "ftp://evil.example/a.png",
+    ]) {
+      expect(proxiedMediaUrl(value, ctx), JSON.stringify(value)).toBeNull();
+    }
+  });
+
+  it("proxies another host hidden behind characters browsers strip", () => {
+    for (const value of [
+      "/\t/evil.example/a.png",
+      "/\n/evil.example/a.png",
+      "\t//evil.example/a.png",
+      " //evil.example/a.png",
+      "/\\evil.example/a.png",
+      "\\\\evil.example/a.png",
+      "\u0000https://evil.example/a.png",
+      "ht\ttps://evil.example/a.png",
+      "https://evil.example/a.png\r\n",
+    ]) {
+      const out = parse(proxiedMediaUrl(value, ctx));
+      expect(out.origin, JSON.stringify(value)).toBe("https://yap.example");
+      expect(out.target, JSON.stringify(value)).toBe(
+        "https://evil.example/a.png",
+      );
+      expect(verifyMediaUrlSignature(out.target!, out.sig, key)).toBe(true);
+    }
+  });
+
+  it("moves a proxy URL we signed on another host onto ours", () => {
     const raw = "https://cdn.example.com/og.png";
-    const ours = `https://alias.example/api/proxy-media?${new URLSearchParams({
+    const query = new URLSearchParams({
       url: raw,
       sig: signMediaUrl(raw, key),
-    })}`;
-    expect(proxiedMediaUrl(ours, ctx)).toBe(ours);
+    });
+    const ours = `https://alias.example/api/proxy-media?${query}`;
+    expect(proxiedMediaUrl(ours, ctx)).toBe(
+      `https://yap.example/api/proxy-media?${query}`,
+    );
+    const evil = `https://evil.example/api/proxy-media?${query}`;
+    expect(proxiedMediaUrl(evil, ctx)).toBe(
+      `https://yap.example/api/proxy-media?${query}`,
+    );
     // Any host can serve a path that looks like ours: that is a third party.
     const lookalike = "https://evil.example/api/proxy-media?id=1";
     expect(parse(proxiedMediaUrl(lookalike, ctx)).target).toBe(lookalike);
@@ -101,12 +161,12 @@ describe("proxiedMediaUrl", () => {
 
   it("is undone by unwrapProxiedMediaUrl", () => {
     const raw = "https://cdn.example.com/og.png?a=1&b=2";
-    expect(unwrapProxiedMediaUrl(proxiedMediaUrl(raw, ctx))).toBe(raw);
+    expect(unwrapProxiedMediaUrl(proxiedMediaUrl(raw, ctx)!)).toBe(raw);
     const legacy = proxiedMediaUrl(
       "https://pbs.twimg.com/a.jpg",
       ctx,
       "https://x.com/u/status/1",
-    );
+    )!;
     expect(unwrapProxiedMediaUrl(legacy)).toBe("https://pbs.twimg.com/a.jpg");
     expect(unwrapProxiedMediaUrl(legacy, { keepSocialForm: true })).toBe(
       legacy,
@@ -214,9 +274,35 @@ describe("rewriteEmbedsMedia", () => {
     expect(embed.thumbnail?.url).toBe("https://cdn.news.example/og.jpg");
   });
 
-  it("round-trips through unwrapEmbedsMedia", () => {
-    expect(JSON.parse(JSON.stringify(unwrapEmbedsMedia([out])))).toEqual(
-      JSON.parse(JSON.stringify([embed])),
+  it("drops media no client may load", () => {
+    const [cleaned] = rewriteEmbedsMedia(
+      [
+        {
+          ...embed,
+          author: { name: "A", iconURL: "javascript:alert(1)" },
+          thumbnail: { url: "https:evil.example/t.png" },
+          media: [
+            { type: "image", url: "data:image/png;base64,AA" },
+            { type: "image", url: "/\t/evil.example/a.png" },
+          ],
+          video: { url: "ftp://evil.example/v.mp4", kind: "direct" },
+          externalCard: {
+            url: "https://other.example",
+            image: { url: "relative.png" },
+          },
+          footer: { text: "x", iconURL: "http:/evil.example/f.ico" },
+        },
+      ],
+      ctx,
+    );
+    expect(cleaned.author?.iconURL).toBeUndefined();
+    expect(cleaned.thumbnail).toBeUndefined();
+    expect(cleaned.video).toBeUndefined();
+    expect(cleaned.externalCard).toEqual({ url: "https://other.example" });
+    expect(cleaned.footer).toEqual({ text: "x", iconURL: undefined });
+    expect(cleaned.media).toHaveLength(1);
+    expect(parse(cleaned.media![0].url).target).toBe(
+      "https://evil.example/a.png",
     );
   });
 
@@ -251,6 +337,45 @@ describe("GIF results", () => {
     expect(proxyAttachmentUrlForDelivery("attachments/c/a/x.png", ctx)).toBe(
       "/api/attachments/c/a/x.png",
     );
+  });
+});
+
+describe("client-supplied URLs", () => {
+  const now = Date.UTC(2026, 10, 13, 12, 30);
+
+  it("sign until a set time, rounded to the hour", () => {
+    const raw = "https://i.example/art.png";
+    const out = new URL(proxiedClientMediaUrl(raw, ctx, now)!);
+    const exp = out.searchParams.get("exp");
+    expect(Number(exp)).toBe(Date.UTC(2026, 10, 14, 13) / 1000);
+    const sig = out.searchParams.get("sig");
+    expect(verifyMediaUrlSignature(raw, sig, key, exp, now)).toBe(true);
+    // Not a stable signature: it cannot be replayed without `exp`.
+    expect(verifyMediaUrlSignature(raw, sig, key)).toBe(false);
+    expect(
+      verifyMediaUrlSignature(raw, sig, key, exp, Number(exp) * 1000),
+    ).toBe(false);
+  });
+
+  it("keep a proxy URL the server signed, and drop unsafe values", () => {
+    const signed = proxiedMediaUrl("https://i.ytimg.com/vi/a/0.jpg", ctx)!;
+    expect(proxiedClientMediaUrl(signed, ctx, now)).toBe(signed);
+    expect(proxiedClientMediaUrl("/\t/evil.example/a.png", ctx, now)).toMatch(
+      /^https:\/\/yap\.example\/api\/proxy-media\?url=https%3A%2F%2Fevil\.example/,
+    );
+    expect(proxiedClientMediaUrl("https:evil.example/a.png", ctx, now)).toBe(
+      null,
+    );
+  });
+
+  it("are not moved onto our host once expired", () => {
+    const raw = "https://i.example/art.png";
+    const expired = proxiedClientMediaUrl(raw, ctx, now - 3 * 86_400_000)!;
+    const elsewhere = expired.replace(
+      "https://yap.example",
+      "https://evil.example",
+    );
+    expect(parse(proxiedMediaUrl(elsewhere, ctx)).target).toBe(elsewhere);
   });
 });
 

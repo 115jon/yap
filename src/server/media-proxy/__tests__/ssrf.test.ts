@@ -197,3 +197,28 @@ describe("createDohResolver", () => {
     ).toEqual({ ok: false, reason: "unresolved" });
   });
 });
+
+describe("own zones", () => {
+  it.each([
+    "https://115jon.com/a.png",
+    "https://cdn.115jon.com/a.png",
+    "https://CDN.115JON.COM/a.png",
+    "https://cdn.115jon.com./a.png",
+    "https://yap.115jon.com/api/attachments/x",
+    "https://meet.115jon.site/a.png",
+    "https://deep.sub.115jon.site./a.png",
+  ])("refuses %s", async (url) => {
+    await expect(checkMediaTarget(url, publicResolver)).resolves.toEqual({
+      ok: false,
+      reason: "hostname",
+    });
+  });
+
+  it("allows names that only end like ours", async () => {
+    const check = await checkMediaTarget(
+      "https://not115jon.com/a.png",
+      publicResolver,
+    );
+    expect(check.ok).toBe(true);
+  });
+});

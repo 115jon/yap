@@ -11,7 +11,7 @@
 import { notePublicOrigin } from "../src/server/media-proxy/origin";
 import {
   getMediaRewriteContext,
-  proxiedMediaUrl,
+  proxiedClientMediaUrl,
 } from "../src/server/media-proxy/rewrite";
 import { DurableObject } from "cloudflare:workers";
 import { clog } from "../src/lib/console-logger";
@@ -1269,11 +1269,13 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
                 ? track.album.trim().slice(0, 120)
                 : null,
             durationMs: Math.max(1, Math.floor(durationMs)),
-            // Client-supplied: proxied, so a listener's address never
-            // reaches a host a participant picked.
+            // Client-supplied: proxied (with a signature that expires, so a
+            // participant cannot mint a lasting proxy link), so a listener's
+            // address never reaches a host a participant picked. A value
+            // that is not plain http(s) is dropped.
             artworkUrl:
               typeof track?.artworkUrl === "string"
-                ? proxiedMediaUrl(
+                ? proxiedClientMediaUrl(
                     track.artworkUrl.slice(0, 2048),
                     getMediaRewriteContext(),
                   )

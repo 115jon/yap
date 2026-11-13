@@ -1,7 +1,14 @@
 import * as nodeCrypto from "node:crypto";
 import { createFileRoute } from "@tanstack/react-router";
 import * as cloudflareWorkers from "cloudflare:workers";
-import { apiError, apiSuccess, getEnv, requireAuth } from "@/lib/api-helpers";
+import {
+  apiError,
+  apiSuccess,
+  getEnv,
+  isDesktopOrigin,
+  requireAuth,
+} from "@/lib/api-helpers";
+import { checkRateLimitDO } from "@/lib/rate-limit";
 import { cacheFetch, cacheGet, cacheSet } from "@/lib/cache";
 import { clog } from "@/lib/console-logger";
 import { resolveInstagramVideoMetadata } from "@/lib/instagram-video-resolver";
@@ -1146,56 +1153,100 @@ function getDefaultCache(): Cache | null {
   }
 }
 
-const BEARER_MEMO_TTL_MS = 5 * 60_000;
+/** Short, so a signed-out or suspended session stops working quickly. */
+export const BEARER_MEMO_TTL_MS = 30_000;
 const BEARER_MEMO_MAX = 2_000;
-const bearerMemo = new Map<string, number>();
+const bearerMemo = new Map<string, { userId: string; until: number }>();
 
 /**
  * Expo and the native apps send their session bearer to the API's own URLs.
- * A valid session is remembered per isolate for a few minutes, keyed by a
- * hash of the token, so a screen of images costs one session lookup.
+ * A valid session is remembered per isolate for BEARER_MEMO_TTL_MS, keyed
+ * by a hash of the token, so a screen of images costs one session lookup.
+ * Returns the session's user, or null.
  */
-async function bearerIsSignedIn(request: Request): Promise<boolean> {
+async function bearerUserId(request: Request): Promise<string | null> {
   const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) return false;
+  if (!authorization?.startsWith("Bearer ")) return null;
   const memoKey = nodeCrypto
     .createHash("sha256")
     .update(authorization)
     .digest("base64url");
   const now = Date.now();
-  const until = bearerMemo.get(memoKey);
-  if (until && until > now) return true;
+  const memo = bearerMemo.get(memoKey);
+  if (memo && memo.until > now) return memo.userId;
+  bearerMemo.delete(memoKey);
 
   const result = await requireAuth(request);
-  if (result instanceof Response) return false;
+  if (result instanceof Response) return null;
   if (bearerMemo.size >= BEARER_MEMO_MAX) {
     const oldest = bearerMemo.keys().next().value;
     if (oldest !== undefined) bearerMemo.delete(oldest);
   }
-  bearerMemo.set(memoKey, now + BEARER_MEMO_TTL_MS);
-  return true;
+  bearerMemo.set(memoKey, {
+    userId: result.userId,
+    until: now + BEARER_MEMO_TTL_MS,
+  });
+  return result.userId;
 }
 
-export type GenericMediaAuthorization = "signature" | "pass" | "bearer" | null;
+export type GenericMediaAuthorization =
+  | { via: "signature" }
+  | { via: "pass" | "bearer"; userId: string }
+  | null;
 
 /** How (if at all) a generic-mode request is allowed to use the proxy. */
 export async function authorizeGenericMediaRequest(
   request: Request,
   targetUrl: string,
   key: Buffer,
-  checkBearer: (request: Request) => Promise<boolean> = bearerIsSignedIn,
+  checkBearer: (request: Request) => Promise<string | null> = bearerUserId,
 ): Promise<GenericMediaAuthorization> {
-  const signature = new URL(request.url).searchParams.get("sig");
-  // A bad signature (a rotated key) still lets a pass or session through.
-  if (signature && verifyMediaUrlSignature(targetUrl, signature, key)) {
-    return "signature";
-  }
+  const params = new URL(request.url).searchParams;
+  const signature = params.get("sig");
+  // A bad or expired signature (a rotated key) still lets a pass or
+  // session through.
   if (
-    verifyMediaPass(readMediaPassCookie(request.headers.get("cookie")), key)
+    signature &&
+    verifyMediaUrlSignature(targetUrl, signature, key, params.get("exp"))
   ) {
-    return "pass";
+    return { via: "signature" };
   }
-  return (await checkBearer(request)) ? "bearer" : null;
+  const pass = verifyMediaPass(
+    readMediaPassCookie(request.headers.get("cookie")),
+    key,
+  );
+  if (pass) return { via: "pass", userId: pass.userId };
+  const userId = await checkBearer(request);
+  return userId ? { via: "bearer", userId } : null;
+}
+
+/**
+ * Per-user limit for URLs a client chose (pass or bearer), on top of the
+ * per-IP one: global, through the RATE_LIMITER Durable Object. Signed URLs
+ * are limited to what payloads named and skip it. Fails open, like the
+ * other users of the limiter.
+ */
+export const PROXY_MEDIA_USER_RATE_LIMIT = { limit: 600, windowMs: 60_000 };
+
+export type UserRateCheck = (userId: string) => Promise<Response | null>;
+
+const checkProxyUserRate: UserRateCheck = async (userId) => {
+  try {
+    return await checkRateLimitDO(
+      userId,
+      "proxy-media",
+      PROXY_MEDIA_USER_RATE_LIMIT,
+    );
+  } catch {
+    return null;
+  }
+};
+
+/** Ports a URL a client chose may name: the default http(s) ones. */
+const UNSIGNED_PORTS = new Set(["", "80", "443"]);
+
+function hostKey(url: URL): string {
+  return `${url.hostname.replace(/\.+$/, "")}:${url.port}`;
 }
 
 /**
@@ -1209,6 +1260,7 @@ export async function handleProxyMedia(
   request: Request,
   includeBody: boolean,
   nested = false,
+  checkUserRate: UserRateCheck = checkProxyUserRate,
 ): Promise<Response> {
   const requestUrl = new URL(request.url);
   const target = requestUrl.searchParams.get("url");
@@ -1230,6 +1282,7 @@ export async function handleProxyMedia(
       new Request(inner, { method: request.method, headers: request.headers }),
       includeBody,
       true,
+      checkUserRate,
     );
   }
 
@@ -1256,8 +1309,19 @@ export async function handleProxyMedia(
   }
 
   // Never proxy ourselves (a loop that would only cost requests).
-  if (targetUrl.host === requestUrl.host) {
+  if (hostKey(targetUrl) === hostKey(requestUrl)) {
     return new Response("Unsupported media URL", { status: 400 });
+  }
+
+  if (authorization.via !== "signature") {
+    if (!UNSIGNED_PORTS.has(targetUrl.port)) {
+      return new Response("Unsupported media port", {
+        status: 400,
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
+    const limited = await checkUserRate(authorization.userId);
+    if (limited) return limited;
   }
 
   return serveGenericMedia(request, targetUrl, includeBody, {
@@ -1290,11 +1354,13 @@ const POST = async ({ request }: { request: Request }) => {
     },
   );
   if (!key) return apiError("Media proxy is not configured", 503);
-  const pass = issueMediaPass(key);
+  const pass = issueMediaPass(key, auth.userId);
   const response = apiSuccess({ expiresAt: pass.expiresAt }, 200, request);
   response.headers.set(
     "Set-Cookie",
-    mediaPassCookie(pass.value, MEDIA_PASS_TTL_SECONDS),
+    mediaPassCookie(pass.value, MEDIA_PASS_TTL_SECONDS, {
+      crossSite: isDesktopOrigin(request.headers.get("origin")),
+    }),
   );
   response.headers.set("Cache-Control", "no-store");
   return response;
@@ -1302,7 +1368,12 @@ const POST = async ({ request }: { request: Request }) => {
 
 const DELETE = async ({ request }: { request: Request }) => {
   const response = apiSuccess({ ok: true }, 200, request);
-  response.headers.set("Set-Cookie", mediaPassCookie("", 0));
+  response.headers.set(
+    "Set-Cookie",
+    mediaPassCookie("", 0, {
+      crossSite: isDesktopOrigin(request.headers.get("origin")),
+    }),
+  );
   response.headers.set("Cache-Control", "no-store");
   return response;
 };

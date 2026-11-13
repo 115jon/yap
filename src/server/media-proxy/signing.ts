@@ -3,10 +3,20 @@
 // The proxy fetches any public http(s) image or video, so it must not be an
 // open proxy. A request is let through when it carries one of:
 //   - `sig`: an HMAC over the exact target URL, minted by this server when it
-//     builds a payload (embeds, GIF results, Listen Together artwork). Stable
-//     per URL, so browsers and the edge cache can keep the response.
-//   - the media pass cookie (`/api/media-pass`): a signed, expiring value the
-//     web app gets while signed in, so URLs it builds itself need no sig.
+//     builds a payload. Two kinds:
+//       - stable (no `exp`) for URLs the server read from data it fetched
+//         itself: link embeds, GIF provider results, Listen Together search
+//         and resolve artwork, radio station favicons. Stable per URL, so
+//         browsers and the edge cache keep the response. Anyone who can make
+//         the server read a page can get one for a URL that page names, so a
+//         stable sig only limits the proxy to URLs that appeared in some
+//         payload; the per-IP limit still applies to them.
+//       - expiring (`exp`, seconds since the epoch, inside the MAC) for URLs
+//         a client handed in, such as a Listen Together track's artwork, so a
+//         participant cannot mint a lasting open-proxy link.
+//   - the media pass cookie (POST /api/proxy-media): a signed value bound to
+//     the user and valid for an hour, which the web app renews (a session
+//     check) while signed in, so URLs it builds itself need no sig.
 //   - a session bearer (Expo and native send it to the API's own URLs).
 //
 // node:crypto (nodejs_compat) keeps signing synchronous, so payload rewriting
@@ -17,14 +27,18 @@
 import * as nodeCrypto from "node:crypto";
 
 const URL_SIGNATURE_DOMAIN = "yap/media-proxy/url/v1";
-const PASS_DOMAIN = "yap/media-proxy/pass/v1";
+const EXPIRING_URL_SIGNATURE_DOMAIN = "yap/media-proxy/url-exp/v1";
+const PASS_DOMAIN = "yap/media-proxy/pass/v2";
 const KEY_DOMAIN = "yap/media-proxy/key/v1";
 /** 128 bits of HMAC-SHA256, base64url: 22 characters. */
 const SIGNATURE_BYTES = 16;
-const PASS_VERSION = "mp1";
+const PASS_VERSION = "mp2";
 
 export const MEDIA_PASS_COOKIE = "yap_media_pass";
-export const MEDIA_PASS_TTL_SECONDS = 7 * 24 * 60 * 60;
+/** An hour: renewing it checks the session, so sign-out ends it soon. */
+export const MEDIA_PASS_TTL_SECONDS = 60 * 60;
+/** How long a signature over a client-supplied URL lasts. */
+export const CLIENT_URL_SIGNATURE_TTL_SECONDS = 24 * 60 * 60;
 
 export interface MediaProxySecretEnv {
   MEDIA_PROXY_SECRET?: string;
@@ -60,26 +74,47 @@ function decodeBase64Url(value: string): Buffer | null {
   return Buffer.from(value, "base64url");
 }
 
-/** The `sig` for `targetUrl` (the exact string sent as `url=`). */
-export function signMediaUrl(targetUrl: string, key: Buffer): string {
-  return mac(key, URL_SIGNATURE_DOMAIN, targetUrl)
-    .subarray(0, SIGNATURE_BYTES)
-    .toString("base64url");
+function urlMac(targetUrl: string, key: Buffer, expiresAt?: number): Buffer {
+  const digest =
+    expiresAt === undefined
+      ? mac(key, URL_SIGNATURE_DOMAIN, targetUrl)
+      : mac(key, EXPIRING_URL_SIGNATURE_DOMAIN, `${expiresAt}\n${targetUrl}`);
+  return digest.subarray(0, SIGNATURE_BYTES);
 }
 
+/**
+ * The `sig` for `targetUrl` (the exact string sent as `url=`). With
+ * `expiresAt` (seconds since the epoch, sent as `exp=`) it lasts until then.
+ */
+export function signMediaUrl(
+  targetUrl: string,
+  key: Buffer,
+  expiresAt?: number,
+): string {
+  return urlMac(targetUrl, key, expiresAt).toString("base64url");
+}
+
+/**
+ * True when `signature` is ours for `targetUrl` and, with `expires` (the
+ * `exp` parameter), that time has not passed yet.
+ */
 export function verifyMediaUrlSignature(
   targetUrl: string,
   signature: string | null,
   key: Buffer,
+  expires: string | null = null,
+  nowMs: number = Date.now(),
 ): boolean {
   if (!signature) return false;
   const given = decodeBase64Url(signature);
   if (!given || given.length !== SIGNATURE_BYTES) return false;
-  const expected = mac(key, URL_SIGNATURE_DOMAIN, targetUrl).subarray(
-    0,
-    SIGNATURE_BYTES,
-  );
-  return equalBytes(given, expected);
+  let expiresAt: number | undefined;
+  if (expires !== null) {
+    if (!/^\d{1,12}$/.test(expires)) return false;
+    expiresAt = Number(expires);
+    if (Math.floor(nowMs / 1000) >= expiresAt) return false;
+  }
+  return equalBytes(given, urlMac(targetUrl, key, expiresAt));
 }
 
 export interface MediaPass {
@@ -89,40 +124,48 @@ export interface MediaPass {
   expiresAt: number;
 }
 
-/** A media pass valid until `now + ttl` (seconds since the epoch). */
+/**
+ * A media pass for `userId`, valid until `now + ttl` (seconds since the
+ * epoch). The user id is inside the MAC, so the proxy can limit per user.
+ */
 export function issueMediaPass(
   key: Buffer,
+  userId: string,
   nowMs: number = Date.now(),
   ttlSeconds: number = MEDIA_PASS_TTL_SECONDS,
 ): MediaPass {
   const expiresAt = Math.floor(nowMs / 1000) + ttlSeconds;
+  const user = Buffer.from(userId, "utf8").toString("base64url");
   const nonce = nodeCrypto.randomBytes(9).toString("base64url");
-  const body = `${PASS_VERSION}.${expiresAt}.${nonce}`;
+  const body = `${PASS_VERSION}.${expiresAt}.${user}.${nonce}`;
   const signature = mac(key, PASS_DOMAIN, body)
     .subarray(0, SIGNATURE_BYTES)
     .toString("base64url");
   return { value: `${body}.${signature}`, expiresAt };
 }
 
+/** The pass's user, or null when it is not a valid, unexpired pass. */
 export function verifyMediaPass(
   value: string | null | undefined,
   key: Buffer,
   nowMs: number = Date.now(),
-): boolean {
-  if (!value) return false;
+): { userId: string } | null {
+  if (!value) return null;
   const parts = value.split(".");
-  if (parts.length !== 4 || parts[0] !== PASS_VERSION) return false;
-  const expiresAt = Number(parts[1]);
-  if (!Number.isInteger(expiresAt)) return false;
-  if (Math.floor(nowMs / 1000) >= expiresAt) return false;
-  const given = decodeBase64Url(parts[3]);
-  if (!given || given.length !== SIGNATURE_BYTES) return false;
+  if (parts.length !== 5 || parts[0] !== PASS_VERSION) return null;
+  const [version, expiry, user, nonce, signature] = parts;
+  if (!/^\d{1,12}$/.test(expiry)) return null;
+  if (Math.floor(nowMs / 1000) >= Number(expiry)) return null;
+  const given = decodeBase64Url(signature);
+  if (!given || given.length !== SIGNATURE_BYTES) return null;
   const expected = mac(
     key,
     PASS_DOMAIN,
-    `${parts[0]}.${parts[1]}.${parts[2]}`,
+    `${version}.${expiry}.${user}.${nonce}`,
   ).subarray(0, SIGNATURE_BYTES);
-  return equalBytes(given, expected);
+  if (!equalBytes(given, expected)) return null;
+  const userId = decodeBase64Url(user)?.toString("utf8");
+  return userId ? { userId } : null;
 }
 
 /** The media pass cookie's value from a Cookie header. */
@@ -141,17 +184,22 @@ export function readMediaPassCookie(
 }
 
 /**
- * Set-Cookie for the pass. Scoped to the proxy's path, HttpOnly, and
- * SameSite=None so the desktop webview (another site) sends it too: the pass
- * only unlocks fetching public media, so a cross-site send leaks nothing.
+ * Set-Cookie for the pass. Scoped to the proxy's path and HttpOnly.
+ * SameSite=Lax for the web app (the same site as the API); SameSite=None
+ * only with `crossSite`, for the desktop webview, whose origin is another
+ * site and would never send a Lax cookie on its image requests.
  */
-export function mediaPassCookie(value: string, maxAgeSeconds: number): string {
+export function mediaPassCookie(
+  value: string,
+  maxAgeSeconds: number,
+  options: { crossSite?: boolean } = {},
+): string {
   return [
     `${MEDIA_PASS_COOKIE}=${value}`,
     "Path=/api/proxy-media",
     `Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}`,
     "HttpOnly",
     "Secure",
-    "SameSite=None",
+    options.crossSite ? "SameSite=None" : "SameSite=Lax",
   ].join("; ");
 }

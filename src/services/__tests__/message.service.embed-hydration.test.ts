@@ -1,7 +1,15 @@
+import { mapEmbedMediaUrls } from "@/lib/embed-media-urls";
 import type { EmbedInfo } from "@/lib/types";
-import { unwrapEmbedsMedia } from "@/server/media-proxy/rewrite";
+import { unwrapProxiedMediaUrl } from "@/server/media-proxy/rewrite";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockD1 } from "../../lib/__tests__/mock-d1";
+
+/** Embeds with our proxy URLs turned back into the originals. */
+function unwrapEmbedsMedia(embeds: EmbedInfo[]): EmbedInfo[] {
+  return embeds.map((embed) =>
+    mapEmbedMediaUrls(embed, (url) => unwrapProxiedMediaUrl(url)),
+  );
+}
 
 const hoisted = vi.hoisted(() => ({
   hydrateSocialEmbedsMock: vi.fn(),

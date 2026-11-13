@@ -189,6 +189,26 @@ export type UpstreamResult =
   | { ok: false; status: number; message: string };
 
 /**
+ * True for a URL that would loop back into this Worker: our own host (any
+ * case, with or without the root dot) or a proxy path on any host
+ * (trailing slashes and case ignored). Our own zones are refused by the
+ * SSRF guard.
+ */
+export function isSelfTarget(url: URL, ownHost?: string): boolean {
+  const path = url.pathname.replace(/\/+$/, "").toLowerCase();
+  if (path === "/api/proxy-media") return true;
+  if (!ownHost) return false;
+  let own: URL;
+  try {
+    own = new URL(`https://${ownHost}`);
+  } catch {
+    return false;
+  }
+  const name = (value: URL) => value.hostname.replace(/\.+$/, "");
+  return name(url) === name(own);
+}
+
+/**
  * Fetches `target` with redirects followed by hand (at most
  * `maxRedirects`), every hop re-checked against the SSRF guard. Only our own
  * headers go upstream: no cookies, no client headers, no Referer.
@@ -202,10 +222,7 @@ export async function fetchPublicMedia(
   let current = target;
 
   for (let hop = 0; hop <= MEDIA_PROXY_LIMITS.maxRedirects; hop += 1) {
-    if (
-      current.pathname === "/api/proxy-media" ||
-      (deps.ownHost && current.host === deps.ownHost)
-    ) {
+    if (isSelfTarget(current, deps.ownHost)) {
       return { ok: false, status: 403, message: "Blocked media URL (self)" };
     }
     const check = await checkMediaTarget(current, deps.resolve);

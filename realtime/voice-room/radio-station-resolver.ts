@@ -4,9 +4,13 @@ import {
   proxiedMediaUrl,
 } from "../../src/server/media-proxy/rewrite";
 
-/** A station's favicon through the media proxy (any host radio lists). */
+/**
+ * A station's favicon through the media proxy (any host radio lists). The
+ * server read it from Radio Browser, so its signature does not expire.
+ */
 function proxyFavicon(href: string | undefined): string | undefined {
-  return href ? proxiedMediaUrl(href, getMediaRewriteContext()) : href;
+  if (!href) return href;
+  return proxiedMediaUrl(href, getMediaRewriteContext()) ?? undefined;
 }
 
 interface RadioBrowserStation {

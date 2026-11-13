@@ -22,11 +22,9 @@ import { logger } from "@/lib/logger";
 import { validateBody } from "@/lib/validate-body";
 import { Schema } from "effect";
 import { withDefault } from "@/lib/schema";
+import { keptStoredEmbeds } from "@/lib/embed-removal";
 import type { EmbedInfo } from "@/lib/types";
-import {
-  proxyEmbedsForDelivery,
-  unwrapEmbedsMedia,
-} from "@/server/media-proxy/rewrite";
+import { proxyEmbedsForDelivery } from "@/server/media-proxy/rewrite";
 import {
   createMessage,
   deleteMessage,
@@ -252,18 +250,25 @@ export const PATCH = async ({ request, params }: any) => {
   }
 
   try {
-    // If clearing embeds (no content change)
+    // Removing embeds (no content change)
     if (Array.isArray(body.embeds) && !body.content?.trim()) {
       // Verify ownership
       const msg = (await db
         .prepare(
-          `SELECT author_id, content_revision
+          `SELECT author_id, content_revision, embeds
            FROM messages WHERE id = ? AND channel_id = ?`,
         )
         .bind(body.message_id, channelId)
-        .first()) as { author_id: string; content_revision: number } | null;
+        .first()) as {
+        author_id: string;
+        content_revision: number;
+        embeds: string | null;
+      } | null;
       if (!msg) return apiError("Message not found", 404);
       if (msg.author_id !== userId) return apiError("Not your message", 403);
+      // Only stored previews can stay: an author never writes embeds.
+      const kept = keptStoredEmbeds(body.embeds, parseEmbeds(msg.embeds));
+      if (!kept) return apiError("Embeds can only be removed", 400);
 
       const cleared = await db
         .prepare(
@@ -272,12 +277,7 @@ export const PATCH = async ({ request, params }: any) => {
            WHERE id = ? AND channel_id = ?
            RETURNING content_revision`,
         )
-        .bind(
-          // Clients send back what they were given: store the originals.
-          JSON.stringify(unwrapEmbedsMedia(body.embeds as EmbedInfo[])),
-          body.message_id,
-          channelId,
-        )
+        .bind(JSON.stringify(kept), body.message_id, channelId)
         .first<{ content_revision: number }>();
       if (!cleared) return apiError("Message not found", 404);
 
@@ -285,9 +285,7 @@ export const PATCH = async ({ request, params }: any) => {
         id: body.message_id,
         channel_id: channelId,
         content_revision: Number(cleared.content_revision),
-        embeds: proxyEmbedsForDelivery(
-          unwrapEmbedsMedia(body.embeds as EmbedInfo[]),
-        ),
+        embeds: proxyEmbedsForDelivery(kept),
       };
       const { serverId: editServerId } = accessResult as {
         serverId: string | null;
@@ -333,6 +331,16 @@ export const PATCH = async ({ request, params }: any) => {
     throw e;
   }
 };
+
+function parseEmbeds(value: string | null): EmbedInfo[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? (parsed as EmbedInfo[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 // DELETE /api/channels/:id/messages — delete a message
 export const DELETE = async ({ request, params }: any) => {

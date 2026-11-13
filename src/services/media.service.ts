@@ -142,7 +142,7 @@ function proxyMediaItemsForDelivery(items: MediaItem[]): MediaItem[] {
     const source = item.source_url ?? undefined;
     return {
       ...item,
-      url: proxiedMediaUrl(item.url, ctx, source),
+      url: proxiedMediaUrl(item.url, ctx, source) ?? "",
       thumbnail_url: item.thumbnail_url
         ? proxiedMediaUrl(item.thumbnail_url, ctx, source)
         : item.thumbnail_url,

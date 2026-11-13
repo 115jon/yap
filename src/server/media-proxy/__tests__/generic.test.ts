@@ -3,6 +3,7 @@ import {
   allowedMediaType,
   cacheTtlSeconds,
   fetchPublicMedia,
+  isSelfTarget,
   MEDIA_PROXY_LIMITS,
   serveGenericMedia,
   sniffMediaType,
@@ -575,5 +576,32 @@ describe("cacheTtlSeconds", () => {
     expect(cacheTtlSeconds("public, max-age=5")).toBe(3600);
     expect(cacheTtlSeconds("max-age=172800")).toBe(172800);
     expect(cacheTtlSeconds("max-age=99999999")).toBe(604800);
+  });
+});
+
+describe("isSelfTarget", () => {
+  it.each([
+    ["https://yap.example/a.png", "yap.example"],
+    ["https://yap.example./a.png", "yap.example"],
+    ["https://YAP.Example/a.png", "yap.example"],
+    ["https://yap.example:8443/a.png", "yap.example"],
+    ["https://other.example/api/proxy-media", undefined],
+    ["https://other.example/api/proxy-media/", undefined],
+    ["https://other.example/api/proxy-media//", undefined],
+    ["https://other.example/API/Proxy-Media?url=x", undefined],
+  ])("catches %s", (url, ownHost) => {
+    expect(isSelfTarget(new URL(url), ownHost)).toBe(true);
+  });
+
+  it("lets other hosts and paths through", () => {
+    expect(
+      isSelfTarget(new URL("https://cdn.example/a.png"), "yap.example"),
+    ).toBe(false);
+    expect(
+      isSelfTarget(
+        new URL("https://cdn.example/api/proxy-media-x"),
+        "yap.example",
+      ),
+    ).toBe(false);
   });
 });

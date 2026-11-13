@@ -4,8 +4,8 @@
 // third party never sees a viewer's address.
 //
 // Stored data keeps the original URLs: rewriting happens where payloads leave
-// the server, and `unwrapEmbedsMedia` undoes it for embeds a client sends
-// back. Social CDN hosts (X, TikTok, Instagram) keep the existing
+// the server (clients never write embeds back: lib/embed-removal). Values no
+// client may load are dropped on the way out. Social CDN hosts (X, TikTok, Instagram) keep the existing
 // allowlisted `url` + `sourceUrl` form, since the proxy re-resolves their
 // expiring links from the post.
 
@@ -19,9 +19,11 @@ import {
   type EmbedMediaField,
   mapEmbedMediaUrls,
 } from "@/lib/embed-media-urls";
+import { isOwnZoneHostname, classifyMediaUrl } from "@/lib/media-url-class";
 import type { EmbedInfo } from "@/lib/types";
 import { currentPublicOrigin } from "./origin";
 import {
+  CLIENT_URL_SIGNATURE_TTL_SECONDS,
   mediaProxyKey,
   signMediaUrl,
   verifyMediaUrlSignature,
@@ -89,47 +91,77 @@ export function getMediaRewriteContext(): MediaRewriteContext {
   return { key, origin: currentPublicOrigin() };
 }
 
+export interface ProxiedMediaUrlOptions {
+  /**
+   * For a URL a client handed in (not one the server read from data it
+   * fetched): the signature expires this many seconds from now, rounded up
+   * to the hour so the URL stays cacheable for a while.
+   */
+  expiresInSeconds?: number;
+  /** Tests only. */
+  nowMs?: number;
+}
+
+function sameHost(a: URL, b: URL): boolean {
+  const name = (url: URL) => url.hostname.replace(/\.+$/, "");
+  return name(a) === name(b) && a.port === b.port;
+}
+
 /**
- * `raw` as a proxy URL. Unchanged: our own URLs (host or path), non-http
- * values, and an HLS playlist in a video field (its segments are named by
- * URL, so the playlist cannot be proxied on its own). A protocol-relative
- * URL is another host's and is proxied like an https one.
+ * `raw` as payloads may carry it, or null when no payload may carry it.
+ *
+ * - Our own URLs (this deployment's host, any host in our own zones, or a
+ *   path) stay, in their cleaned form.
+ * - Our proxy URL on another host with our valid signature is rebuilt on
+ *   `ctx.origin`, so no client fetches it from that host.
+ * - Other http(s) media becomes a signed proxy URL; social CDN media the
+ *   allowlisted form with its post; an HLS playlist in a video field stays
+ *   (its segments are named by URL, so it cannot be proxied on its own).
+ * - Anything else is null: other schemes, and input that parsers read
+ *   differently (`https:host/x`, control characters a browser strips).
+ *
+ * Protocol-relative input (`//host/x`, `/\host/x`) is another host's and is
+ * proxied like an https URL.
  */
 export function proxiedMediaUrl(
   raw: string,
   ctx: MediaRewriteContext,
   sourceUrl?: string | null,
   field: EmbedMediaField = "media",
-): string {
-  if (typeof raw !== "string") return raw;
-  let target = raw.trim();
-  if (/^[\\/]{2}/.test(target)) {
-    target = `https://${target.replace(/^[\\/]+/, "")}`;
-  }
-  if (!/^https?:\/\//i.test(target)) return raw;
-  let url: URL;
-  try {
-    url = new URL(target);
-  } catch {
-    return raw;
-  }
+  options: ProxiedMediaUrlOptions = {},
+): string | null {
+  if (typeof raw !== "string") return null;
+  const classified = classifyMediaUrl(raw);
+  if (classified.kind === "path") return classified.value;
+  if (classified.kind === "other") return classified.value === "" ? "" : null;
+  const { url } = classified;
+  const target = url.href;
+
   let origin: URL | null = null;
   try {
     origin = new URL(ctx.origin);
   } catch {
     origin = null;
   }
-  // Ours by host, or by our own signature (another host of this
-  // deployment). A path that merely looks like our proxy on another host is
-  // that host's, and is proxied like any other.
-  if (origin && url.host === origin.host) return raw;
+  if (origin && sameHost(url, origin)) return target;
+  if (isOwnZoneHostname(url.hostname)) return target;
+
+  // Our proxy URL on another host: a lookalike path is that host's own and
+  // is proxied like any other URL, but one we signed (an older payload, or
+  // another host of this deployment) loads from us.
   if (isProxyMediaUrl(url) && ctx.key) {
     const inner = url.searchParams.get("url");
     if (
       inner &&
-      verifyMediaUrlSignature(inner, url.searchParams.get("sig"), ctx.key)
+      verifyMediaUrlSignature(
+        inner,
+        url.searchParams.get("sig"),
+        ctx.key,
+        url.searchParams.get("exp"),
+        options.nowMs,
+      )
     ) {
-      return raw;
+      return `${ctx.origin}${PROXY_MEDIA_PATH}${url.search}`;
     }
   }
 
@@ -139,16 +171,37 @@ export function proxiedMediaUrl(
     return `${ctx.origin}${PROXY_MEDIA_PATH}?${params}`;
   }
 
-  if (!ctx.key) return raw;
+  if (!ctx.key) return target;
   if (field === "video" && url.pathname.toLowerCase().endsWith(".m3u8")) {
-    return raw;
+    return target;
   }
 
-  const params = new URLSearchParams({
-    url: target,
-    sig: signMediaUrl(target, ctx.key),
-  });
+  const params = new URLSearchParams({ url: target });
+  if (options.expiresInSeconds !== undefined) {
+    const nowSeconds = Math.floor((options.nowMs ?? Date.now()) / 1000);
+    const expiresAt =
+      Math.ceil((nowSeconds + options.expiresInSeconds) / 3600) * 3600;
+    params.set("exp", String(expiresAt));
+    params.set("sig", signMediaUrl(target, ctx.key, expiresAt));
+  } else {
+    params.set("sig", signMediaUrl(target, ctx.key));
+  }
   return `${ctx.origin}${PROXY_MEDIA_PATH}?${params}`;
+}
+
+/**
+ * `proxiedMediaUrl` for a URL a client handed in (Listen Together artwork):
+ * its signature expires (CLIENT_URL_SIGNATURE_TTL_SECONDS).
+ */
+export function proxiedClientMediaUrl(
+  raw: string,
+  ctx: MediaRewriteContext,
+  nowMs?: number,
+): string | null {
+  return proxiedMediaUrl(raw, ctx, null, "media", {
+    expiresInSeconds: CLIENT_URL_SIGNATURE_TTL_SECONDS,
+    nowMs,
+  });
 }
 
 /**
@@ -197,14 +250,6 @@ export function proxyEmbedsForDelivery<T extends EmbedInfo[] | undefined>(
   return rewriteEmbedsMedia(embeds, getMediaRewriteContext()) as T;
 }
 
-/** Embeds a client sent back, with our proxy URLs turned into originals. */
-export function unwrapEmbedsMedia(embeds: EmbedInfo[]): EmbedInfo[] {
-  if (!Array.isArray(embeds)) return embeds;
-  return embeds.map((embed) =>
-    mapEmbedMediaUrls(embed, (url) => unwrapProxiedMediaUrl(url)),
-  );
-}
-
 interface GifRenditionLike {
   url: string;
 }
@@ -225,8 +270,11 @@ export function rewriteGifItemMedia<T extends GifItemLike>(
 ): T {
   return {
     ...item,
-    preview: { ...item.preview, url: proxiedMediaUrl(item.preview.url, ctx) },
-    send: { ...item.send, url: proxiedMediaUrl(item.send.url, ctx) },
+    preview: {
+      ...item.preview,
+      url: proxiedMediaUrl(item.preview.url, ctx) ?? "",
+    },
+    send: { ...item.send, url: proxiedMediaUrl(item.send.url, ctx) ?? "" },
   };
 }
 
@@ -247,19 +295,24 @@ export function proxyAttachmentUrlForDelivery(
   ctx: MediaRewriteContext = getMediaRewriteContext(),
 ): string {
   const url = getAttachmentUrl(fileKey);
-  return isExternalAttachmentUrl(url) ? proxiedMediaUrl(url, ctx) : url;
+  return isExternalAttachmentUrl(url) ? (proxiedMediaUrl(url, ctx) ?? "") : url;
 }
 
-/** A user's avatar for a payload: an OAuth provider's picture is proxied. */
-export function proxyAvatarUrlForDelivery<T>(avatarUrl: T): T {
+/**
+ * A user's avatar for a payload: an OAuth provider's picture is proxied,
+ * and a value no client may load is null.
+ */
+export function proxyAvatarUrlForDelivery<T>(avatarUrl: T): T | null {
   if (typeof avatarUrl !== "string" || !avatarUrl) return avatarUrl;
-  return proxiedMediaUrl(avatarUrl, getMediaRewriteContext()) as T;
+  return proxiedMediaUrl(avatarUrl, getMediaRewriteContext()) as T | null;
 }
 
 /**
  * A Listen Together response with every `artworkUrl` (YouTube and Spotify
- * thumbnails) proxied. Clients enqueue tracks as they got them, so the room's
- * queue carries the proxied URL to everyone in it.
+ * thumbnails) proxied, or null when no client may load it. The server read
+ * these from the providers, so their signatures do not expire. Clients
+ * enqueue tracks as they got them, so the room's queue carries the proxied
+ * URL to everyone in it.
  */
 export function proxyArtworkUrlsForDelivery<T>(
   value: T,
