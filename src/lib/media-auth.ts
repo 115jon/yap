@@ -12,8 +12,10 @@
  * token; the Worker's own logs and traces drop query strings
  * (`observability.redact_query_string`).
  */
+import { pendingDeletionDate } from "@/lib/account-deletion";
 import {
   getEnv,
+  pendingDeletionResponse,
   requireCredentials,
   suspendedResponse,
   unauthorizedResponse,
@@ -191,5 +193,8 @@ async function authorizeCap(
   if (await isSuspended(verification.userId)) {
     return suspendedResponse(request);
   }
+  // As requireAuth: an account waiting for deletion reads nothing.
+  const deleteAfter = await pendingDeletionDate(verification.userId);
+  if (deleteAfter) return pendingDeletionResponse(deleteAfter, request);
   return { userId: verification.userId };
 }

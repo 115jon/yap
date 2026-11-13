@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   env: {} as Record<string, string | undefined>,
   requireCredentials: vi.fn(),
   isSuspended: vi.fn(),
+  pendingDeletionDate: vi.fn(),
   logs: [] as unknown[][],
 }));
 
@@ -12,11 +13,19 @@ vi.mock("@/lib/api-helpers", () => ({
   requireCredentials: mocks.requireCredentials,
   suspendedResponse: () =>
     Response.json({ error: "suspended" }, { status: 403 }),
+  pendingDeletionResponse: (deleteAfter: string) =>
+    Response.json(
+      { error: "pending", code: "ACCOUNT_PENDING_DELETION", deleteAfter },
+      { status: 403 },
+    ),
   unauthorizedResponse: () =>
     Response.json({ error: "Unauthorized" }, { status: 401 }),
 }));
 
 vi.mock("@/lib/suspension", () => ({ isSuspended: mocks.isSuspended }));
+vi.mock("@/lib/account-deletion", () => ({
+  pendingDeletionDate: mocks.pendingDeletionDate,
+}));
 
 vi.mock("@/lib/console-logger", () => ({
   clog: () => {
@@ -50,6 +59,8 @@ beforeEach(() => {
   mocks.requireCredentials.mockResolvedValue({ userId: "from-session" });
   mocks.isSuspended.mockReset();
   mocks.isSuspended.mockResolvedValue(false);
+  mocks.pendingDeletionDate.mockReset();
+  mocks.pendingDeletionDate.mockResolvedValue(null);
   mocks.logs = [];
 });
 
@@ -222,6 +233,20 @@ describe("requireMediaAuth", () => {
     );
     const result = await requireMediaAuth(new Request(url));
     expect((result as Response).status).toBe(403);
+  });
+
+  it("refuses a capability for an account waiting for deletion", async () => {
+    mocks.pendingDeletionDate.mockResolvedValue("2026-12-13T00:00:00.000Z");
+    const url = withMediaCap(
+      issueMediaGrant(SECRET, "user-7", Date.now()),
+      new URL(ATTACHMENT),
+    );
+    const result = await requireMediaAuth(new Request(url));
+    expect((result as Response).status).toBe(403);
+    expect(await (result as Response).json()).toMatchObject({
+      code: "ACCOUNT_PENDING_DELETION",
+    });
+    expect(mocks.pendingDeletionDate).toHaveBeenCalledWith("user-7");
   });
 
   it("refuses every capability when no secret is configured", async () => {
