@@ -300,6 +300,108 @@ fn a_refused_start_should_not_take_up_a_later_ring_from_another_device() {
     assert_eq!(c.view.status, RingStatus::Idle);
 }
 
+impl Client {
+    fn gateway(&mut self, event: GatewayEvent) -> Vec<Effect> {
+        let session = self.state.session().expect("session").id;
+        self.input(Input::Gateway { session, event })
+    }
+}
+
+/// Another device of ours placed a call in Alice's DM: its CALL_RINGING
+/// and accepted stop must neither ring nor join here.
+fn assert_ignores_a_call_from_another_device(c: &mut Client, call_id: &str) {
+    let fx = c.dispatch(
+        "CALL_RINGING",
+        json!({ "call_id": call_id, "callee_id": ALICE, "channel_id": DM }),
+    );
+    assert!(sounds(&fx).is_empty(), "no outgoing ring here");
+    assert_eq!(c.view.status, RingStatus::Idle);
+    let fx = c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": call_id, "reason": "accepted" }),
+    );
+    assert!(voice_start(&fx).is_none(), "no join, no microphone");
+    assert!(c.state.voice().is_none());
+}
+
+#[test]
+fn a_start_while_offline_should_say_so_and_not_take_up_a_later_ring() {
+    let mut c = Client::online();
+    c.gateway(GatewayEvent::Closed);
+    let fx = start(&mut c);
+    assert!(gateway_frames(&fx).is_empty(), "op 36 cannot go out");
+    assert!(fx.contains(&Effect::View(ViewUpdate::Notice(
+        "You're offline. Try again in a moment.".into()
+    ))));
+    // The old session comes back; another device of ours places a call.
+    c.gateway(GatewayEvent::Resumed);
+    assert_ignores_a_call_from_another_device(&mut c, "call-3");
+}
+
+#[test]
+fn a_refused_start_while_a_ring_is_up_should_not_take_up_a_later_ring() {
+    let mut c = Client::online();
+    // Alice calls us as we call her: the server refuses our op 36, on this
+    // socket only, while her ring is up here.
+    ring(&mut c);
+    start(&mut c);
+    c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": null, "reason": "busy" }),
+    );
+    // The refusal ends her ring here too (chat-gateway.ts does the same).
+    assert_eq!(c.view.status, RingStatus::Idle);
+    assert_ignores_a_call_from_another_device(&mut c, "call-3");
+}
+
+#[test]
+fn a_gateway_drop_after_a_start_should_not_take_up_a_later_ring() {
+    let drops = [
+        vec![GatewayEvent::Closed, GatewayEvent::Resumed],
+        vec![
+            GatewayEvent::Reconnecting {
+                attempt: 1,
+                offline: false,
+            },
+            GatewayEvent::Resumed,
+        ],
+        vec![GatewayEvent::Ready],
+    ];
+    for events in drops {
+        let mut c = Client::online();
+        // op 36 goes out, but the socket drops before its CALL_RINGING.
+        start(&mut c);
+        for event in events {
+            c.gateway(event);
+        }
+        assert_ignores_a_call_from_another_device(&mut c, "call-3");
+    }
+}
+
+#[test]
+fn a_late_stop_for_a_declined_ring_should_not_drop_our_new_call() {
+    let mut c = Client::online();
+    ring(&mut c);
+    c.calls(CallsCommand::Decline);
+    // We call Alice back before the server's stop for her call arrives.
+    start(&mut c);
+    c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": "call-1", "reason": "declined" }),
+    );
+    let fx = c.dispatch(
+        "CALL_RINGING",
+        json!({ "call_id": "call-2", "callee_id": ALICE, "channel_id": DM }),
+    );
+    assert!(sounds(&fx).contains(&Sound::OutgoingRing));
+    let fx = c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": "call-2", "reason": "accepted" }),
+    );
+    assert!(voice_start(&fx).is_some(), "our own call joins here");
+    assert_eq!(c.view.status, RingStatus::Active);
+}
+
 #[test]
 fn decline_should_send_op_38_and_end_the_call() {
     let mut c = Client::online();

@@ -3695,6 +3695,8 @@ impl State {
         match event {
             GatewayEvent::Ready => {
                 current.gateway.ready = true;
+                // A fresh session: an op 36 of the old one is lost.
+                self.calls.initiating = None;
                 let reconnect = std::mem::replace(&mut current.gateway.was_ready, true);
                 self.set_connected(fx, true);
                 self.set_link(fx, 0, false);
@@ -3742,6 +3744,10 @@ impl State {
             }
             GatewayEvent::Closed => {
                 current.gateway.ready = false;
+                // Our op 36 may be lost with the socket; its CALL_RINGING
+                // must not be waited for, or we take up a later call
+                // another device of ours places in that DM.
+                self.calls.initiating = None;
                 self.activity_socket_changed();
                 self.set_connected(fx, false);
             }
@@ -3749,6 +3755,7 @@ impl State {
                 // Also before the first ready (a launch from the cache with
                 // no network): the shell is up, so the strip says why.
                 current.gateway.ready = false;
+                self.calls.initiating = None;
                 if self.connected {
                     self.set_connected(fx, false);
                 }

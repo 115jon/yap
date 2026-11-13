@@ -265,7 +265,7 @@ pub struct CallsView {
 pub struct CallsState {
     pub ring: Option<Ring>,
     /// The DM whose call this device asked for (op 36), until its
-    /// `CALL_RINGING` (or a refusal) arrives.
+    /// `CALL_RINGING`, a refusal or a gateway drop.
     pub initiating: Option<String>,
     pub end_reason: String,
     pub details_open: bool,
@@ -301,6 +301,10 @@ pub fn move_error_copy(message: &str) -> Option<&'static str> {
 pub fn ring_toast_title(name: &str) -> String {
     format!("Incoming call from {name}")
 }
+
+/// The notice for a call started while the gateway is down: op 36 cannot
+/// be sent (the mobile app's `startDmCall`).
+pub const CALL_OFFLINE: &str = "You're offline. Try again in a moment.";
 
 /// Why a ring ended on this device when another device of ours answered
 /// it (the server's stop only says `accepted`).

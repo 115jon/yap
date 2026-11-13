@@ -79,6 +79,12 @@ impl State {
         if active_here {
             return self.join_dm_lobby(fx, channel_id, false);
         }
+        if !self.session.as_ref().is_some_and(|s| s.gateway.ready) {
+            // op 36 would be dropped, and a call left marked as ours
+            // would take up one another device of ours places later.
+            fx.view(ViewUpdate::Notice(c::CALL_OFFLINE.to_owned()));
+            return;
+        }
         if self.voice.as_ref().is_some_and(|call| !call.dm) {
             self.leave_voice(fx);
         }
@@ -343,8 +349,10 @@ impl State {
     /// started the call joins: on our other devices the ring just ends,
     /// quietly ("answered_elsewhere").
     pub(super) fn on_call_ring_stop(&mut self, fx: &mut Effects, stop: CallRingStop) {
-        if self.calls.ring.is_none() {
-            // Our op 36 was refused (busy, unavailable, invalid).
+        if stop.call_id.is_none() {
+            // Our op 36 was refused (busy, unavailable, invalid). The
+            // server sends it to this socket only, also while a ring is up
+            // here; a stop for a known call says nothing about our op 36.
             self.calls.initiating = None;
         }
         // A stop for another call (a ring we declined while busy) is not ours.
