@@ -20,6 +20,7 @@ fn main() {
         QmlFile::from("qml/components/ComposerCore.qml"),
         QmlFile::from("qml/components/CountBadge.qml"),
         QmlFile::from("qml/components/DisplayName.qml"),
+        QmlFile::from("qml/components/DmCallModel.qml"),
         QmlFile::from("qml/components/EaseColor.qml"),
         QmlFile::from("qml/components/EaseNumber.qml"),
         QmlFile::from("qml/components/ConnectionStrip.qml"),

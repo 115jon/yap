@@ -12,9 +12,10 @@ import Yap.Ui
 Popup {
     id: root
 
-    readonly property var calls: JSON.parse(Calls.view)
-    readonly property bool ringing: calls.status === "ringing_incoming"
-    readonly property bool wanted: ringing && calls.channelId !== Nav.activeChannelId
+    // Yap.Ui, shared with the phone's incoming sheet.
+    readonly property DmCallModel call: DmCallModel {}
+    readonly property var calls: call.view
+    readonly property bool wanted: call.incomingElsewhere
 
     onWantedChanged: wanted ? open() : close()
     // Made as the call rings (LazyPopup).
@@ -51,7 +52,7 @@ Popup {
     }
 
     contentItem: Column {
-        Keys.onEscapePressed: Calls.decline()
+        Keys.onEscapePressed: root.call.decline()
         Rectangle {
             width: root.width
             height: 72
@@ -118,7 +119,7 @@ Popup {
                 variant: "danger"
                 iconName: "disconnect"
                 text: qsTr("Decline")
-                onClicked: Calls.decline()
+                onClicked: root.call.decline()
             }
             KitButton {
                 id: acceptKey
@@ -126,7 +127,7 @@ Popup {
                 variant: "talk"
                 iconName: "call"
                 text: qsTr("Accept")
-                onClicked: Calls.accept(false)
+                onClicked: root.call.accept(false)
             }
         }
     }

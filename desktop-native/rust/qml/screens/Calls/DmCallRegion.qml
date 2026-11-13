@@ -24,17 +24,17 @@ import Yap.Ui
 Rectangle {
     id: root
 
-    readonly property var calls: JSON.parse(Calls.view)
-    readonly property string dmId: Nav.activeChannelId
-    readonly property bool shown: calls.region === true && calls.dmChannelId === dmId
-    readonly property bool mine: calls.channelId === dmId
-    readonly property bool ringingOut: mine && calls.status === "ringing_outgoing"
-    readonly property bool ringingIn: mine && calls.status === "ringing_incoming"
-    readonly property bool joined: calls.joined === true && Voice.channelId === dmId
-    // The sentinels apart (a muted mic is silent on purpose; what we hear is
-    // not affected by it).
-    readonly property bool micStalled: joined && !Voice.muted && calls.micStalled === true
-    readonly property bool inboundStalled: joined && calls.inboundStalled === true
+    // The open DM's call (Yap.Ui, shared with the phone).
+    DmCallModel { id: call }
+    readonly property var calls: call.view
+    readonly property string dmId: call.dmId
+    readonly property bool shown: call.shown
+    readonly property bool mine: call.mine
+    readonly property bool ringingOut: call.ringingOut
+    readonly property bool ringingIn: call.ringingIn
+    readonly property bool joined: call.joined
+    readonly property bool micStalled: call.micStalled
+    readonly property bool inboundStalled: call.inboundStalled
     readonly property int tileHeight: (Window.height >= 800 ? 224 : 176) - 24
     // The tiles' row inside the stage's px-4.
     readonly property int rowWidth: Math.max(0, width - 32)
@@ -188,7 +188,7 @@ Rectangle {
                 model: root.joined ? [] : (root.calls.lobby ?? [])
                 LobbyTile {
                     required property var modelData
-                    readonly property bool ringingTile: (root.ringingOut || root.ringingIn) && !modelData.me
+                    readonly property bool ringingTile: call.tileRinging(modelData)
                     // aspect-video h-full max-w-full; two that would run past the
                     // column (web: they overflow it) share the row instead.
                     width: Math.min(Math.round(root.tileHeight * 16 / 9),
@@ -201,13 +201,8 @@ Rectangle {
                     deafened: modelData.deafened
                     ringing: ringingTile
                     dimmed: !modelData.me && !modelData.inVoice && !ringingTile
-                    statusLed: modelData.me ? "you"
-                        : root.ringingOut || root.ringingIn ? "idle"
-                        : modelData.inVoice ? "talk" : "off"
-                    statusText: modelData.me ? qsTr("You")
-                        : root.ringingOut ? qsTr("Ringing")
-                        : root.ringingIn ? qsTr("Calling")
-                        : modelData.inVoice ? qsTr("In voice") : qsTr("Not in voice")
+                    statusLed: call.tileLed(modelData)
+                    statusText: call.tileStatus(modelData)
                 }
             }
         }
@@ -319,7 +314,7 @@ Rectangle {
                 visible: root.ringingOut
                 size: 48
                 tip: qsTr("Cancel call")
-                onClicked: Calls.cancel()
+                onClicked: call.cancel()
             }
             IconKey {
                 visible: !root.ringingOut
@@ -327,19 +322,19 @@ Rectangle {
                 tone: "rest"
                 iconName: "camera"
                 tip: qsTr("Join with video")
-                onClicked: root.ringingIn ? Calls.accept(true) : Calls.join(root.dmId, true)
+                onClicked: call.answer(true)
             }
             AcceptKey {
                 visible: !root.ringingOut
                 size: 48
                 tip: qsTr("Join voice")
-                onClicked: root.ringingIn ? Calls.accept(false) : Calls.join(root.dmId, false)
+                onClicked: call.answer(false)
             }
             DangerKey {
                 visible: root.ringingIn
                 size: 48
                 tip: qsTr("Decline")
-                onClicked: Calls.decline()
+                onClicked: call.decline()
             }
         }
 
@@ -445,7 +440,7 @@ Rectangle {
                 DangerKey {
                     size: 48
                     tip: qsTr("Leave call")
-                    onClicked: Calls.leave()
+                    onClicked: call.leave()
                 }
             }
             // Trailing: Expand call / Collapse call (`canFullscreen`).
