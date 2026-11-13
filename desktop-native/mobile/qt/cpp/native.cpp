@@ -130,6 +130,7 @@ Native::Native(QObject* parent)
   applyBars();
   installPush();
   installVoice();
+  installLinks();
   // Text size, Remove animations and the wallpaper accent can change while
   // the app is away; read them again when it comes back, and the keyboard's
   // inset, which can go stale behind another activity (the photo picker).
@@ -261,13 +262,15 @@ void Native::haptic(Haptic kind) const
 #endif
 }
 
-void Native::share(const QString& text) const
+void Native::share(const QString& text, const QString& title) const
 {
 #ifdef Q_OS_ANDROID
-  QJniObject::callStaticMethod<void>(kShim, "share", "(Ljava/lang/String;)V",
-                                     QJniObject::fromString(text).object<jstring>());
+  QJniObject::callStaticMethod<void>(kShim, "share", "(Ljava/lang/String;Ljava/lang/String;)V",
+                                     QJniObject::fromString(text).object<jstring>(),
+                                     QJniObject::fromString(title).object<jstring>());
 #else
   Q_UNUSED(text);
+  Q_UNUSED(title);
 #endif
 }
 

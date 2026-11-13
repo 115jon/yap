@@ -28,6 +28,8 @@ fn main() {
         QmlFile::from("qml/components/GifPickerCore.qml"),
         QmlFile::from("qml/components/Icon.qml"),
         QmlFile::from("qml/components/IconKey.qml"),
+        QmlFile::from("qml/components/InviteLandingState.qml"),
+        QmlFile::from("qml/components/InviteMaker.qml"),
         QmlFile::from("qml/components/KitButton.qml"),
         QmlFile::from("qml/components/LazyPopup.qml"),
         QmlFile::from("qml/components/Led.qml"),
