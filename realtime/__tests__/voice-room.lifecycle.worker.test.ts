@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   issueSocketTicket,
   verifySocketTicket,
@@ -70,6 +70,7 @@ async function openVoiceSocket(
   subject = TEST_SUBJECT,
   accessMode: "authenticated" | "public-demo" = "authenticated",
   serverId = accessMode === "authenticated" ? "server-1" : undefined,
+  origin = "https://internal",
 ): Promise<WebSocket> {
   if (accessMode === "authenticated" && serverId) {
     await seedSoundboardMembership(serverId, subject);
@@ -77,7 +78,7 @@ async function openVoiceSocket(
   const roomId = env.VOICE_ROOM.idFromName(roomName);
   const room = env.VOICE_ROOM.get(roomId);
   const response = await room.fetch(
-    `https://internal/api/channels/${roomName}/voice?v=1`,
+    `${origin}/api/channels/${roomName}/voice?v=1`,
     {
       headers: await createAdmissionHeaders(
         roomName,
@@ -3758,7 +3759,15 @@ describe("VoiceRoom lifecycle", () => {
       favicon: "https://station.example.com/artwork.png",
     });
     const participantId = crypto.randomUUID();
-    const socket = await openVoiceSocket(roomName);
+    // Clients reach the DO through the public URL; proxy URLs use its
+    // origin, never the made-up host of an internal stub call.
+    const socket = await openVoiceSocket(
+      roomName,
+      TEST_SUBJECT,
+      "authenticated",
+      "server-1",
+      "https://yap.example.com",
+    );
     await identifyVoiceSocket(socket, participantId, roomName);
 
     const listener = await openVoiceSocket(roomName);
@@ -3808,7 +3817,12 @@ describe("VoiceRoom lifecycle", () => {
               provider: "radio",
               title: "Resolved Radio Station",
               streamUrl: "https://stream.example.com/radio",
-              artworkUrl: "https://station.example.com/artwork.png",
+              // The station's favicon reaches listeners through the signed
+              // media proxy on the public origin, never from the station's
+              // host and never on the DO's internal host.
+              artworkUrl: expect.stringMatching(
+                /^https:\/\/yap\.example\.com\/api\/proxy-media\?url=https%3A%2F%2Fstation\.example\.com%2Fartwork\.png&exp=\d+&sig=[\w-]{22}$/,
+              ),
               canonicalUrl: "https://station.example.com/",
               sourceLabel: "Live Radio",
             },
@@ -3820,9 +3834,160 @@ describe("VoiceRoom lifecycle", () => {
         ],
       },
     });
+    const { snapshot } = response.d as {
+      snapshot: { queue: Array<{ track: { artworkUrl: string } }> };
+    };
+    const artwork = new URL(snapshot.queue[0]!.track.artworkUrl);
+    expect(artwork.searchParams.get("url")).toBe(
+      "https://station.example.com/artwork.png",
+    );
+    expect(artwork.searchParams.get("sig")).toBeTruthy();
+    expect(JSON.stringify(response.d)).not.toContain("//internal");
 
     socket.close();
     listener.close();
+  });
+
+  it("takes the requester's picture from the stored profile, never the client", async () => {
+    await env.DB.prepare(
+      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL, display_name TEXT, avatar_url TEXT, avatar_display TEXT)",
+    ).run();
+    await env.DB.prepare(
+      "INSERT OR REPLACE INTO users (id, username, display_name, avatar_url, avatar_display) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        TEST_SUBJECT,
+        "stored-user",
+        "Stored Name",
+        "https://lh3.googleusercontent.com/a/stored-picture",
+        '{"crop":{"x":0,"y":0,"size":1}}',
+      )
+      .run();
+    // D1 is shared by the tests in this file: later ones expect no profile.
+    onTestFinished(async () => {
+      await env.DB.prepare("DELETE FROM users WHERE id = ?")
+        .bind(TEST_SUBJECT)
+        .run();
+    });
+    const roomName = crypto.randomUUID();
+    const socket = await openVoiceSocket(
+      roomName,
+      TEST_SUBJECT,
+      "authenticated",
+      "server-1",
+      "https://yap.example.com",
+    );
+    await identifyVoiceSocket(socket, crypto.randomUUID(), roomName);
+    const listener = await openVoiceSocket(roomName);
+    await identifyVoiceSocket(listener, crypto.randomUUID(), roomName);
+
+    socket.send(
+      JSON.stringify({
+        op: 106,
+        d: {
+          type: "listen_together.enqueue",
+          room_slug: roomName,
+          entries: [
+            {
+              ...listenTogetherMusicEntry(10_000),
+              requester: {
+                userId: "spoofed-user-id",
+                displayName: "Spoofed Name",
+                // A Windows client would open this as \\attacker.example\x.png.
+                avatarUrl: "file://attacker.example/x.png",
+                avatarDisplay: "spoofed",
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    const response = await nextMessageWithOpcodeAndType(
+      listener,
+      106,
+      "listen_together.snapshot",
+    );
+    const { snapshot } = response.d as {
+      snapshot: {
+        queue: Array<{
+          requester: {
+            userId: string;
+            displayName: string;
+            avatarUrl: string | null;
+            avatarDisplay: string | null;
+          };
+        }>;
+      };
+    };
+    const requester = snapshot.queue[0]!.requester;
+    expect(requester).toMatchObject({
+      userId: TEST_SUBJECT,
+      displayName: "Stored Name",
+      avatarDisplay: '{"crop":{"x":0,"y":0,"size":1}}',
+    });
+    // The stored picture, through the signed media proxy on the public origin.
+    const avatar = new URL(requester.avatarUrl!);
+    expect(avatar.origin).toBe("https://yap.example.com");
+    expect(avatar.pathname).toBe("/api/proxy-media");
+    expect(avatar.searchParams.get("url")).toBe(
+      "https://lh3.googleusercontent.com/a/stored-picture",
+    );
+    expect(avatar.searchParams.get("exp")).toMatch(/^\d+$/);
+    expect(avatar.searchParams.get("sig")).toMatch(/^[\w-]{22}$/);
+    expect(JSON.stringify(response.d)).not.toContain("attacker.example");
+    expect(JSON.stringify(response.d)).not.toContain("Spoofed");
+
+    socket.close();
+    listener.close();
+  });
+
+  it("gives a requester with no stored profile no picture", async () => {
+    const roomName = crypto.randomUUID();
+    const socket = await openVoiceSocket(roomName);
+    await identifyVoiceSocket(socket, crypto.randomUUID(), roomName);
+
+    socket.send(
+      JSON.stringify({
+        op: 106,
+        d: {
+          type: "listen_together.enqueue",
+          room_slug: roomName,
+          entries: [
+            {
+              ...listenTogetherMusicEntry(10_000),
+              requester: {
+                displayName: "Client Name",
+                avatarUrl: "https://attacker.example/x.png",
+                avatarDisplay: "spoofed",
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    const response = await nextMessageWithOpcodeAndType(
+      socket,
+      106,
+      "listen_together.snapshot",
+    );
+    expect(response.d).toMatchObject({
+      snapshot: {
+        queue: [
+          {
+            requester: {
+              userId: TEST_SUBJECT,
+              displayName: "Client Name",
+              avatarUrl: null,
+              avatarDisplay: null,
+            },
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(response.d)).not.toContain("attacker.example");
+    socket.close();
   });
 
   it("resolves at most five distinct radio stations per enqueue and caches duplicates", async () => {

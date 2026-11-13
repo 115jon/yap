@@ -23,6 +23,11 @@ const DESKTOP_ORIGINS = new Set([
   "https://tauri.localhost",
 ]);
 
+/** True for the desktop (Tauri) webview's origin. */
+export function isDesktopOrigin(origin: string | null | undefined): boolean {
+  return !!origin && DESKTOP_ORIGINS.has(origin);
+}
+
 export function getCorsHeaders(req?: Request): HeadersInit {
   const origin = req?.headers.get("origin") ?? "";
   if (!DESKTOP_ORIGINS.has(origin)) return {};

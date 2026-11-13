@@ -1725,7 +1725,7 @@ export default function GifPickerModal({
                   )}
                 >
                   <img
-                    src={category.imageUrl}
+                    src={getAuthAssetUrl(category.imageUrl)}
                     alt=""
                     loading="lazy"
                     decoding="async"

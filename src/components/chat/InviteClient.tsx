@@ -1,3 +1,4 @@
+import { getAuthAssetUrl } from "@/lib/platform";
 import { apiGet, apiPost } from "@/lib/api-client";
 import { buildAuthRouteUrl } from "@/lib/auth-route-urls";
 import InlineEmojiText from "@/components/chat/InlineEmojiText";
@@ -399,7 +400,7 @@ function InviteFrame({
       <StatusTile tone="accent">
         {invite.server.icon_url ? (
           <img
-            src={invite.server.icon_url}
+            src={getAuthAssetUrl(invite.server.icon_url)}
             alt=""
             className="size-full object-cover"
           />

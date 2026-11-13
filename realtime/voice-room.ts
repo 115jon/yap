@@ -8,6 +8,13 @@
 // Clients authenticate via voice_token issued by MeetingRoom on Identify.
 // ============================================================================
 
+import { notePublicOrigin } from "../src/server/media-proxy/origin";
+import {
+  getMediaRewriteContext,
+  proxiedClientMediaUrl,
+  proxiedMediaUrl,
+  resignRoomMediaForDelivery,
+} from "../src/server/media-proxy/rewrite";
 import { DurableObject } from "cloudflare:workers";
 import { clog } from "../src/lib/console-logger";
 import { isSupersededVoiceConnection } from "./connection-lifecycle";
@@ -104,6 +111,7 @@ import {
 } from "./voice-room/listen-activity";
 import { recordListenSession } from "../src/services/profile-activity.service";
 import { resolveRoomVoiceChannelId } from "./voice-roster";
+import { resolveMeetingProfile } from "./meeting-room/profile-resolver";
 import { RadioStationResolver } from "./voice-room/radio-station-resolver";
 import { SfuClient } from "./voice-room/sfu-client";
 import { sanitizeVoiceAppEvent } from "./voice-room-events";
@@ -511,6 +519,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
   }
 
   async fetch(request: Request): Promise<Response> {
+    notePublicOrigin(request);
     const url = new URL(request.url);
     const gatewayVersion = requestedGatewayVersion(url);
 
@@ -1007,7 +1016,11 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     ws: WebSocket,
     snapshot?: ListenTogetherStateSnapshot,
   ) {
-    const effectiveSnapshot = snapshot ?? this.getListenTogetherSnapshot();
+    // Stored artwork and avatars carry signatures that expire: fresh ones
+    // on the way out.
+    const effectiveSnapshot = resignRoomMediaForDelivery(
+      snapshot ?? this.getListenTogetherSnapshot(),
+    );
     const payload: ListenTogetherEvent = {
       type: "listen_together.snapshot",
       room_slug: effectiveSnapshot.roomSlug,
@@ -1017,10 +1030,13 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
   }
 
   private broadcastListenTogetherUpdates(
-    snapshot: ListenTogetherStateSnapshot,
+    stored: ListenTogetherStateSnapshot,
     queueChanged: boolean,
     playbackChanged: boolean,
   ) {
+    // Stored artwork and avatars carry signatures that expire: fresh ones
+    // on the way out.
+    const snapshot = resignRoomMediaForDelivery(stored);
     for (const ws of this.ctx.getWebSockets()) {
       const attachment = this.getVoiceAttachment(ws);
       // Only identified participants hear the room (see broadcast).
@@ -1139,6 +1155,11 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     callerUserId: string | null,
   ): Promise<ListenTogetherEnqueueCommand["entries"]> {
     if (!Array.isArray(entries)) return [];
+    // Who queued the entries, from the caller's own stored profile: every
+    // listener loads the requester's picture, so it is never taken from the
+    // client (a URL of the client's choosing would collect every listener's
+    // address, or, as a file:// URL, reach out over SMB from Windows).
+    const requesterFor = await this.listenTogetherRequesterFor(callerUserId);
     const musicProviders = new Set<ListenTogetherMusicProvider>([
       "youtube",
       "youtube_music",
@@ -1188,25 +1209,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
 
         sanitizedEntries.push({
           track: station,
-          requester: {
-            userId:
-              callerUserId ||
-              (typeof requester?.userId === "string"
-                ? requester.userId.slice(0, 160)
-                : "guest"),
-            displayName:
-              typeof requester?.displayName === "string"
-                ? requester.displayName.trim().slice(0, 80)
-                : "Guest",
-            avatarUrl:
-              typeof requester?.avatarUrl === "string"
-                ? requester.avatarUrl.slice(0, 2048)
-                : null,
-            avatarDisplay:
-              typeof requester?.avatarDisplay === "string"
-                ? requester.avatarDisplay.slice(0, 64)
-                : null,
-          },
+          requester: requesterFor(requester),
           importBatchId:
             typeof payload.importBatchId === "string"
               ? payload.importBatchId.slice(0, 120)
@@ -1263,9 +1266,16 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
                 ? track.album.trim().slice(0, 120)
                 : null,
             durationMs: Math.max(1, Math.floor(durationMs)),
+            // Client-supplied: proxied (with a signature that expires, so a
+            // participant cannot mint a lasting proxy link), so a listener's
+            // address never reaches a host a participant picked. A value
+            // that is not plain http(s) is dropped.
             artworkUrl:
               typeof track?.artworkUrl === "string"
-                ? track.artworkUrl.slice(0, 2048)
+                ? proxiedClientMediaUrl(
+                    track.artworkUrl.slice(0, 2048),
+                    getMediaRewriteContext(),
+                  )
                 : null,
             canonicalUrl:
               typeof track?.canonicalUrl === "string"
@@ -1280,25 +1290,7 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
                 ? track.sourceLabel.trim().slice(0, 48)
                 : "YouTube",
           },
-          requester: {
-            userId:
-              callerUserId ||
-              (typeof requester?.userId === "string"
-                ? requester.userId.slice(0, 160)
-                : "guest"),
-            displayName:
-              typeof requester?.displayName === "string"
-                ? requester.displayName.trim().slice(0, 80)
-                : "Guest",
-            avatarUrl:
-              typeof requester?.avatarUrl === "string"
-                ? requester.avatarUrl.slice(0, 2048)
-                : null,
-            avatarDisplay:
-              typeof requester?.avatarDisplay === "string"
-                ? requester.avatarDisplay.slice(0, 64)
-                : null,
-          },
+          requester: requesterFor(requester),
           importBatchId:
             typeof payload.importBatchId === "string"
               ? payload.importBatchId.slice(0, 120)
@@ -1312,6 +1304,49 @@ export class VoiceRoom extends DurableObject<Env, unknown> {
     }
 
     return sanitizedEntries;
+  }
+
+  /**
+   * Builds each entry's requester for `callerUserId`. The name, picture and
+   * picture display come from the caller's stored profile (D1 `users`), the
+   * picture through the media proxy; a caller with no stored profile (a
+   * guest, or D1 unavailable) gets the name they sent and no picture.
+   */
+  private async listenTogetherRequesterFor(
+    callerUserId: string | null,
+  ): Promise<
+    (
+      requester: Record<string, unknown> | undefined,
+    ) => ListenTogetherEnqueueCommand["entries"][number]["requester"]
+  > {
+    const profile = callerUserId
+      ? await resolveMeetingProfile({
+          db: this.env.DB,
+          log: roomLog,
+          userId: callerUserId,
+        })
+      : null;
+    const avatarUrl = profile?.avatarUrl
+      ? proxiedMediaUrl(profile.avatarUrl, getMediaRewriteContext())
+      : null;
+    return (requester) => ({
+      userId:
+        callerUserId ||
+        (typeof requester?.userId === "string"
+          ? requester.userId.slice(0, 160)
+          : "guest"),
+      displayName: profile
+        ? profile.name.slice(0, 80)
+        : typeof requester?.displayName === "string"
+          ? requester.displayName.trim().slice(0, 80)
+          : "Guest",
+      avatarUrl,
+      // Stored JSON; too long a value is dropped rather than cut.
+      avatarDisplay:
+        profile?.avatarDisplay && profile.avatarDisplay.length <= 2048
+          ? profile.avatarDisplay
+          : null,
+    });
   }
 
   private async resolveRadioStation(

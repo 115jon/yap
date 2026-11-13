@@ -1399,7 +1399,9 @@ pub(super) fn absolute_url(api_base: &str, url: Option<&str>) -> String {
         url if is_google_avatar(url) => {
             format!("{api_base}/api/proxy-media?url={}", query_value(url))
         }
-        url => url.to_owned(),
+        // Any other third party (an OAuth provider's avatar, a status
+        // picture, artwork) loads through the media proxy too.
+        url => media::via_media_proxy(url, api_base),
     }
 }
 
@@ -2675,7 +2677,9 @@ fn non_null(value: serde_json::Value) -> String {
 }
 
 /// A user's nameplate for a row, or empty. An uploaded one
-/// (`/api/profile-assets/…`) is fetched from the API.
+/// (`/api/profile-assets/…`) is fetched from the API; the collectible CDNs
+/// load as they are; any other URL (the user's own `nameplate_url`) goes
+/// through the media proxy, and one that is not http(s) loads nothing.
 pub fn plate_json(user: &User, api_base: &str) -> String {
     let mut plate = collectibles::plate(
         user.avatar_display.as_ref(),
@@ -2684,7 +2688,7 @@ pub fn plate_json(user: &User, api_base: &str) -> String {
         &user.id,
     );
     for url in [&mut plate.still, &mut plate.motion] {
-        if url.starts_with('/') {
+        if !url.is_empty() && !collectibles::is_asset_url(url) {
             *url = absolute_url(api_base, Some(url.as_str()));
         }
     }
@@ -2929,7 +2933,7 @@ mod tests {
 
 #[cfg(test)]
 mod banner_tests {
-    use super::banner_url;
+    use super::{absolute_url, avatar_url, banner_url, plate_json, User};
 
     #[test]
     fn a_video_banner_without_an_extension_should_carry_its_type() {
@@ -3073,6 +3077,86 @@ mod banner_tests {
             banner_url("https://y/api/profile-assets/b1", Some("image/jpeg")),
             "https://y/api/profile-assets/b1"
         );
+    }
+
+    #[test]
+    fn remote_media_values_should_load_from_the_api_or_not_at_all() {
+        let api = "https://y";
+        // Ours, and third parties through the media proxy.
+        assert_eq!(
+            absolute_url(api, Some("/api/avatars/u.png")),
+            "https://y/api/avatars/u.png"
+        );
+        assert_eq!(
+            absolute_url(api, Some("https://cdn.example/a.png")),
+            "https://y/api/proxy-media?url=https%3A%2F%2Fcdn.example%2Fa.png"
+        );
+        // Anything that is not http(s) loads nothing: `file://host` is a UNC
+        // path on Windows (SMB to that host), the rest reach a host directly.
+        for url in [
+            "file://attacker.example/x.png",
+            "file:///c:/x.png",
+            "smb://attacker.example/share/x.png",
+            "ftp://attacker.example/x.png",
+            "javascript:alert(1)",
+            "data:image/png;base64,AA",
+            "x.png",
+        ] {
+            assert_eq!(absolute_url(api, Some(url)), "", "{url}");
+            assert_eq!(avatar_url(api, Some(url), None), "", "{url}");
+        }
+        assert_eq!(absolute_url(api, None), "");
+    }
+
+    #[test]
+    fn a_nameplate_should_load_from_the_cdn_the_api_or_the_proxy() {
+        let user = |url: &str| User {
+            id: "u1".into(),
+            nameplate_url: Some(url.into()),
+            ..User::default()
+        };
+        let still = |url: &str| {
+            let json = plate_json(&user(url), "https://y");
+            if json.is_empty() {
+                return String::new();
+            }
+            serde_json::from_str::<serde_json::Value>(&json).unwrap()["still"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        assert_eq!(
+            still("/api/profile-assets/n1"),
+            "https://y/api/profile-assets/n1"
+        );
+        assert_eq!(
+            still("https://cdn.yapper.shop/n.png"),
+            "https://cdn.yapper.shop/n.png"
+        );
+        assert_eq!(
+            still("https://evil.example/n.png"),
+            "https://y/api/proxy-media?url=https%3A%2F%2Fevil.example%2Fn.png"
+        );
+        assert_eq!(still("file://attacker.example/n.png"), "");
+        // A UNC-style value names a web host to URL readers: proxied.
+        assert!(still(r"\\attacker.example\n.png").starts_with("https://y/api/proxy-media?"));
+    }
+
+    #[test]
+    fn catalog_art_should_be_https_only() {
+        use crate::collectibles::{https_only, is_https, resized_shop_image_url};
+        assert!(is_https("https://cdn.discordapp.com/a.png"));
+        assert!(is_https("HTTPS://cdn.discordapp.com/a.png"));
+        for url in [
+            "file://attacker.example/a.png",
+            "http://a/b",
+            "https://",
+            "",
+        ] {
+            assert!(!is_https(url), "{url}");
+            assert_eq!(https_only(Some(url)), "", "{url}");
+            assert_eq!(resized_shop_image_url(url, 10.0, 10.0), "", "{url}");
+        }
     }
 
     #[test]

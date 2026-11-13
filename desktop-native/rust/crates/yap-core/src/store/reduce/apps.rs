@@ -2948,11 +2948,15 @@ impl State {
 
     fn listen_view(&self) -> ListenView {
         let l = &self.apps.listen;
+        // Artwork comes from the room (what another listener queued) and the
+        // server's search: through the media proxy, or nothing when it is
+        // not http(s).
+        let art = |url: Option<&str>| crate::store::view::absolute_url(&self.api_base, url);
         let row = |entry: &yap_protocol::voice_app::LtEntry, current: bool| QueueRow {
             entry_id: entry.entry_id.clone(),
             title: entry.track.title.clone(),
             artist: entry.track.artist.clone().unwrap_or_default(),
-            artwork: entry.track.artwork_url.clone().unwrap_or_default(),
+            artwork: art(entry.track.artwork_url.as_deref()),
             duration_ms: entry.track.duration().unwrap_or(0.0),
             requester: entry.requester.display_name.clone(),
             // ListenTogetherNowPlayingCard.tsx requesterAvatar.
@@ -2988,7 +2992,7 @@ impl State {
                         c.subtitle.as_deref().unwrap_or_default(),
                         &format!("{} items", c.item_count),
                     ]),
-                    artwork: c.artwork_url.clone().unwrap_or_default(),
+                    artwork: art(c.artwork_url.as_deref()),
                     url: c.source_url.clone(),
                 })
                 .collect(),
@@ -2996,9 +3000,7 @@ impl State {
             collection_meta: collection
                 .map(|c| joined(&[c.subtitle.as_deref().unwrap_or_default(), &resolved]))
                 .unwrap_or_default(),
-            collection_artwork: collection
-                .and_then(|c| c.artwork_url.clone())
-                .unwrap_or_default(),
+            collection_artwork: art(collection.and_then(|c| c.artwork_url.as_deref())),
             resolving: l.resolve.is_some(),
             feedback: l.feedback.clone(),
             recent: snapshot
@@ -3012,7 +3014,7 @@ impl State {
                                 h.entry.track.artist.as_deref().unwrap_or_default(),
                                 &h.entry.track.source_label,
                             ]),
-                            artwork: h.entry.track.artwork_url.clone().unwrap_or_default(),
+                            artwork: art(h.entry.track.artwork_url.as_deref()),
                             played_at: h.played_at,
                         })
                         .collect()
@@ -3057,7 +3059,7 @@ impl State {
                     index,
                     title: track.title.clone(),
                     artist: track.artist.clone().unwrap_or_default(),
-                    artwork: track.artwork_url.clone().unwrap_or_default(),
+                    artwork: art(track.artwork_url.as_deref()),
                     duration_ms: track.duration_ms.unwrap_or(0.0),
                     url: track
                         .source_url

@@ -230,7 +230,7 @@ const PinnedMessageItem = ({
             {videoAttachments.map((att) => (
               <VideoAttachment
                 key={att.id}
-                src={att.url || `/api/${att.file_key}`}
+                src={getAuthAssetUrl(att.url || `/api/${att.file_key}`)}
                 filename={att.filename}
                 maxWidth={280}
                 maxHeight={200}

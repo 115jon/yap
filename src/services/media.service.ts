@@ -8,6 +8,11 @@
  */
 
 import { getAttachmentUrl } from "@/lib/attachment-url";
+import {
+  getMediaRewriteContext,
+  proxiedMediaUrl,
+  proxyAttachmentUrlForDelivery,
+} from "@/server/media-proxy/rewrite";
 import type { EmbedInfo, EmbedMedia } from "@/lib/types";
 import type { D1Database } from "@cloudflare/workers-types";
 
@@ -117,9 +122,32 @@ export async function fetchChannelMedia(
     extractEmbeddedMediaRows,
   );
 
-  return [...attachmentItems, ...embedItems]
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .slice(0, limit);
+  return proxyMediaItemsForDelivery(
+    [...attachmentItems, ...embedItems]
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit),
+  );
+}
+
+/** Gallery items as payload: third-party media through the proxy. */
+function proxyMediaItemsForDelivery(items: MediaItem[]): MediaItem[] {
+  const ctx = getMediaRewriteContext();
+  return items.map((item) => {
+    if (item.source_kind === "attachment") {
+      return {
+        ...item,
+        url: proxyAttachmentUrlForDelivery(item.file_key, ctx),
+      };
+    }
+    const source = item.source_url ?? undefined;
+    return {
+      ...item,
+      url: proxiedMediaUrl(item.url, ctx, source) ?? "",
+      thumbnail_url: item.thumbnail_url
+        ? proxiedMediaUrl(item.thumbnail_url, ctx, source)
+        : item.thumbnail_url,
+    };
+  });
 }
 
 // ─── fetchChannelFiles ───────────────────────────────────────────────────────
@@ -165,7 +193,7 @@ export async function fetchChannelFiles(
     .bind(...bindings)
     .all();
 
-  return (results ?? []).map(formatAttachmentRow);
+  return proxyMediaItemsForDelivery((results ?? []).map(formatAttachmentRow));
 }
 
 // ─── fetchChannelLinks ───────────────────────────────────────────────────────

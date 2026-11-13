@@ -1,3 +1,4 @@
+import { getAuthAssetUrl } from "@/lib/platform";
 import GifPickerModal from "@/components/chat/GifPickerModal";
 import InlineEmojiText from "@/components/chat/InlineEmojiText";
 import { GifProviderBranding } from "@/components/chat/GifProviderBranding";
@@ -337,7 +338,7 @@ function DemoChatGifPreview({ gif }: { gif: DemoChatGif }) {
     >
       {gif.content_type === "video/mp4" ? (
         <video
-          src={gif.url}
+          src={getAuthAssetUrl(gif.url)}
           autoPlay
           loop
           muted
@@ -347,7 +348,7 @@ function DemoChatGifPreview({ gif }: { gif: DemoChatGif }) {
         />
       ) : (
         <img
-          src={gif.url}
+          src={getAuthAssetUrl(gif.url)}
           alt={alt}
           className="max-h-52 w-full object-cover"
           loading="lazy"

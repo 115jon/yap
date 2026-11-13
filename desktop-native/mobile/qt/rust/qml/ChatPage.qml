@@ -503,7 +503,12 @@ Item {
             onReactionToggled: (id, emoji) => actions.react(id, emoji)
             onReactionPickerRequested: (id, anchor, toRight) => actions.pickReaction(id)
             onReactionDetailsRequested: (id, emoji) => actions.showReactions(id, emoji)
-            onLinkOpened: url => Qt.openUrlExternally(url)
+            // Embed and message links are another user's: only web and mail
+            // links open (any other scheme could reach a host or run a handler).
+            onLinkOpened: url => {
+                if (/^(https?:|mailto:)/i.test(url))
+                    Qt.openUrlExternally(url)
+            }
             onImageOpened: (images, index) => viewer.show(images, index)
             // A send of ours that failed: the reject haptic, once, for the
             // row that was sending.

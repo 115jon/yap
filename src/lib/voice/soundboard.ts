@@ -1,5 +1,5 @@
 import { useVoiceSoundboardStore } from "@/stores/useVoiceSoundboardStore";
-import { getMediaUrl } from "@/lib/platform";
+import { getAuthAssetUrl, getMediaUrl } from "@/lib/platform";
 import { UPLOAD_LIMITS } from "@/lib/upload-limits";
 
 export interface DefaultSound {
@@ -360,9 +360,14 @@ export function playSoundboardPlayback({
     !mediaUrl && dataUrl?.startsWith("data:")
       ? dataUrlToObjectUrl(dataUrl)
       : null;
+  // A legacy `dataUrl` that is a URL is someone else's: it loads like any
+  // other asset (through the media proxy, or not at all).
   const audioSource = mediaUrl
     ? getMediaUrl(mediaUrl)
-    : (objectUrl ?? (dataUrl?.startsWith("data:") ? undefined : dataUrl));
+    : (objectUrl ??
+      (!dataUrl || dataUrl.startsWith("data:")
+        ? undefined
+        : getAuthAssetUrl(dataUrl) || undefined));
   if (audioSource) {
     const audio = new Audio(audioSource);
     let finished = false;

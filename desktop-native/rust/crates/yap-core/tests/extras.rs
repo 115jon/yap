@@ -569,9 +569,16 @@ fn an_embed_video_should_go_through_the_proxy_only_for_hosts_it_serves() {
         json!({ "items": [item("v1", "https://www.w3schools.com/html/mov_bbb.mp4"), item("v2", "https://video.twimg.com/a.mp4")] }),
     );
     let rows = view(&fx).expect("view").media.rows;
-    // proxy-media.ts answers 400 for a host it does not serve.
-    assert_eq!(rows[0].url, "https://www.w3schools.com/html/mov_bbb.mp4");
-    assert_eq!(rows[0].poster, "https://i.ytimg.com/vi/a/hq.jpg");
+    // Any other host goes through the generic media proxy (the server
+    // signs gallery items; a raw one is proxied with the session).
+    assert_eq!(
+        rows[0].url,
+        "https://api.fixture.invalid/api/proxy-media?url=https%3A%2F%2Fwww.w3schools.com%2Fhtml%2Fmov_bbb.mp4"
+    );
+    assert_eq!(
+        rows[0].poster,
+        "https://api.fixture.invalid/api/proxy-media?url=https%3A%2F%2Fi.ytimg.com%2Fvi%2Fa%2Fhq.jpg"
+    );
     assert!(rows[1]
         .url
         .contains("/api/proxy-media?url=https%3A%2F%2Fvideo.twimg.com"));

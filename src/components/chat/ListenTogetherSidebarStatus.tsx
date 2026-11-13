@@ -1,3 +1,4 @@
+import { getAuthAssetUrl } from "@/lib/platform";
 import { Icon } from "@/components/ui/icon";
 
 import { ListenTogetherClock } from "./ListenTogetherNowPlayingCard";
@@ -24,7 +25,7 @@ export function ListenTogetherSidebarStatus({
       <div className="size-7 shrink-0 overflow-hidden rounded-sm bg-tint-1">
         {track.artworkUrl ? (
           <img
-            src={track.artworkUrl}
+            src={getAuthAssetUrl(track.artworkUrl)}
             alt=""
             className="h-full w-full object-cover"
             loading="lazy"

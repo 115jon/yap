@@ -244,6 +244,8 @@ export function resolveStreamThumbnails(
       !member.user_id ||
       member.user_id === localUserId ||
       !preview ||
+      // A still is an inline image; a URL would load from the sender's host.
+      !/^data:image\//i.test(preview) ||
       merged[member.user_id] === preview
     ) {
       continue;

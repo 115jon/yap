@@ -1,3 +1,4 @@
+import { startMediaPass } from "@/lib/media-pass";
 import { readMap, readStoredJson, readString } from "@/lib/persisted-guard";
 import type { VoiceSessionStreamState } from "@/components/chat/VoiceChannelView";
 import {
@@ -242,6 +243,12 @@ export function useChatPageLogic() {
     },
     [dmChannels, stateChannels],
   );
+
+  // Signed in: hold the media pass third-party images load through.
+  useEffect(() => {
+    if (!authReady) return;
+    return startMediaPass();
+  }, [authReady]);
 
   useEffect(() => {
     if (authReady) return;

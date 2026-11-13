@@ -14,7 +14,11 @@ import {
   getFxTwitterGifWebpUrl,
   unwrapProxyMediaUrl,
 } from "@/lib/gif-favorite-item";
-import { buildProxyMediaPath, buildProxyMediaUrl } from "@/lib/proxy-media-url";
+import {
+  buildProxyMediaPath,
+  buildProxyMediaUrl,
+  unwrapEmbedMediaUrls,
+} from "@/lib/proxy-media-url";
 import {
   hydrationKey,
   loadEmbedHydration,
@@ -348,7 +352,7 @@ const BaseEmbed = memo(
             <div className="flex min-w-0 items-center gap-2 text-ui-xs text-ink-3">
               {embed.footer.iconURL && (
                 <img
-                  src={embed.footer.iconURL}
+                  src={getAuthAssetUrl(embed.footer.iconURL)}
                   alt=""
                   className="size-4 shrink-0 rounded-avatar"
                 />
@@ -536,7 +540,7 @@ const YouTubeEmbed = memo(
             <>
               {embed.thumbnail?.url && (
                 <img
-                  src={embed.thumbnail.url}
+                  src={getAuthAssetUrl(embed.thumbnail.url)}
                   alt={embed.rawTitle || "YouTube video"}
                   loading="lazy"
                   className="absolute inset-0 w-full h-full object-cover"
@@ -1206,6 +1210,8 @@ const TikTokEmbed = memo(
       }
       return { mode: hasStoredMedia ? "idle" : "loading" };
     });
+    // TikTok's own player is a third-party page: it loads on a click only.
+    const [tiktokPlayerArmed, setTikTokPlayerArmed] = useState(false);
     const [hydrationError, setHydrationError] = useState<{
       transient: boolean;
     } | null>(() =>
@@ -1946,7 +1952,38 @@ const TikTokEmbed = memo(
               }}
             >
               {(player.mode === "iframe" || player.mode === "ready") &&
-                iframeUrl && (
+                iframeUrl &&
+                !tiktokPlayerArmed && (
+                  <button
+                    type="button"
+                    onClick={() => setTikTokPlayerArmed(true)}
+                    className="group/media absolute inset-0 flex cursor-pointer items-center justify-center outline-none"
+                    aria-label="Load the TikTok player"
+                    title="Loading the player connects to TikTok"
+                    data-testid="tiktok-click-to-load"
+                  >
+                    {displayEmbed.thumbnail?.url && (
+                      <img
+                        src={getAuthAssetUrl(
+                          buildProxyMediaPath(
+                            displayEmbed.thumbnail.url,
+                            displayEmbed.url,
+                          ),
+                        )}
+                        alt=""
+                        className="absolute inset-0 h-full w-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    )}
+                    <span className="relative flex size-12 items-center justify-center rounded-full border border-line bg-ply-3 text-ink-1 shadow-float transition-colors duration-(--dur-1) ease-out pointer-fine:group-hover/media:bg-ply-4 group-focus-visible/media:outline-2 group-focus-visible/media:outline-offset-2 group-focus-visible/media:outline-focus">
+                      <Icon name="play" size="lg" />
+                    </span>
+                  </button>
+                )}
+
+              {(player.mode === "iframe" || player.mode === "ready") &&
+                iframeUrl &&
+                tiktokPlayerArmed && (
                   <iframe
                     src={iframeUrl}
                     className="absolute inset-0 h-full w-full border-0"
@@ -2021,6 +2058,13 @@ const TikTokEmbed = memo(
 const SpotifyEmbed = memo(({ embed }: { embed: EmbedInfo }) => {
   const spotifyEmbedUrl = getSpotifyEmbedUrl(embed.url);
   const playerHeight = getSpotifyPlayerHeight(embed.url);
+  // Spotify's player is a third-party page: it loads only on a click, so
+  // posting a link cannot make every viewer's browser call Spotify.
+  const [loaded, setLoaded] = useState(false);
+  const title = embed.rawTitle || "Spotify";
+  const artwork = embed.thumbnail?.url
+    ? getAuthAssetUrl(embed.thumbnail.url)
+    : null;
 
   // Spotify's player is its own card (art, colour, controls), so it renders
   // bare: no ply-2 fill, edge or padding around it (no card in a card), just
@@ -2029,20 +2073,52 @@ const SpotifyEmbed = memo(({ embed }: { embed: EmbedInfo }) => {
   // sniffing which one is active.
   return (
     <EmbedFrame width="compact" bare>
-      <iframe
-        src={`${spotifyEmbedUrl}?utm_source=generator`}
-        title="Spotify player"
-        frameBorder="0"
-        sandbox={EMBED_WIDGET_SANDBOX}
-        allow="clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-        className="block"
-        style={{
-          width: "100%",
-          minWidth: 0,
-          height: playerHeight,
-        }}
-        loading="lazy"
-      />
+      {loaded ? (
+        <iframe
+          src={`${spotifyEmbedUrl}?utm_source=generator`}
+          title="Spotify player"
+          frameBorder="0"
+          sandbox={EMBED_WIDGET_SANDBOX}
+          allow="clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          className="block"
+          style={{
+            width: "100%",
+            minWidth: 0,
+            height: playerHeight,
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setLoaded(true)}
+          className="group/media flex w-full cursor-pointer items-center gap-3 bg-tint-1 p-3 text-left outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          style={{ minHeight: Math.min(playerHeight, 152) }}
+          aria-label={`Load the Spotify player for ${title}`}
+          data-testid="spotify-click-to-load"
+        >
+          {artwork ? (
+            <img
+              src={artwork}
+              alt=""
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              className="size-20 shrink-0 rounded-sm object-cover"
+            />
+          ) : (
+            <span className="flex size-20 shrink-0 items-center justify-center rounded-sm bg-tint-2 text-ink-3">
+              <Icon name="music" size="md" />
+            </span>
+          )}
+          <span className="flex min-w-0 flex-col gap-1">
+            <span className="truncate text-ui-sm font-medium text-ink-1">
+              {title}
+            </span>
+            <span className="text-ui-xs text-ink-3">
+              Play on Spotify. Loading the player connects to Spotify.
+            </span>
+          </span>
+        </button>
+      )}
     </EmbedFrame>
   );
 });
@@ -2295,7 +2371,7 @@ const XEmbed = memo(
             <div className="flex min-w-0 items-center gap-2">
               {embed.author.iconURL ? (
                 <img
-                  src={embed.author.iconURL}
+                  src={getAuthAssetUrl(embed.author.iconURL)}
                   alt=""
                   className="size-8 shrink-0 rounded-avatar bg-tint-3 object-cover"
                   loading="lazy"
@@ -2403,7 +2479,7 @@ const XReferencedTweetCard = memo(
             <div className="flex min-w-0 items-center gap-2">
               {tweet.author.iconURL ? (
                 <img
-                  src={tweet.author.iconURL}
+                  src={getAuthAssetUrl(tweet.author.iconURL)}
                   alt=""
                   className="size-5 shrink-0 rounded-avatar bg-tint-3 object-cover"
                   loading="lazy"
@@ -3601,7 +3677,7 @@ const VideoEmbed = memo(({ embed }: { embed: EmbedInfo }) => {
             }
           >
             <img
-              src={embed.thumbnail.url}
+              src={getAuthAssetUrl(embed.thumbnail.url)}
               alt="Video thumbnail"
               width={embed.thumbnail.width}
               height={embed.thumbnail.height}
@@ -3697,7 +3773,7 @@ const RichEmbed = memo(
               ) : (
                 <>
                   <img
-                    src={embed.thumbnail.url}
+                    src={getAuthAssetUrl(embed.thumbnail.url)}
                     alt="Media"
                     width={embed.thumbnail.width}
                     height={embed.thumbnail.height}
@@ -4606,7 +4682,9 @@ const LinkEmbed_ = memo(({ embed }: { embed: EmbedInfo }) => {
   const thumbnailSrc =
     providerName === "instagram" && embed.thumbnail?.url
       ? getAuthAssetUrl(buildProxyMediaPath(embed.thumbnail.url, embed.url))
-      : embed.thumbnail?.url;
+      : embed.thumbnail?.url
+        ? getAuthAssetUrl(embed.thumbnail.url)
+        : undefined;
   const width = embed.thumbnail?.width;
   const height = embed.thumbnail?.height;
   const showImage = Boolean(thumbnailSrc) && !imageFailed;
@@ -4820,7 +4898,7 @@ const DirectMediaEmbed = memo(
       return (
         <div className="max-w-full" data-testid="direct-media-video">
           <DirectVideoEmbed
-            src={video.url}
+            src={getAuthAssetUrl(video.url)}
             filename={getDirectMediaFilename(video.url, "video.mp4")}
             maxWidth={box?.width ?? DIRECT_MEDIA_MAX_WIDTH}
             maxHeight={DIRECT_MEDIA_MAX_HEIGHT}
@@ -4880,7 +4958,7 @@ const DirectMediaEmbed = memo(
         data-media-filename={filename}
       >
         <img
-          src={item.url}
+          src={getAuthAssetUrl(item.url)}
           alt={item.altText || ""}
           loading="lazy"
           referrerPolicy="no-referrer"
@@ -4902,7 +4980,7 @@ const DirectMediaEmbed = memo(
 
 export const LinkEmbed = memo(
   ({
-    embed,
+    embed: deliveredEmbed,
     messageId,
     onJumpToMessage,
     onRemoveEmbeds,
@@ -4916,6 +4994,13 @@ export const LinkEmbed = memo(
     onMediaPlay?: () => void;
     onMediaStop?: () => void;
   }) => {
+    // The server sends third-party media as signed proxy URLs; the renderers
+    // work on the originals (hosts, file names) and getAuthAssetUrl loads
+    // them through the proxy with that signature again.
+    const embed = useMemo(
+      () => unwrapEmbedMediaUrls(deliveredEmbed),
+      [deliveredEmbed],
+    );
     const [showModal, setShowModal] = useState(false);
     // Mount the confirm on first use (not per embed up front), then keep it
     // so its close animation can run.
