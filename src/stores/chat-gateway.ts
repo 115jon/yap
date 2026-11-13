@@ -150,8 +150,8 @@ export function createChatGateway(
   // session of both users, without saying which one answered. Only the tab
   // that started the call (op 36) or answered it (op 37) joins its room.
   /**
-   * The DM this tab rang (op 36), until its CALL_RINGING, a refusal, or the
-   * loss of the socket it went out on.
+   * The DM this tab rang (op 36), until its CALL_RINGING, a refusal, or a
+   * Resumed or Ready that came without that CALL_RINGING.
    */
   let initiatingChannelId: string | null = null;
   /** That op 36 still waits in the socket's queue for the next Ready. */
@@ -213,10 +213,8 @@ export function createChatGateway(
         identified = false;
         resumeInFlight = false;
         resetSubscriptions();
-        // An op 36 sent on this socket may be lost with it. Waiting for its
-        // CALL_RINGING would take up a later call another session of ours
-        // places in that DM. One still queued goes out on the next Ready.
-        if (!initiateQueued) initiatingChannelId = null;
+        // A call this tab started stays ours: a Resume replays its
+        // CALL_RINGING if the server took the op 36 (handleGatewayReady).
       },
       // The slow auth retry is not a reconnect attempt: the strip keeps
       // showing "Signed out", so only backoff retries count here.
@@ -1049,9 +1047,16 @@ export function createChatGateway(
         d: { game_activity: gameActivity },
       });
     }
+    const initiateWentOut = initiateQueued;
     socket.markReady();
     // The queue went out on this socket.
     initiateQueued = false;
+    // A Resumed comes after the replayed frames, so the CALL_RINGING of an
+    // op 36 the server took has been taken up by now; a Ready starts a
+    // session it never reaches. One still awaited was lost with the old
+    // socket, and waiting on would take up a later call another session of
+    // ours places in that DM. An op 36 the queue just sent waits on.
+    if (!initiateWentOut) initiatingChannelId = null;
 
     const servers = get().servers;
     for (const server of servers) {

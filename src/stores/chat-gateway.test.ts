@@ -983,28 +983,55 @@ describe("chat gateway CALL_RING_STOP", () => {
     gateway.disconnectGateway();
   });
 
-  it("forgets a call start whose socket dropped before it rang", async () => {
-    const { gateway, socket, setOutgoingCall } = await connectWithCall({
-      status: "idle",
-      callId: null,
-    });
-
-    gateway.sendCallInitiate("user-2", "dm-2");
-    expect(sentMessages(socket)).toContainEqual({
+  /** Our op 36 went out; the socket drops and a new one is opened. */
+  async function startThenDrop() {
+    const call = await connectWithCall({ status: "idle", callId: null });
+    call.gateway.sendCallInitiate("user-2", "dm-2");
+    expect(sentMessages(call.socket)).toContainEqual({
       op: 36,
       d: { target_user_id: "user-2", channel_id: "dm-2" },
     });
-    socket.disconnect();
-    gateway.initGateway("user-1");
+    call.socket.disconnect();
+    call.gateway.initGateway("user-1");
     await new Promise((resolve) => setTimeout(resolve, 0));
     const next = FakeWebSocket.instances.at(-1)!;
     next.open();
     next.message({ op: 8, d: { heartbeat_interval: 45_000 } });
-    next.message({ op: 9 });
+    return { ...call, next };
+  }
+
+  it.each([
+    ["a Resume that replays no ring", { op: 9, d: {} }],
+    ["a fresh Ready", { op: 2, d: { participant_id: "session-2" } }],
+  ])("forgets a call start lost with its socket after %s", async (_, frame) => {
+    const { gateway, next, setOutgoingCall } = await startThenDrop();
+    // The server never got our op 36.
+    next.message(frame);
     // Another session of ours calls the same DM.
     ringing(next, "call-3", "dm-2");
 
     expect(setOutgoingCall).not.toHaveBeenCalled();
+    gateway.disconnectGateway();
+  });
+
+  it("takes up the ring a Resume replays for a call start and joins it", async () => {
+    const { gateway, next, setOutgoingCall, acceptCall } =
+      await startThenDrop();
+    // The server took our op 36; its CALL_RINGING missed the old socket and
+    // is replayed before Resumed.
+    ringing(next, "call-2", "dm-2");
+    next.message({ op: 9, d: {} });
+
+    expect(setOutgoingCall).toHaveBeenCalledTimes(1);
+    expect(playOutgoingRingStart).toHaveBeenCalledTimes(1);
+    mocks.callState = {
+      ...mocks.callState,
+      status: "ringing_outgoing",
+      callId: "call-2",
+    };
+    ringStop(next, { call_id: "call-2", reason: "accepted" });
+
+    expect(acceptCall).toHaveBeenCalledTimes(1);
     gateway.disconnectGateway();
   });
 
