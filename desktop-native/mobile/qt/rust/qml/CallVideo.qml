@@ -77,6 +77,7 @@ Item {
                 delegate: Rectangle {
                     id: tile
 
+                    required property int index
                     required property string tileId
                     required property string kind
                     required property string participantId
@@ -100,8 +101,31 @@ Item {
                     readonly property bool talking: speaking && !muted
 
                     onShownChanged: Qt.callLater(root.recount)
-                    onOnStageChanged: parent = onStage ? stageSlot : flow
-                    Component.onCompleted: Qt.callLater(root.recount)
+                    onOnStageChanged: place()
+                    Component.onCompleted: {
+                        // Made while on stage (the model reset): straight there.
+                        place()
+                        Qt.callLater(root.recount)
+                    }
+                    // On stage the tile moves into the stage slot; back in the
+                    // grid it goes where the model has it (Flow lays out in
+                    // child order, and a new child is the last).
+                    function place() {
+                        if (onStage) {
+                            parent = stageSlot
+                            return
+                        }
+                        if (parent === flow)
+                            return
+                        parent = flow
+                        for (let i = index + 1; i < grid.count; ++i) {
+                            const next = grid.itemAt(i)
+                            if (next && next.parent === flow) {
+                                stackBefore(next)
+                                return
+                            }
+                        }
+                    }
 
                     visible: shown
                     width: onStage ? stageSlot.width : root.cell

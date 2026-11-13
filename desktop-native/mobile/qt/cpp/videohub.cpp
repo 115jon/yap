@@ -35,6 +35,10 @@ void VideoFeed::publish(QImage image, int rotation)
 {
   {
     QMutexLocker lock(&m_mutex);
+    // The last view went while this frame was written: it is not kept, or
+    // the next view would show it before a new one.
+    if (m_attached.load(std::memory_order_relaxed) == 0)
+      return;
     m_spare = std::exchange(m_latest.image, std::move(image));
     m_latest.rotation = rotation;
     ++m_latest.serial;
@@ -54,17 +58,19 @@ VideoFrame VideoFeed::latest()
 void VideoFeed::attach(VideoView* view)
 {
   m_views.append(view);
+  QMutexLocker lock(&m_mutex);
   m_attached.fetch_add(1, std::memory_order_relaxed);
 }
 
 void VideoFeed::detach(VideoView* view)
 {
-  if (m_views.removeOne(view))
-    m_attached.fetch_sub(1, std::memory_order_relaxed);
-  if (m_attached.load(std::memory_order_relaxed) > 0)
+  if (!m_views.removeOne(view))
+    return;
+  // The count changes under the lock publish() checks it under.
+  QMutexLocker lock(&m_mutex);
+  if (m_attached.fetch_sub(1, std::memory_order_relaxed) > 1)
     return;
   // Nobody shows the key: its frames go (the next one starts afresh).
-  QMutexLocker lock(&m_mutex);
   m_latest.image = QImage();
   m_latest.serial = 0;
   m_spare = QImage();
@@ -148,7 +154,10 @@ VideoFeed* VideoHub::wantedFeed(const QString& key)
 void VideoHub::reportLimits()
 {
 #ifdef Q_OS_ANDROID
-  const bool background = qGuiApp->applicationState() != Qt::ApplicationActive;
+  // Hidden or suspended; Inactive (a permission dialog, another window
+  // focused in split screen) is still on screen.
+  const Qt::ApplicationState state = qGuiApp->applicationState();
+  const bool background = state == Qt::ApplicationSuspended || state == Qt::ApplicationHidden;
   int thermal = -1;
   bool metered = false;
   // Only asked while something shows video (the poll runs then); the app
