@@ -666,7 +666,7 @@ describe("picker tile renditions", () => {
     expect(JSON.parse(JSON.stringify(item))).not.toHaveProperty("thumb");
   });
 
-  it("picks the lightest tile-sized rendition, unknown sizes last", () => {
+  it("picks the lightest tile-sized rendition, by area when a size is unknown", () => {
     const asset = (url: string, edge: number, sizeBytes: number) => ({
       url,
       width: edge,
@@ -682,7 +682,15 @@ describe("picker tile renditions", () => {
         asset("sm", 240, 0),
         { ...asset("mp4", 240, 10), contentType: "video/mp4" as const },
       ])?.url,
+    ).toBe("sm");
+    expect(
+      pickGifThumb([asset("md", 320, 1_400_000), asset("hd", 480, 1_000_000)])
+        ?.url,
     ).toBe("hd");
+    // A sizeless tile rendition beats the full file whose size is known.
+    expect(
+      pickGifThumb([asset("gif", 498, 5_000_000), asset("tiny", 220, 0)])?.url,
+    ).toBe("tiny");
     expect(pickGifThumb([asset("a", 240, 0), asset("b", 300, 0)])?.url).toBe(
       "a",
     );

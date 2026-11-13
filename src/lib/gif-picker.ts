@@ -358,7 +358,8 @@ export const GIF_THUMB_MIN_EDGE = 180;
 /**
  * The tile picture among `candidates` (images only): the fewest bytes among
  * those at least GIF_THUMB_MIN_EDGE on their long edge, else the biggest of
- * the small ones. Unknown sizes (0) rank after known ones, then by area.
+ * the small ones. Bytes decide when both sizes are known (non-zero); else
+ * the smaller area wins.
  */
 export function pickGifThumb(
   candidates: readonly (GifPickerAsset | null | undefined)[],
@@ -378,9 +379,11 @@ export function pickGifThumb(
         : best,
     );
   }
+  // Bytes decide only when both sizes are known; otherwise the smaller
+  // picture wins, so a sizeless tile rendition still beats the full file.
   return bigEnough.reduce((best, a) => {
-    const diff = bytesRank(a) - bytesRank(best);
-    if (diff !== 0) return diff < 0 ? a : best;
+    if (a.sizeBytes > 0 && best.sizeBytes > 0 && a.sizeBytes !== best.sizeBytes)
+      return a.sizeBytes < best.sizeBytes ? a : best;
     return a.width * a.height < best.width * best.height ? a : best;
   });
 }
