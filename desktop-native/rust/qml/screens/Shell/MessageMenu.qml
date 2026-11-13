@@ -95,6 +95,22 @@ MenuPanel {
             addItem(item)
         made = out
     }
+    // A role that changes while the menu is open redraws its rows.
+    Connections {
+        target: Panels
+        enabled: messageMenu.visible
+        function onCanPinChanged() { messageMenu.rebuild() }
+    }
+    Connections {
+        target: Chat
+        enabled: messageMenu.visible
+        function onCanManageMessagesChanged() { messageMenu.rebuild() }
+    }
+    Connections {
+        target: Admin
+        enabled: messageMenu.visible
+        function onCanBanChanged() { messageMenu.rebuild() }
+    }
     Component {
         id: ruleRow
         MenuRule {}
