@@ -595,6 +595,28 @@ export default {
           },
         ],
       },
+      // Accounts whose 30-day deletion grace period is over: their messages
+      // move to a "Deleted user", the rest of their data and files go
+      // (src/services/account-deletion.service.ts).
+      accountDeletion: {
+        crons: [COLLECTIBLES_SYNC_CRON],
+        jobs: [
+          {
+            name: "Account deletion purge",
+            run: async () => {
+              const { purgeDueAccountDeletions } =
+                await import("./src/services/account-deletion.service");
+              const result = await purgeDueAccountDeletions(env.DB, env.BUCKET);
+              console.info("Account deletion purge", result);
+              if (result.failed > 0) {
+                throw new Error(
+                  `${result.failed} account purge(s) failed; they retry next hour`,
+                );
+              }
+            },
+          },
+        ],
+      },
       collectibles: {
         crons: [COLLECTIBLES_SYNC_CRON],
         jobs: [

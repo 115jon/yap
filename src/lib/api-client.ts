@@ -1,3 +1,4 @@
+import { announcePendingDeletion } from "@/lib/account-deletion-events";
 import {
   getAppSessionState,
   recoverAppSession,
@@ -65,6 +66,7 @@ function createHttpResponseError(
   const error = new Error(message);
   (error as any).code =
     json && typeof json === "object" ? json.code : undefined;
+  if (res.status === 403) announcePendingDeletion((error as any).code);
   (error as any).status = res.status;
   // The parsed error body, for answers that carry data (a 409's server copy).
   (error as any).body = json && typeof json === "object" ? json : undefined;

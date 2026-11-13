@@ -7,6 +7,11 @@
 import { env } from "cloudflare:workers";
 import { Context, Effect, Layer, Option, Schema, type Duration } from "effect";
 
+import {
+  ACCOUNT_PENDING_DELETION,
+  pendingDeletionDate,
+  pendingDeletionMessage,
+} from "@/lib/account-deletion";
 import { looseStruct } from "@/lib/schema";
 import {
   DEFAULT_KOVA_AUTH_PUBLISHABLE_KEY,
@@ -457,11 +462,14 @@ export function appSessionCredentials(request: Request): Credentials {
 /**
  * The signed-in caller, user and session, from `credentials` (the request's
  * own by default). A suspended account (lib/suspension) fails with a 403
- * ACCOUNT_SUSPENDED, as `requireAuth` answers it.
+ * ACCOUNT_SUSPENDED, as `requireAuth` answers it; an account waiting for
+ * deletion (lib/account-deletion) with a 403 ACCOUNT_PENDING_DELETION,
+ * unless `allowPendingDeletion` (the routes that show or undo the deletion).
  */
 export function signedInIdentity(
   request: Request,
   credentials: Credentials = credentialsOf(request),
+  options: { allowPendingDeletion?: boolean } = {},
 ): Effect.Effect<
   KovaIdentity,
   Unauthenticated | AuthUnavailable | ServiceFailure,
@@ -469,8 +477,13 @@ export function signedInIdentity(
 > {
   return Effect.flatMap(authenticate(credentials), (identity) =>
     Effect.flatMap(
-      Effect.promise(() => isSuspended(identity.user.id)),
-      (suspended) =>
+      Effect.promise(async () => ({
+        suspended: await isSuspended(identity.user.id),
+        deleteAfter: options.allowPendingDeletion
+          ? null
+          : await pendingDeletionDate(identity.user.id),
+      })),
+      ({ suspended, deleteAfter }) =>
         suspended
           ? Effect.fail(
               new ServiceFailure({
@@ -479,7 +492,15 @@ export function signedInIdentity(
                 code: ACCOUNT_SUSPENDED,
               }),
             )
-          : Effect.succeed(identity),
+          : deleteAfter
+            ? Effect.fail(
+                new ServiceFailure({
+                  message: pendingDeletionMessage(deleteAfter),
+                  status: 403,
+                  code: ACCOUNT_PENDING_DELETION,
+                }),
+              )
+            : Effect.succeed(identity),
     ),
   );
 }

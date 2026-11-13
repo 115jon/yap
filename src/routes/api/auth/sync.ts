@@ -185,7 +185,9 @@ const POST = async ({ request }: any) => {
            END,
            bio = COALESCE(users.bio, excluded.bio),
            profile_accent_color = COALESCE(users.profile_accent_color, excluded.profile_accent_color),
-           profile_background_color = COALESCE(users.profile_background_color, excluded.profile_background_color)`,
+           profile_background_color = COALESCE(users.profile_background_color, excluded.profile_background_color)
+         -- An account waiting for deletion stays hidden until restored.
+         WHERE users.id NOT IN (SELECT user_id FROM account_deletions)`,
         )
         .bind(
           userId,
@@ -217,7 +219,9 @@ const POST = async ({ request }: any) => {
              ELSE ?
            END,
            bio = COALESCE(bio, ?)
-         WHERE id = ?`,
+         WHERE id = ?
+           -- An account waiting for deletion stays hidden until restored.
+           AND id NOT IN (SELECT user_id FROM account_deletions)`,
         )
         .bind(username, displayName, avatarUrl, bio, userId)
         .run();

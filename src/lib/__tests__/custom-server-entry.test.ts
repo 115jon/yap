@@ -21,6 +21,9 @@ const runCollectiblesCatalogCron = vi.hoisted(() =>
 const runDeadlockAssetSync = vi.hoisted(() =>
   vi.fn(async () => ({ version: 1, refreshed: false, mirrored: [] })),
 );
+const purgeDueAccountDeletions = vi.hoisted(() =>
+  vi.fn(async () => ({ purged: 0, failed: 0 })),
+);
 const runDeadlockCron = vi.hoisted(() =>
   vi.fn(async () => ({ added: 0, dropped: 0, fetched: 0 })),
 );
@@ -78,6 +81,9 @@ vi.mock("../../../src/services/multipart-upload.service", () => ({
   cleanupStalePendingUploads,
 }));
 
+vi.mock("../../../src/services/account-deletion.service", () => ({
+  purgeDueAccountDeletions,
+}));
 vi.mock("../../../src/services/deadlock/runtime", () => ({
   runDeadlockAssetSync,
   runDeadlockCron,
@@ -228,8 +234,10 @@ describe("custom server soundboard media rate limiting", () => {
     expect(cleanupStalePendingUploads).toHaveBeenCalledWith(env.DB, undefined);
     // And the Deadlock art mirror (its stats sweep has its own cron).
     expect(runDeadlockAssetSync).toHaveBeenCalled();
+    // And accounts past their deletion grace period, hourly.
+    expect(purgeDueAccountDeletions).toHaveBeenCalledWith(env.DB, undefined);
     expect(runDeadlockCron).not.toHaveBeenCalled();
-    expect(waitUntil).toHaveBeenCalledTimes(4);
+    expect(waitUntil).toHaveBeenCalledTimes(5);
     const results = await Promise.all(
       waitUntil.mock.calls.map((call) => call[0]),
     );

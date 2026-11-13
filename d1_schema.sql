@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT,
     suspended_at TEXT,                 -- site admin suspension; NULL = active
-    suspended_reason TEXT
+    suspended_reason TEXT,
+    deleted_at TEXT                    -- set only on "Deleted user" rows (migration 045)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower
@@ -736,3 +737,22 @@ CREATE INDEX IF NOT EXISTS idx_deadlock_fetch_state_due
     ON deadlock_fetch_state(next_due_at);
 CREATE INDEX IF NOT EXISTS idx_deadlock_fetch_state_user
     ON deadlock_fetch_state(user_id);
+
+-- Account deletion with a 30-day grace period (migration 045).
+CREATE TABLE IF NOT EXISTS account_deletions (
+    user_id TEXT PRIMARY KEY,
+    requested_at TEXT NOT NULL,
+    delete_after TEXT NOT NULL,
+    reserved_username TEXT NOT NULL,
+    snapshot TEXT NOT NULL,
+    tombstone_id TEXT,
+    purge_started_at TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_deletions_reserved_username
+    ON account_deletions(reserved_username);
+
+CREATE INDEX IF NOT EXISTS idx_account_deletions_due
+    ON account_deletions(delete_after);

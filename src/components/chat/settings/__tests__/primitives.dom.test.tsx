@@ -40,7 +40,7 @@ function renderInSettings(
 }
 
 describe("SettingsCard", () => {
-  it("prints the section as a rule card: a heading legend and a 01 / 02 index", () => {
+  it("prints the section as a rule card: a heading legend and a 01 / 03 index", () => {
     renderInSettings(
       <SettingsCard id="profile">
         <SettingsRow id="display-name" layout="inline">
@@ -54,7 +54,7 @@ describe("SettingsCard", () => {
     expect(
       within(card).getByRole("heading", { level: 3, name: "Profile" }),
     ).toBeInTheDocument();
-    expect(within(card).getByText("01 / 02")).toBeInTheDocument();
+    expect(within(card).getByText("01 / 03")).toBeInTheDocument();
   });
 
   it("titles a card outside the schema without an index", () => {
