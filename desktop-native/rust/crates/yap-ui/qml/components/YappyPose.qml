@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // Yappy's too-big poses (toobig-spec.md): "stuffed" (A, a file wedged in
