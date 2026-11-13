@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/115jon/yap/compare/qt-android-v0.6.1...qt-android-v0.7.0) (2026-11-13)
+
+
+### Features
+
+* **desktop-native:** ✨ edit your profile on the phone ([90ff7a1](https://github.com/115jon/yap/commit/90ff7a1fcddf536769fc9df7cb6b4900c98583f0))
+
 ## [0.6.1](https://github.com/115jon/yap/compare/qt-android-v0.6.0...qt-android-v0.6.1) (2026-11-13)
 
 
