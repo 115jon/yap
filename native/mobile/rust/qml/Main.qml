@@ -64,6 +64,8 @@ Window {
     }
 
     readonly property bool ready: Session.phase === Session.Ready
+    // The account waits for deletion: the restore screen covers the rest.
+    readonly property bool pendingDeletion: Session.deletion.length > 0 && JSON.parse(Session.deletion).pending === true
 
     // Foreground / background: the core keeps the gateway as for a shown
     // window, and the snapshot cache is committed on the way out.
@@ -795,12 +797,25 @@ Window {
         onDeclineRequested: window.declineRing()
     }
 
+    // An account waiting for deletion: the restore screen over everything
+    // (the core holds the session, its gateway closed) until it is
+    // restored or signed out.
+    Loader {
+        anchors.fill: parent
+        anchors.bottomMargin: Native.clippedBottom
+        active: window.pendingDeletion
+        sourceComponent: PendingDeletionView {
+            topInset: SafeArea.margins.top
+            bottomInset: SafeArea.margins.bottom
+        }
+    }
+
     // The system back gesture and its predictive preview, through Native's
     // shim: the progress drives whichever is on top.
     Connections {
         target: Native
         function onBackProgressed(progress) {
-            if (!window.ready)
+            if (!window.ready || window.pendingDeletion)
                 return
             // The shim ends a committed gesture with a progress of 0 before
             // it invokes Back: the panel leaves from where the finger left it.
@@ -833,6 +848,6 @@ Window {
     Binding {
         target: Native
         property: "handlesBack"
-        value: window.ready && (accountPanel.shown || stack.depth > 1 || pager.canGoBack)
+        value: window.ready && !window.pendingDeletion && (accountPanel.shown || stack.depth > 1 || pager.canGoBack)
     }
 }

@@ -12,8 +12,9 @@ import Yap.Ui
 // and synced to the account when asked); Text size (a factor over the
 // system's, this phone's own); Notifications (the push shim's permission
 // state); Devices (the account's sessions, others signed out after a
-// confirm); About; Sign out, confirmed in place. Opened from the account
-// row at the drawer's foot.
+// confirm); About; Sign out, confirmed in place; Delete account, behind
+// the username typed to confirm it. Opened from the account row at the
+// drawer's foot.
 Rectangle {
     id: root
 
@@ -85,6 +86,7 @@ Rectangle {
     // The other device whose Sign out is asking first, or empty.
     property string armedSession: ""
     property bool signOutArmed: false
+    property bool deleteArmed: false
 
     color: Theme.ply0
     transform: [
@@ -449,6 +451,170 @@ Rectangle {
                         }
                         onConfirmed: Session.signOut()
                     }
+                }
+            }
+
+            // Delete account (the desktop's Account → Delete account): the
+            // warning with the date 30 days out, the username typed to
+            // confirm it, then the request; once scheduled this phone signs
+            // out as Sign out does. A refusal stays under the keys.
+            Section {
+                number: 7
+                title: qsTr("Delete account")
+                Text {
+                    width: parent.width
+                    bottomPadding: 12
+                    textFormat: Text.PlainText
+                    text: qsTr("Deletes your Yap account after 30 days. Sign in before then to restore it.")
+                    wrapMode: Text.Wrap
+                    color: Theme.ink2
+                    font: Theme.type.description
+                }
+                KitButton {
+                    width: parent.width
+                    visible: !root.deleteArmed
+                    size: "lg"
+                    variant: "destructive"
+                    iconName: "trash"
+                    text: qsTr("Delete account")
+                    onClicked: {
+                        scroll.revealEnd = true
+                        root.deleteArmed = true
+                    }
+                }
+                Loader {
+                    width: parent.width
+                    active: root.deleteArmed
+                    visible: active
+                    sourceComponent: DeleteConfirm {
+                        onCancelled: {
+                            scroll.revealEnd = false
+                            root.deleteArmed = false
+                            Session.dismissDeleteAccount()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // The delete confirm: InlineConfirm's look with the username field
+    // between the warning and the keys; Delete account works only once the
+    // field names this account (any case, an optional @).
+    component DeleteConfirm: Item {
+        id: confirm
+
+        readonly property var deletion: {
+            try {
+                return JSON.parse(Session.deletion.length > 0 ? Session.deletion : "{}")
+            } catch (e) {
+                return {}
+            }
+        }
+        readonly property bool busy: deletion.deleting === true
+        readonly property string error: deletion.deleteError ?? ""
+        // Fixed as it opens, as the web's warning does.
+        readonly property string deleteOn: Session.deletionDateFromNow()
+        readonly property bool matches: Session.confirmsUsername(nameField.text)
+
+        signal cancelled()
+
+        function submit() {
+            if (confirm.busy || !confirm.matches)
+                return
+            Native.haptic(Native.Confirm)
+            Session.deleteAccount(nameField.text)
+        }
+
+        width: parent ? parent.width : 0
+        implicitHeight: box.height
+
+        Rectangle {
+            id: box
+            width: parent.width
+            height: content.implicitHeight + 32
+            radius: Theme.radius
+            color: Theme.tint1
+            Rectangle {
+                width: 2
+                height: parent.height
+                color: Theme.dangerInk
+            }
+            Column {
+                id: content
+                x: 16
+                y: 16
+                width: parent.width - 32
+                spacing: 12
+                Text {
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    text: qsTr("Delete your account on %1?").arg(confirm.deleteOn)
+                    wrapMode: Text.Wrap
+                    color: Theme.ink1
+                    font: Theme.type.setting
+                    Accessible.role: Accessible.Heading
+                    Accessible.name: text
+                }
+                Text {
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    text: qsTr("You leave every server, are shown to others as “Deleted user” and are signed out everywhere now. On that date your profile, board, friends, settings and uploaded files are deleted. Messages you sent stay, from “Deleted user”. Sign in before then to restore your account. Your Kova sign-in is not deleted.")
+                    wrapMode: Text.Wrap
+                    color: Theme.ink1
+                    font: Theme.type.description
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: text
+                }
+                Text {
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    text: qsTr("Type @%1 to confirm.").arg(Session.meUsername)
+                    wrapMode: Text.Wrap
+                    color: Theme.ink2
+                    font: Theme.type.description
+                }
+                MobileField {
+                    id: nameField
+                    width: parent.width
+                    maximumLength: 64
+                    enabled: !confirm.busy
+                    placeholderText: "@" + Session.meUsername
+                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData
+                    Accessible.name: qsTr("Type %1 to confirm").arg(Session.meUsername)
+                    onAccepted: confirm.submit()
+                }
+                Row {
+                    width: parent.width
+                    spacing: 8
+                    KitButton {
+                        width: (parent.width - parent.spacing) / 2
+                        size: "lg"
+                        variant: "secondary"
+                        text: qsTr("Cancel")
+                        enabled: !confirm.busy
+                        onClicked: confirm.cancelled()
+                    }
+                    KitButton {
+                        width: (parent.width - parent.spacing) / 2
+                        size: "lg"
+                        variant: "danger"
+                        text: qsTr("Delete account")
+                        enabled: confirm.matches
+                        loading: confirm.busy
+                        onClicked: confirm.submit()
+                    }
+                }
+                Text {
+                    width: parent.width
+                    visible: confirm.error.length > 0
+                    textFormat: Text.PlainText
+                    text: confirm.error
+                    wrapMode: Text.Wrap
+                    color: Theme.dangerInk
+                    font: Theme.type.caption
+                    Accessible.role: Accessible.AlertMessage
+                    Accessible.name: text
                 }
             }
         }
