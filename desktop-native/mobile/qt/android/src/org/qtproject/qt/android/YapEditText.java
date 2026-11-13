@@ -98,15 +98,19 @@ public class YapEditText extends QtEditText {
         }
     }
 
-    /** A content:// item (a copied picture or file) is on the clipboard. */
+    /**
+     * A copied picture or file (a non-text type) is on the clipboard. Only
+     * its description: reading the clip itself would grant us its URIs and
+     * show Android's "pasted from your clipboard" before the user pastes.
+     */
     private boolean clipboardHasContent() {
         ClipboardManager clipboard = (ClipboardManager)
                 getContext().getSystemService(Context.CLIPBOARD_SERVICE);
         try {
-            ClipData clip = clipboard == null ? null : clipboard.getPrimaryClip();
-            for (int i = 0; clip != null && i < clip.getItemCount(); i++) {
-                Uri uri = clip.getItemAt(i).getUri();
-                if (uri != null && ContentResolver.SCHEME_CONTENT.equals(uri.getScheme())) return true;
+            ClipDescription description = clipboard == null ? null : clipboard.getPrimaryClipDescription();
+            for (int i = 0; description != null && i < description.getMimeTypeCount(); i++) {
+                String type = description.getMimeType(i);
+                if (type != null && !ClipDescription.compareMimeTypes(type, "text/*")) return true;
             }
         } catch (RuntimeException e) {
             // No access: no Paste.
