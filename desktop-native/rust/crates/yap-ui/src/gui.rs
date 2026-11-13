@@ -659,6 +659,9 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
         ViewUpdate::Saved { path, open } => {
             with::<Chat>(|chat| chat.saved(q(&path), open));
         }
+        ViewUpdate::DownloadFailed { path, message } => {
+            with::<Chat>(|chat| chat.download_failed(q(&path), q(&message)));
+        }
         ViewUpdate::ThreadMessages(diff) => models::apply::<m::ThreadMessageModel>(*diff),
         ViewUpdate::PinnedMessages(diff) => models::apply::<m::PinnedMessageModel>(*diff),
         ViewUpdate::Panels(view) => crate::panels::on_view(*view),

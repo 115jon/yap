@@ -128,8 +128,8 @@ Item {
         id: gifPicker
         keep: true
         sourceComponent: GifPicker {
-            replyToId: root.replyToId
-            onSent: core.cancelReply()
+            // A send goes as the reply, which then clears.
+            composer: core
             onClosed: input.forceActiveFocus()
         }
     }

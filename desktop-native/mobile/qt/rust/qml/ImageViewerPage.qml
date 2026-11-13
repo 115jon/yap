@@ -10,8 +10,9 @@ import Yap.Media
 // to fit), drag to pan while zoomed, swipe sideways between the pictures,
 // swipe down (or the back gesture) to put it away, the scrim fading as the
 // picture follows the finger. A tap shows or hides the bar: close, "2 / 3",
-// the file name and Share (the picture's link). `show(images, index)`
-// takes MessageMedia's images ({ url, name, ... }).
+// the file name, Save image (into the gallery's Pictures/Yap) and Share
+// (the picture's link). `show(images, index)` takes MessageMedia's images
+// ({ url, name, mime, ... }).
 Item {
     id: root
 
@@ -53,6 +54,96 @@ Item {
             return
         enterAnim.stop()
         exit.restart()
+    }
+
+    // ---- Save image ---------------------------------------------------------
+
+    // Saves under way, by their cache path: the picture's type, until the
+    // gallery has it or the download fails. Matched by path, so nothing
+    // else the core or Native reports in the meantime ends a save.
+    property var saves: ({})
+    // The save the Save key waits on (its spinner); empty when none.
+    property string savingPath: ""
+    readonly property bool saving: savingPath.length > 0
+    // Save image (the desktop's): the core downloads the picture into the
+    // cache (with the session for the API's own files), then Native copies
+    // it into the gallery through MediaStore (no storage permission from
+    // API 29) and deletes the download.
+    function save() {
+        if (!root.current || root.saving)
+            return
+        const url = String(root.current.url)
+        let fromUrl = url.split(/[?#]/)[0].split("/").pop() || ""
+        try {
+            fromUrl = decodeURIComponent(fromUrl)
+        } catch (e) {
+            // A stray % stays as it is.
+        }
+        const name = root.current.name && root.current.name.length > 0 ? root.current.name : fromUrl
+        const path = Native.saveTarget(name)
+        if (path.length === 0)
+            return
+        Native.haptic(Native.Tick)
+        root.saves[path] = root.current.mime || ""
+        root.savingPath = path
+        saveTimeout.restart()
+        Chat.download(url, path, false)
+    }
+    // A slow download frees the key after a minute (Save goes again); the
+    // download carries on and still reaches the gallery when it lands.
+    Timer {
+        id: saveTimeout
+        interval: 60000
+        onTriggered: {
+            root.savingPath = ""
+            root.flash(qsTr("Still downloading. It saves when it's done."))
+        }
+    }
+    function endSave(path) {
+        delete root.saves[path]
+        if (path === root.savingPath) {
+            saveTimeout.stop()
+            root.savingPath = ""
+        }
+    }
+    Connections {
+        target: Chat
+        function onSaved(path, open) {
+            if (path in root.saves)
+                Native.saveToGallery(path, root.saves[path])
+        }
+        // The core removes what it wrote of a failed download.
+        function onDownloadFailed(path, text) {
+            if (!(path in root.saves))
+                return
+            root.endSave(path)
+            root.flash(text)
+        }
+    }
+    Connections {
+        target: Native
+        function onImageSaved(path, result) {
+            if (!(path in root.saves))
+                return
+            root.endSave(path)
+            if (result === 0 && root.shown)
+                Native.haptic(Native.Confirm)
+            root.flash(result === 0 ? qsTr("Saved to Pictures/Yap")
+                : result === 2 ? qsTr("Allow storage access, then save again.")
+                : result === 3 ? qsTr("Turn on Storage for Yap in Settings, then save again.")
+                : qsTr("Couldn't save the picture."))
+        }
+    }
+    // A short line over the foot of the picture.
+    property string note: ""
+    function flash(text) {
+        root.note = text
+        noteTimer.restart()
+    }
+    Timer {
+        id: noteTimer
+        interval: 2500
+        onTriggered: root.note = ""
     }
 
     visible: shown
@@ -359,7 +450,7 @@ Item {
             Column {
                 anchors.left: closeKey.right
                 anchors.leftMargin: 8
-                anchors.right: shareKey.left
+                anchors.right: saveKey.left
                 anchors.rightMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
                 Text {
@@ -379,6 +470,24 @@ Item {
                     font: Theme.type.numSm
                 }
             }
+            // Save image: the picture's own file, from its link.
+            IconKey {
+                id: saveKey
+                anchors.right: shareKey.visible ? shareKey.left : shareKey.right
+                anchors.verticalCenter: parent.verticalCenter
+                tone: "onMedia"
+                iconName: "download"
+                tip: qsTr("Save image")
+                visible: root.current !== null && /^https?:/.test(String(root.current.url))
+                enabled: !root.saving
+                opacity: root.saving ? 0 : 1
+                onClicked: root.save()
+            }
+            Spinner {
+                anchors.centerIn: saveKey
+                running: root.saving && saveKey.visible
+                onMedia: true
+            }
             IconKey {
                 id: shareKey
                 anchors.right: parent.right
@@ -391,6 +500,33 @@ Item {
                 visible: root.current !== null && /^https?:/.test(String(root.current.url))
                 onClicked: Native.share(root.current.url)
             }
+        }
+    }
+
+    // What Save image did.
+    Rectangle {
+        visible: opacity > 0
+        opacity: root.note.length > 0 && root.shown ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: Theme.dur2 } }
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: Math.max(SafeArea.margins.bottom, Native.gestureInset) + 32
+        width: Math.min(parent.width - 48, noteText.implicitWidth + 32)
+        height: noteText.implicitHeight + 20
+        radius: Theme.radius
+        color: Qt.rgba(0, 0, 0, 0.72)
+        Accessible.role: Accessible.AlertMessage
+        Accessible.name: root.note
+        Text {
+            id: noteText
+            anchors.centerIn: parent
+            width: Math.min(implicitWidth, parent.parent.width - 80)
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+            text: root.note
+            color: "#ffffff"
+            font: Theme.type.caption
         }
     }
 }

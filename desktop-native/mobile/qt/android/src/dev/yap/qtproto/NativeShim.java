@@ -1,9 +1,13 @@
 package dev.yap.qtproto;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.database.Cursor;
@@ -11,6 +15,7 @@ import android.graphics.Insets;
 import android.hardware.SensorManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Environment;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
@@ -34,6 +39,7 @@ import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -59,11 +65,26 @@ public final class NativeShim {
     static native void nativeEdges(float gestureBottom, float clippedBottom);
     static native void nativeMediaCopying();
     static native void nativeMediaPicked(String[] paths, int failed);
+    static native void nativeImageSaved(String path, int result);
 
     /** The most files one pick hands to the tray. */
     private static final int PICK_MAX = 10;
     /** Picked files are copied under the cache, here, until the next start. */
     private static final String UPLOADS = "uploads";
+    /** Pictures being saved wait under the cache, here, on their way to the gallery. */
+    private static final String SAVES = "saves";
+    /** Saved pictures go in the gallery's Pictures/Yap. */
+    private static final String GALLERY_FOLDER = "Yap";
+    /** saveToGallery's results (Native.imageSaved). */
+    private static final int SAVE_OK = 0;
+    private static final int SAVE_FAILED = 1;
+    private static final int SAVE_NEEDS_PERMISSION = 2;
+    private static final int SAVE_OPENED_SETTINGS = 3;
+    /** The storage permission's request code (API 28 only). */
+    private static final int SAVE_PERMISSION_REQUEST = 0x5962;
+    /** Where we remember that the storage permission was asked for once (API 28). */
+    private static final String SAVE_PREFS = "yap-save-image";
+    private static final String SAVE_ASKED = "storageAsked";
     /** File names stay well under the file system's 255 bytes. */
     private static final int NAME_BYTES = 160;
     /** The account's attachment limit for the pick under way (bytes). */
@@ -87,7 +108,11 @@ public final class NativeShim {
         a.runOnUiThread(NativeShim::installOnUi);
         // Nothing uploads before the app is up: last run's copies can go.
         final File uploads = new File(a.getCacheDir(), UPLOADS);
-        new Thread(() -> deleteTree(uploads), "yap-uploads-clean").start();
+        final File saves = new File(a.getCacheDir(), SAVES);
+        new Thread(() -> {
+            deleteTree(uploads);
+            deleteTree(saves);
+        }, "yap-uploads-clean").start();
     }
 
     private static void installOnUi() {
@@ -573,6 +598,169 @@ public final class NativeShim {
             name = name.substring(Character.charCount(name.codePointAt(0)));
         }
         return name;
+    }
+
+    /**
+     * Where a picture to save is downloaded first: a fresh folder under the
+     * cache, the name made safe as a file name. Empty before install.
+     */
+    public static String saveTarget(String name) {
+        if (activity == null) return "";
+        String safe = name == null ? "" : name.replaceAll("[\\\\/:*?\"<>|\\x00-\\x1f]", "_")
+                .replaceAll("^[.\\s]+", "").trim();
+        if (safe.isEmpty()) safe = "image";
+        while (safe.getBytes(StandardCharsets.UTF_8).length > NAME_BYTES) {
+            safe = safe.substring(Character.charCount(safe.codePointAt(0)));
+        }
+        File dir = new File(new File(activity.getCacheDir(), SAVES), Long.toString(System.nanoTime()));
+        return new File(dir, safe).getAbsolutePath();
+    }
+
+    /**
+     * Copies a downloaded picture (`saveTarget`'s path) into the gallery,
+     * Pictures/Yap, through MediaStore, off the UI thread, then deletes the
+     * download; the result goes back through nativeImageSaved with `path`.
+     * API 29+ needs no permission for the app's own entries; API 28 needs
+     * the storage permission, asked here (the save is then reported as
+     * waiting on it). Once Android stops asking ("Don't ask again"), the
+     * app's settings page opens instead.
+     */
+    public static void saveToGallery(final String path, final String mime) {
+        final File file = new File(path);
+        final File folder = file.getParentFile();
+        if (activity == null || !file.isFile()) {
+            if (folder != null) deleteTree(folder);
+            nativeImageSaved(path, SAVE_FAILED);
+            return;
+        }
+        if (Build.VERSION.SDK_INT < 29
+                && activity.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        != PackageManager.PERMISSION_GRANTED) {
+            if (folder != null) deleteTree(folder);
+            nativeImageSaved(path, askForStorage() ? SAVE_NEEDS_PERMISSION : SAVE_OPENED_SETTINGS);
+            return;
+        }
+        new Thread(() -> {
+            boolean ok = writeToGallery(file, mime);
+            if (folder != null) deleteTree(folder);
+            nativeImageSaved(path, ok ? SAVE_OK : SAVE_FAILED);
+        }, "yap-save-image").start();
+    }
+
+    /**
+     * API 28's storage permission: asks for it and returns true, or, when
+     * it was asked for before and Android no longer shows the prompt
+     * ("Don't ask again"), opens the app's settings page and returns false.
+     * The first ask and a "Don't ask again" both have no rationale to show,
+     * so the first ask is remembered.
+     */
+    private static boolean askForStorage() {
+        final String permission = Manifest.permission.WRITE_EXTERNAL_STORAGE;
+        SharedPreferences prefs =
+                activity.getSharedPreferences(SAVE_PREFS, Context.MODE_PRIVATE);
+        boolean asked = prefs.getBoolean(SAVE_ASKED, false);
+        if (asked && !activity.shouldShowRequestPermissionRationale(permission)) {
+            activity.runOnUiThread(() -> {
+                Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.fromParts("package", activity.getPackageName(), null));
+                try {
+                    activity.startActivity(intent);
+                } catch (RuntimeException e) {
+                    Log.w("yap-native", "could not open the app's settings", e);
+                }
+            });
+            return false;
+        }
+        prefs.edit().putBoolean(SAVE_ASKED, true).apply();
+        activity.runOnUiThread(() -> activity.requestPermissions(
+                new String[] {permission}, SAVE_PERMISSION_REQUEST));
+        return true;
+    }
+
+    private static boolean writeToGallery(File file, String mime) {
+        ContentResolver resolver = activity.getContentResolver();
+        String type = mime;
+        if (type == null || !type.startsWith("image/")) {
+            String name = file.getName();
+            int dot = name.lastIndexOf('.');
+            String ext = dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);
+            type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+            if (type == null || !type.startsWith("image/")) type = "image/jpeg";
+        }
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.MediaColumns.DISPLAY_NAME, file.getName());
+        values.put(MediaStore.MediaColumns.MIME_TYPE, type);
+        Uri collection;
+        if (Build.VERSION.SDK_INT >= 29) {
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH,
+                    Environment.DIRECTORY_PICTURES + "/" + GALLERY_FOLDER);
+            values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+            collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+        } else {
+            File dir = new File(Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_PICTURES), GALLERY_FOLDER);
+            if (!dir.mkdirs() && !dir.isDirectory()) return false;
+            values.put(MediaStore.MediaColumns.DATA, unusedFile(dir, file.getName()).getAbsolutePath());
+            collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+        }
+        Uri uri;
+        try {
+            uri = resolver.insert(collection, values);
+        } catch (RuntimeException e) {
+            Log.w("yap-native", "could not add a picture to the gallery", e);
+            return false;
+        }
+        if (uri == null) return false;
+        try (InputStream in = new FileInputStream(file);
+                OutputStream out = resolver.openOutputStream(uri)) {
+            if (out == null) throw new IOException("no output stream");
+            byte[] buffer = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buffer)) > 0) out.write(buffer, 0, n);
+        } catch (IOException | RuntimeException e) {
+            Log.w("yap-native", "could not write a picture to the gallery", e);
+            try {
+                resolver.delete(uri, null, null);
+            } catch (RuntimeException ignored) {
+                // Already gone.
+            }
+            return false;
+        }
+        if (Build.VERSION.SDK_INT >= 29) {
+            // Published: until IS_PENDING is 0 the entry is hidden from the
+            // gallery (and removed by the system after a week), so a failure
+            // here is a failed save.
+            ContentValues done = new ContentValues();
+            done.put(MediaStore.MediaColumns.IS_PENDING, 0);
+            boolean published;
+            try {
+                published = resolver.update(uri, done, null, null) > 0;
+            } catch (RuntimeException e) {
+                Log.w("yap-native", "could not publish a picture in the gallery", e);
+                published = false;
+            }
+            if (!published) {
+                try {
+                    resolver.delete(uri, null, null);
+                } catch (RuntimeException ignored) {
+                    // Already gone.
+                }
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** `name` in `dir`, or "name (2).ext" and so on when it is taken (API 28's file path). */
+    private static File unusedFile(File dir, String name) {
+        File out = new File(dir, name);
+        int dot = name.lastIndexOf('.');
+        String stem = dot > 0 ? name.substring(0, dot) : name;
+        String ext = dot > 0 ? name.substring(dot) : "";
+        for (int i = 2; out.exists() && i < 1000; i++) {
+            out = new File(dir, stem + " (" + i + ")" + ext);
+        }
+        return out;
     }
 
     private static void deleteTree(File file) {

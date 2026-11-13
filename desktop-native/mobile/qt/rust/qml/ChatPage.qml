@@ -24,6 +24,13 @@ Item {
     signal threadRequested(string messageId)
 
     readonly property bool dm: Nav.dmUserId.length > 0
+    // The composer's shared core, for the picker sheet (its sends reply).
+    readonly property ComposerCore composerCore: composer.core
+    // An emoji from the picker sheet: at the caret, the keyboard back up.
+    function insertEmoji(emoji) {
+        composer.insertText(emoji)
+        composer.focusField()
+    }
     // The conversation shows rows (the drawer reopens it only when not).
     readonly property bool hasRows: view.count > 0
 
@@ -75,9 +82,10 @@ Item {
         composer.startReply(messageId, author, text)
     }
 
-    // Something lies over the chat (the image viewer, a message sheet):
-    // Back and its gesture are that thing's, and the pager does not pan.
-    readonly property bool overlayShown: viewer.shown || actions.shown
+    // Something lies over the chat (the image viewer, a message sheet, the
+    // emoji and GIF picker): Back and its gesture are that thing's, and the
+    // pager does not pan.
+    readonly property bool overlayShown: viewer.shown || actions.shown || (picker.item?.up ?? false)
     // The back gesture's progress while it does (the viewer shrinks and
     // fades); the pager passes it on.
     property real backProgress: 0
@@ -368,6 +376,23 @@ Item {
             Chat.sendMessage(text, replyToId)
         }
         onOpenImages: (images, index) => viewer.show(images, index)
+        onGifSent: scroll.followEnd = true
+        onPickerRequested: tab => {
+            picker.active = true
+            picker.item.openOn(tab, "gifs")
+        }
+    }
+
+    // The composer's emoji and GIF picker, made on first use.
+    Loader {
+        id: picker
+        anchors.fill: parent
+        z: 9
+        active: false
+        sourceComponent: PickerSheet {
+            composer: root.composerCore
+            onPicked: emoji => root.insertEmoji(emoji)
+        }
     }
 
     // The message sheet and what it leads to, over the page.

@@ -20,7 +20,9 @@ import Yap.Ui
 //   to their `<:name:id>` token on send;
 // - typing pings, at most one per 3 s (TYPING_THROTTLE);
 // - `submit`: the text and the finished uploads (Chat.uploadsReady) go
-//   out (`send`), and the field, the reply and the draft are cleared.
+//   out (`send`), and the field, the reply and the draft are cleared;
+// - `sendGif`: a GIF picker tile goes out as the reply, which then clears
+//   (the typed text stays).
 //
 // With `liveWord` (a soft keyboard), the word being composed (the field's
 // preedit) counts as typed for Send, `@` suggestions and typing pings, and
@@ -48,6 +50,8 @@ Item {
     signal sent()
     // A channel's draft was put back (or the composer emptied for one).
     signal restored()
+    // A GIF went out (`sendGif`); the field keeps its text.
+    signal gifSent()
 
     // What is in the field, with the keyboard's word in progress.
     readonly property string typed: !textField ? "" : liveWord ? textField.text + textField.preeditText : textField.text
@@ -83,6 +87,14 @@ Item {
         ComposerDrafts.keep(root.draftChannel, null)
         root.sent()
         return true
+    }
+
+    // A GIF picker tile (GifListModel's `gifId`) to the open channel, as
+    // the reply when there is one (GifPickerCore's send).
+    function sendGif(gifId) {
+        Chat.sendGif(gifId, root.replyToId)
+        root.cancelReply()
+        root.gifSent()
     }
 
     // Puts a discarded send back, unless something new was typed meanwhile.
