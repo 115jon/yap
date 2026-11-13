@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/115jon/yap/compare/qt-android-v0.5.0...qt-android-v0.6.0) (2026-11-13)
+
+
+### Features
+
+* **desktop-native:** ✨ ring, answer and start dm calls on android ([b5e5075](https://github.com/115jon/yap/commit/b5e507542802a6e8602e22c556ba5d65f5ea4e3f))
+
 ## [0.5.0](https://github.com/115jon/yap/compare/qt-android-v0.4.0...qt-android-v0.5.0) (2026-11-13)
 
 
