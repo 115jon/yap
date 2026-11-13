@@ -1,5 +1,24 @@
 # Changelog
 
+## [4.1.0](https://github.com/115jon/yap/compare/v4.0.3...v4.1.0) (2026-11-13)
+
+
+### Features
+
+* **desktop-native:** gifs and stickers in the phone composer, save image ([c62b94d](https://github.com/115jon/yap/commit/c62b94dec85b9acda3f1bd3064acab30744488b3))
+* **desktop-native:** share and open server invites in the android app ([3d20e13](https://github.com/115jon/yap/commit/3d20e132069d8544122f438f1c9e2b471d49baad))
+
+
+### Bug Fixes
+
+* **calls:** 🐛 forget a call start lost with its socket ([997e3ff](https://github.com/115jon/yap/commit/997e3ff9ea6e154f5b1cac3dd6c991cbeb7570a6))
+* **calls:** 🐛 join a dm call only in the tab that answered it ([38b520a](https://github.com/115jon/yap/commit/38b520a99712383ae124e3348aa6f0ac3120026c))
+* **calls:** 🐛 keep a call start until the resume replays its ring ([a911856](https://github.com/115jon/yap/commit/a911856dbd92be8030f994ae74a02a33db9a4b42))
+* **calls:** only the device that answered a DM call joins it ([80d0a70](https://github.com/115jon/yap/commit/80d0a708654d56c8720c69a3ce5cc1904965f833))
+* **desktop-native:** 🐛 forget a dm call start that never rang ([fde4582](https://github.com/115jon/yap/commit/fde4582aa69e75c5a78c494f2b20b088f3d0faef))
+* **desktop-native:** 🐛 join a dm call only on the device that answered ([ef9e46f](https://github.com/115jon/yap/commit/ef9e46fc78844c9715ba200785c1d493687ea977))
+* **desktop-native:** 🐛 keep a dm call start until the resume replays ([0ca9856](https://github.com/115jon/yap/commit/0ca9856f66d4ba926d6189fba2d84b4a4cb411c8))
+
 ## [4.0.3](https://github.com/115jon/yap/compare/v4.0.2...v4.0.3) (2026-11-12)
 
 
