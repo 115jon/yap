@@ -7,10 +7,12 @@ import Yap.Ui
 // The drawer, under the chat: the server rail with Home on top, the open
 // server's channel tree (or Home's direct messages) beside it, the call in
 // progress and your account along the bottom. The rows are the desktop's
-// own delegates (ServerIcon, TreeRow) on its own list models. A voice
-// channel's row joins it (or opens the call you are in there). A tap on
-// the server's name opens its menu (ServerSheet: Invite people, Mark as
-// read); a long press on a channel opens the channel's.
+// own delegates (ServerIcon, TreeRow) on its own list models, and your
+// account plate floating over the tree's foot (AccountPlate: the call in
+// progress, you, mic and deafen; a tap grows the account panel out of it).
+// A voice channel's row joins it (or opens the call you are in there). A
+// tap on the server's name opens its menu (ServerSheet: Invite people, Mark
+// as read); a long press on a channel opens the channel's.
 Item {
     id: root
 
@@ -18,11 +20,12 @@ Item {
     // The open conversation shows rows (picking it again only goes back).
     property bool chatHasRows: false
     signal profileRequested(string userId)
-    signal settingsRequested()
+    // The account plate was tapped: the panel grows out of it (Main.qml).
+    signal accountRequested(Item plate)
     signal friendsRequested()
     // A voice channel was tapped: join it, or open its call.
     signal voiceRequested(string channelId)
-    // The call bar was tapped.
+    // The account plate's call segment was tapped.
     signal callRequested()
     // The open server's menu, and a channel's (ServerSheet).
     signal serverMenuRequested()
@@ -46,12 +49,21 @@ Item {
     // Edge to edge: the rail and tree run under the status bar; their
     // content starts below it.
     readonly property real topInset: SafeArea.margins.top
+    readonly property real bottomInset: Math.max(SafeArea.margins.bottom, Native.gestureInset)
+
+    // How far the drawer is open, 0 to 1 (the pager's position, not a
+    // timer): as it closes the account plate drops 12 and fades, a third
+    // speed under the drawer's 24 and the chat's full slide.
+    property real reveal: 1
+    readonly property real plateDrop: Theme.reducedMotion ? 0 : 12
+    // The lists' room under their last row, clear of the plate.
+    readonly property real plateClear: plate.height + 16 + bottomInset
 
     Rectangle {
         id: rail
         width: Theme.railTile + 24 + root.leftInset
         anchors.top: parent.top
-        anchors.bottom: call.top
+        anchors.bottom: parent.bottom
         color: Theme.ply0
 
         PlatformList {
@@ -59,7 +71,7 @@ Item {
             anchors.fill: parent
             anchors.leftMargin: root.leftInset
             topMargin: root.topInset + 8
-            bottomMargin: 8
+            bottomMargin: root.plateClear
             spacing: 8
             clip: true
             model: ServerListModel
@@ -142,7 +154,7 @@ Item {
         anchors.left: rail.right
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.bottom: call.top
+        anchors.bottom: parent.bottom
         color: Theme.ply1
 
         Column {
@@ -217,7 +229,7 @@ Item {
             visible: !Nav.home
             leftMargin: 8
             topMargin: 8
-            bottomMargin: 8
+            bottomMargin: root.plateClear
             spacing: 2
             clip: true
             model: ChannelTreeModel
@@ -254,6 +266,7 @@ Item {
             visible: active
             sourceComponent: DmsPane {
                 chatHasRows: root.chatHasRows
+                bottomClear: root.plateClear
                 onConversationOpened: root.conversationOpened()
                 onProfileRequested: userId => root.profileRequested(userId)
                 onFriendsRequested: root.friendsRequested()
@@ -261,19 +274,23 @@ Item {
         }
     }
 
-    CallBar {
-        id: call
-        anchors.bottom: account.top
-        width: parent.width
-        leftInset: root.leftInset
-        rightInset: root.rightInset
-        onCallRequested: root.callRequested()
-    }
-
-    AccountBar {
-        id: account
+    // You, floating 8 in from the drawer's edges and 8 above the gesture
+    // bar, across the rail's foot too: on a phone the tree alone is too
+    // narrow for the plate's keys and the panel's presence rail.
+    AccountPlate {
+        id: plate
+        anchors.left: parent.left
+        anchors.leftMargin: 8 + root.leftInset
+        anchors.right: parent.right
+        anchors.rightMargin: 8 + root.rightInset
         anchors.bottom: parent.bottom
-        width: parent.width
-        onSettingsRequested: root.settingsRequested()
+        anchors.bottomMargin: root.bottomInset + 8
+        height: implicitHeight
+        opacity: root.reveal
+        visible: opacity > 0
+        transform: Translate { y: root.plateDrop * (1 - root.reveal) }
+        clockShown: root.reveal > 0.99
+        onCallRequested: root.callRequested()
+        onPanelRequested: root.accountRequested(plate)
     }
 }
