@@ -158,7 +158,7 @@ public:
   void readConfiguration();
   void onMediaCopying();
   void onMediaPicked(const QStringList& paths, int failed);
-  void onImageSaved(int result);
+  void onImageSaved(const QString& path, int result);
   void onOpenRequest(const QString& channelId, const QString& serverId, const QString& userId);
   void onAudioRoutes(const QByteArray& json);
 
@@ -175,9 +175,10 @@ signals:
   // Local copies of what was picked (none: cancelled); `failed` items could
   // not be read.
   void mediaPicked(const QStringList& paths, int failed);
-  // saveToGallery's outcome: 0 saved, 1 failed, 2 the storage permission
-  // was asked for (API 28; the save can be tried again).
-  void imageSaved(int result);
+  // saveToGallery's outcome for `path`: 0 saved, 1 failed, 2 the storage
+  // permission was asked for (API 28; the save can be tried again), 3 it
+  // is refused for good, so the app's settings page was opened.
+  void imageSaved(const QString& path, int result);
   void notificationsEnabledChanged();
   void activeConversationChanged();
   void openRequested();

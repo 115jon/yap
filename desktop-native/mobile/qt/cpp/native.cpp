@@ -89,9 +89,10 @@ void jniMediaPicked(JNIEnv* env, jclass, jobjectArray paths, jint failed)
   post([list, failed] { Native::instance()->onMediaPicked(list, failed); });
 }
 
-void jniImageSaved(JNIEnv*, jclass, jint result)
+void jniImageSaved(JNIEnv*, jclass, jstring path, jint result)
 {
-  post([result] { Native::instance()->onImageSaved(result); });
+  const QString where = QJniObject(path).toString();
+  post([where, result] { Native::instance()->onImageSaved(where, result); });
 }
 
 // The picker's request code (any number of ours; Qt routes the result back).
@@ -116,7 +117,7 @@ Native::Native(QObject* parent)
     { "nativeEdges", "(FF)V", reinterpret_cast<void*>(jniEdges) },
     { "nativeMediaCopying", "()V", reinterpret_cast<void*>(jniMediaCopying) },
     { "nativeMediaPicked", "([Ljava/lang/String;I)V", reinterpret_cast<void*>(jniMediaPicked) },
-    { "nativeImageSaved", "(I)V", reinterpret_cast<void*>(jniImageSaved) },
+    { "nativeImageSaved", "(Ljava/lang/String;I)V", reinterpret_cast<void*>(jniImageSaved) },
   };
   QJniEnvironment env;
   if (!env.registerNativeMethods(kShim, methods, std::size(methods)))
@@ -337,9 +338,9 @@ void Native::saveToGallery(const QString& path, const QString& mime) const
 #endif
 }
 
-void Native::onImageSaved(int result)
+void Native::onImageSaved(const QString& path, int result)
 {
-  emit imageSaved(result);
+  emit imageSaved(path, result);
 }
 
 void Native::onMediaCopying()

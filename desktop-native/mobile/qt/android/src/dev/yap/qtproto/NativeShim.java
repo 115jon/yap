@@ -5,7 +5,9 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.database.Cursor;
@@ -63,7 +65,7 @@ public final class NativeShim {
     static native void nativeEdges(float gestureBottom, float clippedBottom);
     static native void nativeMediaCopying();
     static native void nativeMediaPicked(String[] paths, int failed);
-    static native void nativeImageSaved(int result);
+    static native void nativeImageSaved(String path, int result);
 
     /** The most files one pick hands to the tray. */
     private static final int PICK_MAX = 10;
@@ -77,8 +79,12 @@ public final class NativeShim {
     private static final int SAVE_OK = 0;
     private static final int SAVE_FAILED = 1;
     private static final int SAVE_NEEDS_PERMISSION = 2;
+    private static final int SAVE_OPENED_SETTINGS = 3;
     /** The storage permission's request code (API 28 only). */
     private static final int SAVE_PERMISSION_REQUEST = 0x5962;
+    /** Where we remember that the storage permission was asked for once (API 28). */
+    private static final String SAVE_PREFS = "yap-save-image";
+    private static final String SAVE_ASKED = "storageAsked";
     /** File names stay well under the file system's 255 bytes. */
     private static final int NAME_BYTES = 160;
     /** The account's attachment limit for the pick under way (bytes). */
@@ -611,33 +617,62 @@ public final class NativeShim {
     /**
      * Copies a downloaded picture (`saveTarget`'s path) into the gallery,
      * Pictures/Yap, through MediaStore, off the UI thread, then deletes the
-     * download; the result goes back through nativeImageSaved. API 29+
-     * needs no permission for the app's own entries; API 28 needs the
-     * storage permission, asked here the first time (the save is then
-     * reported as waiting on it).
+     * download; the result goes back through nativeImageSaved with `path`.
+     * API 29+ needs no permission for the app's own entries; API 28 needs
+     * the storage permission, asked here (the save is then reported as
+     * waiting on it). Once Android stops asking ("Don't ask again"), the
+     * app's settings page opens instead.
      */
     public static void saveToGallery(final String path, final String mime) {
         final File file = new File(path);
         final File folder = file.getParentFile();
         if (activity == null || !file.isFile()) {
             if (folder != null) deleteTree(folder);
-            nativeImageSaved(SAVE_FAILED);
+            nativeImageSaved(path, SAVE_FAILED);
             return;
         }
         if (Build.VERSION.SDK_INT < 29
                 && activity.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                         != PackageManager.PERMISSION_GRANTED) {
             if (folder != null) deleteTree(folder);
-            activity.runOnUiThread(() -> activity.requestPermissions(
-                    new String[] {Manifest.permission.WRITE_EXTERNAL_STORAGE}, SAVE_PERMISSION_REQUEST));
-            nativeImageSaved(SAVE_NEEDS_PERMISSION);
+            nativeImageSaved(path, askForStorage() ? SAVE_NEEDS_PERMISSION : SAVE_OPENED_SETTINGS);
             return;
         }
         new Thread(() -> {
             boolean ok = writeToGallery(file, mime);
             if (folder != null) deleteTree(folder);
-            nativeImageSaved(ok ? SAVE_OK : SAVE_FAILED);
+            nativeImageSaved(path, ok ? SAVE_OK : SAVE_FAILED);
         }, "yap-save-image").start();
+    }
+
+    /**
+     * API 28's storage permission: asks for it and returns true, or, when
+     * it was asked for before and Android no longer shows the prompt
+     * ("Don't ask again"), opens the app's settings page and returns false.
+     * The first ask and a "Don't ask again" both have no rationale to show,
+     * so the first ask is remembered.
+     */
+    private static boolean askForStorage() {
+        final String permission = Manifest.permission.WRITE_EXTERNAL_STORAGE;
+        SharedPreferences prefs =
+                activity.getSharedPreferences(SAVE_PREFS, Context.MODE_PRIVATE);
+        boolean asked = prefs.getBoolean(SAVE_ASKED, false);
+        if (asked && !activity.shouldShowRequestPermissionRationale(permission)) {
+            activity.runOnUiThread(() -> {
+                Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.fromParts("package", activity.getPackageName(), null));
+                try {
+                    activity.startActivity(intent);
+                } catch (RuntimeException e) {
+                    Log.w("yap-native", "could not open the app's settings", e);
+                }
+            });
+            return false;
+        }
+        prefs.edit().putBoolean(SAVE_ASKED, true).apply();
+        activity.runOnUiThread(() -> activity.requestPermissions(
+                new String[] {permission}, SAVE_PERMISSION_REQUEST));
+        return true;
     }
 
     private static boolean writeToGallery(File file, String mime) {

@@ -58,9 +58,12 @@ Item {
 
     // ---- Save image ---------------------------------------------------------
 
-    // The download on its way to the gallery (its cache path), and its type.
+    // Saves under way, by their cache path: the picture's type, until the
+    // gallery has it or the download fails. Matched by path, so nothing
+    // else the core or Native reports in the meantime ends a save.
+    property var saves: ({})
+    // The save the Save key waits on (its spinner); empty when none.
     property string savingPath: ""
-    property string savingMime: ""
     readonly property bool saving: savingPath.length > 0
     // Save image (the desktop's): the core downloads the picture into the
     // cache (with the session for the API's own files), then Native copies
@@ -81,44 +84,53 @@ Item {
         if (path.length === 0)
             return
         Native.haptic(Native.Tick)
-        root.savingMime = root.current.mime || ""
+        root.saves[path] = root.current.mime || ""
         root.savingPath = path
         saveTimeout.restart()
         Chat.download(url, path, false)
     }
-    // A download that never answers lets Save go again.
+    // A slow download frees the key after a minute (Save goes again); the
+    // download carries on and still reaches the gallery when it lands.
     Timer {
         id: saveTimeout
         interval: 60000
-        onTriggered: root.savingPath = ""
+        onTriggered: {
+            root.savingPath = ""
+            root.flash(qsTr("Still downloading. It saves when it's done."))
+        }
+    }
+    function endSave(path) {
+        delete root.saves[path]
+        if (path === root.savingPath) {
+            saveTimeout.stop()
+            root.savingPath = ""
+        }
     }
     Connections {
         target: Chat
         function onSaved(path, open) {
-            if (path !== root.savingPath)
-                return
-            Native.saveToGallery(path, root.savingMime)
+            if (path in root.saves)
+                Native.saveToGallery(path, root.saves[path])
         }
-        // The core's word on a failed download.
-        function onNotice(text) {
-            if (!root.saving)
+        // The core removes what it wrote of a failed download.
+        function onDownloadFailed(path, text) {
+            if (!(path in root.saves))
                 return
-            saveTimeout.stop()
-            root.savingPath = ""
+            root.endSave(path)
             root.flash(text)
         }
     }
     Connections {
         target: Native
-        function onImageSaved(result) {
-            if (!root.saving)
+        function onImageSaved(path, result) {
+            if (!(path in root.saves))
                 return
-            saveTimeout.stop()
-            root.savingPath = ""
-            if (result === 0)
+            root.endSave(path)
+            if (result === 0 && root.shown)
                 Native.haptic(Native.Confirm)
             root.flash(result === 0 ? qsTr("Saved to Pictures/Yap")
                 : result === 2 ? qsTr("Allow storage access, then save again.")
+                : result === 3 ? qsTr("Turn on Storage for Yap in Settings, then save again.")
                 : qsTr("Couldn't save the picture."))
         }
     }
