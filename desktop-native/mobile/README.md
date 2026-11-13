@@ -794,9 +794,10 @@ core's invites:
   missing and failed states. A joined server opens on its tree after
   1.5 s. A chat link opens the channel and slides the chat in.
 - **No verified links yet.** The web's `/.well-known/assetlinks.json` names
-  only the Expo app's packages, so the filter is not `autoVerify`: Android
-  asks which app opens a web link, or the user turns on "Open supported
-  links" for Yap. `yap://` links open the app directly.
+  only the Expo app's packages, so the filter is not `autoVerify`: on
+  Android 12 and later a web link opens in the browser until the user
+  turns on "Open supported links" for Yap. `yap://` links open the app
+  directly.
 
 Shared with the desktop (`Yap.Ui`): `InviteLandingState` (the landing's
 states, their copy and the redirect after a join; the desktop's
