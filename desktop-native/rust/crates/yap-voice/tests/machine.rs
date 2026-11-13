@@ -1368,6 +1368,7 @@ fn show(tiles: &[(&str, u32, u32)], stage: Option<&str>) -> Input {
             .collect(),
         stage: stage.map(str::to_owned),
         suspended: false,
+        watch_needs_tile: false,
     }))
 }
 
@@ -1705,6 +1706,88 @@ fn a_watched_share_nothing_shows_should_stay_pulled_unsuspended() {
     assert!(!VideoIntent::default().suspended);
     assert!(share_release_timer(&fx).is_none());
     assert!(closes(&fx).is_empty());
+}
+
+/// The phone's intent: a watched share is pulled only while a tile shows it.
+fn phone_show(tiles: &[(&str, u32, u32)]) -> Input {
+    let Input::Command(UserCommand::SetVideo(intent)) = show(tiles, None) else {
+        unreachable!("show is a SetVideo");
+    };
+    Input::Command(UserCommand::SetVideo(VideoIntent {
+        watch_needs_tile: true,
+        ..intent
+    }))
+}
+
+#[test]
+fn a_phone_should_release_a_watched_share_no_tile_shows_and_keep_it_watched() {
+    // The call page was left (Back, or a profile over it) with the app still
+    // in the foreground: nothing is suspended, but nothing shows the share.
+    let mut m = watching_a_share();
+    let fx = m.handle(phone_show(&[]));
+    assert_eq!(sinks(&fx), vec![("m-share".to_owned(), None)]);
+    assert!(
+        sends(&fx, Socket::Voice).is_empty(),
+        "still watched: no stream.watch.stop"
+    );
+    let timer = share_release_timer(&fx).expect("a release timer for the share");
+    let fx = m.handle(Input::Timer(timer));
+    assert_eq!(closes(&fx), vec![vec!["m-share".to_owned()]]);
+
+    // The call page again: its tile pulls the share afresh, no new Watch.
+    let fx = m.handle(phone_show(&[("screen-video-ana", 1280, 720)]));
+    assert_eq!(pulls(&fx), vec!["sfu-ana-share"]);
+    assert!(sends(&fx, Socket::Voice).is_empty(), "no new watch.start");
+}
+
+#[test]
+fn a_phone_tile_back_before_the_delay_should_keep_the_share_pull() {
+    let mut m = watching_a_share();
+    let fx = m.handle(phone_show(&[]));
+    let timer = share_release_timer(&fx).expect("a release timer for the share");
+    let fx = m.handle(phone_show(&[("screen-video-ana", 1280, 720)]));
+    assert_eq!(
+        sinks(&fx),
+        vec![("m-share".to_owned(), Some("screen-video-ana".to_owned()))]
+    );
+    let fx = m.handle(Input::Timer(timer));
+    assert!(closes(&fx).is_empty());
+}
+
+#[test]
+fn a_phone_should_not_pull_a_watched_share_its_tiles_leave_out() {
+    // Five watched shares, four shown (the phone's limit): the fifth is not
+    // pulled until a tile shows it.
+    let mut m = joined_with_user();
+    m.handle(phone_show(&[]));
+    let pids = ["ana", "bo", "cy", "di", "ed"];
+    for pid in pids {
+        m.handle(Input::Voice(VoiceEvent::Video {
+            participant_id: pid.into(),
+            tracks: vec![share(pid, &format!("sfu-{pid}-share"))],
+        }));
+    }
+    let fx = m.handle(Input::Command(UserCommand::SetWatched(
+        pids.iter().map(|pid| (*pid).to_owned()).collect(),
+    )));
+    assert!(pulls(&fx).is_empty(), "no tile shows them yet");
+    let shown: Vec<String> = pids[..4]
+        .iter()
+        .map(|pid| format!("screen-video-{pid}"))
+        .collect();
+    let tiles: Vec<(&str, u32, u32)> = shown.iter().map(|k| (k.as_str(), 640, 360)).collect();
+    let fx = m.handle(phone_show(&tiles));
+    let mut pulled = pulls(&fx);
+    pulled.sort();
+    assert_eq!(
+        pulled,
+        [
+            "sfu-ana-share",
+            "sfu-bo-share",
+            "sfu-cy-share",
+            "sfu-di-share"
+        ]
+    );
 }
 
 #[test]
@@ -2388,6 +2471,7 @@ fn shown(alias: &str) -> VideoIntent {
         .collect(),
         stage: None,
         suspended: false,
+        watch_needs_tile: false,
     }
 }
 

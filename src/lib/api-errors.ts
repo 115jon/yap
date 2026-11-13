@@ -16,6 +16,10 @@ import { formatUploadLimit, parseServerLimitBytes } from "@/lib/upload-limits";
  * limit ("Avatar too large (max 8MB)"), and that number is shown so the
  * person knows what will fit. `uploadLimitBytes` (the client's own limit
  * for that kind) stands in when the body names none, e.g. an edge 413.
+ *
+ * A 415 is shown as the server wrote it: only upload routes send one, and
+ * each says which formats it takes or why a file was refused ("This image
+ * format can't be checked for location data. Use JPEG, PNG, WebP or GIF.").
  */
 export function describeApiError(
   error: unknown,
@@ -26,6 +30,8 @@ export function describeApiError(
   // A site switch is off: the server's sentence says what is paused.
   const paused = pausedMessage(error);
   if (paused) return paused;
+  const refused = refusedMediaMessage(error);
+  if (refused) return refused;
   if (status === 401) {
     return `Your session has ended. Sign in again to ${action}.`;
   }
@@ -78,6 +84,17 @@ function errorStatus(error: unknown): number | null {
  * FEATURE_PAUSED, services/site-flags.service.ts), or a suspended account
  * (403 ACCOUNT_SUSPENDED). Both are written for people, not logs.
  */
+/** The `error` sentence of a 415's body, when it had one. */
+function refusedMediaMessage(error: unknown): string | null {
+  if (errorStatus(error) !== 415) return null;
+  const body = (error as { body?: unknown }).body;
+  const sentence =
+    body && typeof body === "object"
+      ? (body as { error?: unknown }).error
+      : undefined;
+  return typeof sentence === "string" && sentence.trim() ? sentence : null;
+}
+
 function pausedMessage(error: unknown): string | null {
   if (!error || typeof error !== "object") return null;
   const { code, message } = error as { code?: unknown; message?: unknown };

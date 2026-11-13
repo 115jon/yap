@@ -33,6 +33,11 @@ import {
 } from "@/lib/upload-limits";
 import { getEntitlement } from "@/services/entitlement.service";
 import { recordR2CleanupFailure } from "@/services/r2-cleanup.service";
+import type { MetadataScan } from "@/lib/upload-metadata";
+import {
+  metadataResponseFields,
+  stripMetadataFromR2Object,
+} from "@/lib/upload-metadata/strip-upload";
 
 export type MultipartRateLimitAction = "create" | "part" | "control";
 
@@ -772,6 +777,36 @@ export function createMultipartUploadHandlers(deps: MultipartUploadDeps) {
       return error("Upload size does not match", 500, "UPLOAD_SIZE_MISMATCH");
     }
 
+    // The parts went to R2 as they came, so location and camera metadata
+    // come out of the assembled object now, before any message can link it.
+    // If that fails the object is not kept: better a retry than a leak.
+    let metadata: MetadataScan | null = null;
+    for (let attempt = 1; attempt <= 2 && !metadata; attempt += 1) {
+      try {
+        metadata = await stripMetadataFromR2Object(
+          bucket,
+          row.file_key,
+          total,
+          {
+            route: "attachment-chunked",
+            userId,
+            channelId,
+            attachmentId: row.attachment_id,
+          },
+        );
+      } catch (err) {
+        logger.error("multipart_metadata_strip_failed", {
+          uploadId: row.id,
+          attempt,
+          error: describe(err),
+        });
+      }
+    }
+    if (!metadata) {
+      await failCleanup("multipart_metadata_strip_failed");
+      return error("Couldn't finish the upload. Try again.", 502);
+    }
+
     const createdAt = new Date(now()).toISOString();
     try {
       await db
@@ -820,6 +855,7 @@ export function createMultipartUploadHandlers(deps: MultipartUploadDeps) {
         file_name: row.filename,
         file_size: total,
         content_type: row.content_type,
+        ...metadataResponseFields(metadata),
       },
       201,
     );

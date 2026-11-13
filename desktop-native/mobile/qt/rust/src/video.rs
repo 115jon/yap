@@ -11,7 +11,10 @@
 //! Limits: cpp/videohub.cpp reports the device's heat, whether its network
 //! is metered and whether the app is in the background
 //! ([`yap_mobile_video_limits`]); [`Limits::phone`] turns those into what
-//! the call may pull.
+//! the call may pull. A watched share is pulled only while a tile shows it
+//! ([`Limits::watch_needs_tile`]): left behind the call page (Back, a
+//! profile over it) or past the tile limit, it is released after the
+//! usual delay and pulled again, still watched, when its tile is back.
 
 use std::ffi::{c_char, c_void};
 
@@ -85,7 +88,10 @@ pub fn install_output() {
 /// whether the app is in the background, each time one changes.
 #[no_mangle]
 pub extern "C" fn yap_mobile_video_limits(thermal: i32, metered: bool, background: bool) {
-    let limits = Limits::phone(thermal, metered, background);
+    let limits = Limits {
+        watch_needs_tile: true,
+        ..Limits::phone(thermal, metered, background)
+    };
     eprintln!(
         "[video] limits: thermal {thermal}, metered {metered}, background {background}: cap {:?}{}",
         limits.cap,
