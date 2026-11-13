@@ -26,7 +26,8 @@ Item {
     property string page: "drawer"
 
     signal profileRequested(string userId)
-    signal settingsRequested()
+    // The drawer's account plate: the account panel grows out of it.
+    signal accountRequested(Item plate)
     signal friendsRequested()
     signal voiceRequested(string channelId)
     signal callRequested()
@@ -69,8 +70,10 @@ Item {
     // flick faster than `fling` (dp/s) decides on its own.
     readonly property real commit: 0.35
     readonly property real fling: 500
-    // The drawer drifts this far under the chat as it closes.
-    readonly property real parallax: 24
+    // The drawer drifts this far under the chat as it closes (its account
+    // plate drops 12 more and fades: DrawerPage.reveal); still under
+    // reduced motion.
+    readonly property real parallax: Theme.reducedMotion ? 0 : 24
 
     function restOf(which) {
         if (wide)
@@ -290,9 +293,10 @@ Item {
         width: pager.drawerWidth
         height: parent.height
         enabled: pager.wide || pager.page === "drawer"
+        reveal: pager.wide ? 1 : Math.max(0, Math.min(1, pager.offset / Math.max(1, pager.drawerWidth)))
         onConversationOpened: pager.show("chat")
         onProfileRequested: userId => pager.profileRequested(userId)
-        onSettingsRequested: pager.settingsRequested()
+        onAccountRequested: plate => pager.accountRequested(plate)
         onFriendsRequested: pager.friendsRequested()
         onVoiceRequested: channelId => pager.voiceRequested(channelId)
         onCallRequested: pager.callRequested()

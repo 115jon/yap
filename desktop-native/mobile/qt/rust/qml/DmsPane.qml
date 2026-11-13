@@ -16,6 +16,9 @@ Item {
     property bool chatHasRows: false
     signal profileRequested(string userId)
     signal friendsRequested()
+    // Room under the last row for what floats over the pane's foot (the
+    // drawer's account plate).
+    property real bottomClear: 8
 
     // A conversation picked in the drawer. The open one picked again is a
     // way back to it, not a reload: the desktop's reselect lays the list
@@ -31,7 +34,7 @@ Item {
         id: list
         anchors.fill: parent
         topMargin: 4
-        bottomMargin: 8
+        bottomMargin: root.bottomClear
         clip: true
         model: DmListModel
 
