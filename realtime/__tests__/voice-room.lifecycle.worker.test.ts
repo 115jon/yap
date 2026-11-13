@@ -70,6 +70,7 @@ async function openVoiceSocket(
   subject = TEST_SUBJECT,
   accessMode: "authenticated" | "public-demo" = "authenticated",
   serverId = accessMode === "authenticated" ? "server-1" : undefined,
+  origin = "https://internal",
 ): Promise<WebSocket> {
   if (accessMode === "authenticated" && serverId) {
     await seedSoundboardMembership(serverId, subject);
@@ -77,7 +78,7 @@ async function openVoiceSocket(
   const roomId = env.VOICE_ROOM.idFromName(roomName);
   const room = env.VOICE_ROOM.get(roomId);
   const response = await room.fetch(
-    `https://internal/api/channels/${roomName}/voice?v=1`,
+    `${origin}/api/channels/${roomName}/voice?v=1`,
     {
       headers: await createAdmissionHeaders(
         roomName,
@@ -3758,7 +3759,15 @@ describe("VoiceRoom lifecycle", () => {
       favicon: "https://station.example.com/artwork.png",
     });
     const participantId = crypto.randomUUID();
-    const socket = await openVoiceSocket(roomName);
+    // Clients reach the DO through the public URL; proxy URLs use its
+    // origin, never the made-up host of an internal stub call.
+    const socket = await openVoiceSocket(
+      roomName,
+      TEST_SUBJECT,
+      "authenticated",
+      "server-1",
+      "https://yap.example.com",
+    );
     await identifyVoiceSocket(socket, participantId, roomName);
 
     const listener = await openVoiceSocket(roomName);
@@ -3808,10 +3817,11 @@ describe("VoiceRoom lifecycle", () => {
               provider: "radio",
               title: "Resolved Radio Station",
               streamUrl: "https://stream.example.com/radio",
-              // The station's favicon reaches listeners through the
-              // signed media proxy, never from the station's host.
+              // The station's favicon reaches listeners through the signed
+              // media proxy on the public origin, never from the station's
+              // host and never on the DO's internal host.
               artworkUrl: expect.stringMatching(
-                /\/api\/proxy-media\?url=https%3A%2F%2Fstation\.example\.com%2Fartwork\.png&sig=[\w-]{22}$/,
+                /^https:\/\/yap\.example\.com\/api\/proxy-media\?url=https%3A%2F%2Fstation\.example\.com%2Fartwork\.png&sig=[\w-]{22}$/,
               ),
               canonicalUrl: "https://station.example.com/",
               sourceLabel: "Live Radio",
@@ -3824,6 +3834,15 @@ describe("VoiceRoom lifecycle", () => {
         ],
       },
     });
+    const { snapshot } = response.d as {
+      snapshot: { queue: Array<{ track: { artworkUrl: string } }> };
+    };
+    const artwork = new URL(snapshot.queue[0]!.track.artworkUrl);
+    expect(artwork.searchParams.get("url")).toBe(
+      "https://station.example.com/artwork.png",
+    );
+    expect(artwork.searchParams.get("sig")).toBeTruthy();
+    expect(JSON.stringify(response.d)).not.toContain("//internal");
 
     socket.close();
     listener.close();

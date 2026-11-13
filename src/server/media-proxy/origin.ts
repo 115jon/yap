@@ -33,15 +33,34 @@ export function withRequestOrigin<T>(request: Request, run: () => T): T {
 /**
  * For Durable Objects, which build payloads outside a Worker request: a
  * client's WebSocket upgrade arrives on the public URL, so its origin is
- * remembered (internal stub calls use made-up hosts and are ignored).
+ * remembered. Internal stub calls use made-up hosts (`https://internal`,
+ * `https://do`) and are ignored, upgrade or not, so a client never gets a
+ * proxy URL on a host it cannot reach.
  */
 export function notePublicOrigin(request: Request): void {
   if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return;
+  const origin = publicOriginOf(request.url);
+  if (origin) lastSeenOrigin = origin;
+}
+
+/**
+ * `rawUrl`'s origin when it can be a client-facing one: http(s) on a dotted
+ * name, an IP literal, or localhost (dev). Single-label names are the
+ * made-up hosts of internal calls.
+ */
+export function publicOriginOf(rawUrl: string): string | null {
+  let url: URL;
   try {
-    lastSeenOrigin = new URL(request.url).origin;
+    url = new URL(rawUrl);
   } catch {
-    // Keep the previous origin.
+    return null;
   }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+  if (!hostname) return null;
+  const dotted = hostname.includes(".") || hostname.startsWith("[");
+  if (!dotted && hostname !== "localhost") return null;
+  return url.origin;
 }
 
 export function currentPublicOrigin(): string {
