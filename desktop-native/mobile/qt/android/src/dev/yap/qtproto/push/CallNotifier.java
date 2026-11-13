@@ -48,6 +48,8 @@ final class CallNotifier {
     static final String ACTION_RING = "dev.yap.call.RING";
     static final String ACTION_ANSWER = "dev.yap.call.ANSWER";
     private static final String ACTIVITY = "dev.yap.qtproto.YapActivity";
+    /** The ringing notification's call, so an Answer for it can be told apart. */
+    private static final String EXTRA_CALL_ID = "dev.yap.call.CALL_ID";
 
     static void ensureChannels(Context context) {
         Uri ringtone = RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_RINGTONE);
@@ -106,6 +108,7 @@ final class CallNotifier {
                 .setAutoCancel(false)
                 .setShowWhen(false)
                 .setTimeoutAfter(call.ringSeconds * 1000L + 5_000L)
+                .addExtras(callExtras(call))
                 .build();
         // The ringtone repeats until the ring is answered or taken down.
         notification.flags |= Notification.FLAG_INSISTENT;
@@ -114,6 +117,27 @@ final class CallNotifier {
         } catch (RuntimeException e) {
             Log.w(TAG, "could not post the incoming call", e);
         }
+    }
+
+    /** This call's ring is up (posted by this process or one let go since). */
+    static boolean isRinging(Context context, IncomingCall call) {
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        if (manager == null) return false;
+        for (StatusBarNotification n : manager.getActiveNotifications()) {
+            Notification shown = n.getNotification();
+            if (n.getId() == ID && call.channelId.equals(n.getTag())
+                    && CHANNEL_RINGING.equals(shown.getChannelId())
+                    && call.callId.equals(shown.extras.getString(EXTRA_CALL_ID))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static android.os.Bundle callExtras(IncomingCall call) {
+        android.os.Bundle extras = new android.os.Bundle();
+        extras.putString(EXTRA_CALL_ID, call.callId);
+        return extras;
     }
 
     static void cancel(Context context, String channelId) {

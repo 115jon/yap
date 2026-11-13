@@ -7,7 +7,9 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
+import android.widget.Toast;
 
 import dev.yap.qtproto.YapActivity;
 import dev.yap.qtproto.voice.VoiceShim;
@@ -17,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.IntConsumer;
 
 /**
  * The DM call ringing this phone (the Expo app's IncomingCalls.kt, without
@@ -33,9 +36,12 @@ import java.util.concurrent.Executors;
  * of the ring (Native.incomingCall), so a ring the core never saw (the app
  * started from the push) still has its sheet.
  *
- * Answer from outside the app tells the server (POST accept, so the caller
- * stops hearing the ring while Qt starts) and hands the call to the QML,
- * which joins it once signed in (Native.callAnswered). Decline tells the
+ * Answer over REST (the notification's, or the app's sheet for a ring the
+ * core never saw) tells the server (POST accept, so the caller stops hearing
+ * the ring while Qt starts) and, only when the server took it, hands the
+ * call to the QML, which joins it once signed in (Native.callAnswered); a
+ * refusal (the caller hung up as it was answered) joins nothing and says
+ * so. Decline tells the
  * server from here. A missed ring (timeout, the caller hung up) becomes a
  * missed-call notification unless it rang in the app. Main thread inside;
  * the entry points may be called from any thread.
@@ -71,8 +77,12 @@ public final class IncomingCalls {
     private static Ring ring;
     /** The ring Qt reads at start (JSON, empty for none). */
     private static volatile String current = "";
-    /** Answered outside the app, until the QML takes it. */
+    /** Answered over REST (the server took it), until the QML takes it. */
     private static IncomingCall answered;
+    /** When `answered` was (elapsedRealtime): a late take finds nothing. */
+    private static long answeredAt;
+    /** Bumped on sign-out: an answer whose POST was in flight then is dropped. */
+    private static int generation;
 
     /** Calls already rung and settled, so a late push or event cannot ring again. */
     private static final Map<String, Long> settled = new LinkedHashMap<>();
@@ -96,11 +106,18 @@ public final class IncomingCalls {
         return current;
     }
 
-    /** The call answered outside the app, once (JSON, empty for none). */
+    /**
+     * The call answered over REST, once (JSON, empty for none). Only for
+     * ANSWERED_JOIN_MS: Qt may still start and sign in by then, and after
+     * it the caller has likely given up.
+     */
     public static synchronized String takeAnswered() {
         IncomingCall call = answered;
         answered = null;
-        return call == null ? "" : call.toJson();
+        long left = ANSWERED_JOIN_MS - (SystemClock.elapsedRealtime() - answeredAt);
+        if (call == null || left <= 0) return "";
+        // The QML waits only what is left of the minute.
+        return call.toJson(left);
     }
 
     // ---- Entry points ----------------------------------------------------------
@@ -147,8 +164,9 @@ public final class IncomingCalls {
 
     /**
      * Answered. `tellServer`: POST accept (the core did not see this ring,
-     * or the gateway may be down). `fromApp`: the app's own sheet, which
-     * joins itself; otherwise the QML hears of it (Native.callAnswered).
+     * or the gateway may be down), and the QML hears of the call
+     * (Native.callAnswered) only once the server took it. `fromApp` without
+     * `tellServer`: the core answers and joins itself.
      */
     public static void answer(Context context, String callId, boolean tellServer, boolean fromApp) {
         Context app = context.getApplicationContext();
@@ -196,18 +214,28 @@ public final class IncomingCalls {
         IncomingCall call = IncomingCall.from(intent);
         if (call == null) return true;
         main.post(() -> {
+            Context app = context.getApplicationContext();
             // Only the ring this process holds: the activity is exported,
             // so another app could send these actions with any extras, and
             // they show the app over the lock screen and answer for the
-            // user. A ring this process no longer holds (it was let go
-            // after posting) just opens the app; its notification ends on
-            // its own (setTimeoutAfter) or with the stop push.
+            // user.
             if (ring == null || !ring.call.callId.equals(call.callId)) {
-                Log.i(TAG, "call intent for a ring not held here: just the app");
+                // The process that posted the ring was let go (killed after
+                // the push), and its notification still rings (insistent).
+                // Its Answer takes it down and tells the server, which
+                // accepts only a call ringing for this user; the call is
+                // joined only if it did. Without that notification up
+                // (another app's intent) it just opens the app.
+                if (answer && !isSettled(call.callId) && CallNotifier.isRinging(app, call)) {
+                    Log.i(TAG, "answer for a ring not held here: by the server's word");
+                    answerOnMain(app, call.callId, call, true, false);
+                } else {
+                    Log.i(TAG, "call intent for a ring not held here: just the app");
+                }
                 return;
             }
             lock(true);
-            if (answer) answerOnMain(context.getApplicationContext(), call.callId, null, true, false);
+            if (answer) answerOnMain(app, call.callId, null, true, false);
         });
         return true;
     }
@@ -219,6 +247,7 @@ public final class IncomingCalls {
             if (ring != null) tearDown(app, ring.call.callId);
             synchronized (IncomingCalls.class) {
                 answered = null;
+                generation++;
             }
             CallNotifier.cancelAll(app);
         });
@@ -266,13 +295,6 @@ public final class IncomingCalls {
         markSettled(callId);
         Ringer.stop();
         CallNotifier.cancel(app, call.channelId);
-        if (tellServer) tellServer(app, callId, "accept", null);
-        if (!fromApp) {
-            synchronized (IncomingCalls.class) {
-                answered = call;
-            }
-            if (running) nativeAnswered(call.toJson());
-        }
         ended(callId);
         // Answered over the lock screen: the app stays over it for the call
         // (VoiceShim says when it ends), or a minute if it never joins.
@@ -280,6 +302,46 @@ public final class IncomingCalls {
             main.removeCallbacks(dropLock);
             main.postDelayed(dropLock, ANSWERED_JOIN_MS);
         }
+        int asked;
+        synchronized (IncomingCalls.class) {
+            asked = generation;
+        }
+        if (tellServer) {
+            // Joined only once the server took the answer: a cancel that
+            // raced it would leave this phone alone in the room, mic open.
+            tellServer(app, callId, "accept", status -> main.post(() -> {
+                if (status >= 200 && status <= 299) {
+                    handOff(call, asked);
+                } else {
+                    refused(app, status);
+                }
+            }));
+        } else if (!fromApp) {
+            handOff(call, asked);
+        }
+    }
+
+    /**
+     * The QML joins it (Native.callAnswered, or takeAnswered once Qt is
+     * up), unless the account signed out since it was answered.
+     */
+    private static void handOff(IncomingCall call, int asked) {
+        synchronized (IncomingCalls.class) {
+            if (asked != generation) return;
+            answered = call;
+            answeredAt = SystemClock.elapsedRealtime();
+        }
+        if (running) nativeAnswered(call.toJson());
+    }
+
+    /** The answer did not take: nothing to join, and the user hears why. */
+    private static void refused(Context app, int status) {
+        // 404: the call no longer rings (cancelled, timed out, answered).
+        String why = status == 404 || status == 409 || status == 410 ? "The call ended before you answered."
+                : status <= 0 ? "Couldn't answer the call. Check your connection."
+                : "Couldn't answer the call.";
+        Toast.makeText(app, why, Toast.LENGTH_LONG).show();
+        if (!VoiceShim.inCall()) lock(false);
     }
 
     private static void finish(Context app, String callId, String reason, IncomingCall caller) {
@@ -321,14 +383,21 @@ public final class IncomingCalls {
     }
 
     private static void tellServer(Context app, String callId, String answer, Runnable then) {
+        tellServer(app, callId, answer, status -> {
+            if (then != null) then.run();
+        });
+    }
+
+    /** POSTs the answer; `then` hears its status (-1: signed out, no answer), off the main thread. */
+    private static void tellServer(Context app, String callId, String answer, IntConsumer then) {
         io.execute(() -> {
+            int status = -1;
             try {
                 PushStore.Session session = PushStore.session(app);
-                if (session == null) return;
-                int status = PushApi.answerCall(session, callId, answer);
+                if (session != null) status = PushApi.answerCall(session, callId, answer);
                 if (status < 200 || status > 299) Log.i(TAG, answer + ": HTTP " + status);
             } finally {
-                if (then != null) then.run();
+                then.accept(status);
             }
         });
     }

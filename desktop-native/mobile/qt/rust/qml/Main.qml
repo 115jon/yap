@@ -216,6 +216,27 @@ Window {
         stack.sheet = false
         stack.push(callPage)
     }
+    // The call page once the stack is still: an answer closes what is on
+    // top first (a profile, a thread, Settings), and that pop animates.
+    property bool callWanted: false
+    function openCallSoon() {
+        if (stack.busy) {
+            callWanted = true
+            return
+        }
+        callWanted = false
+        openCall()
+    }
+    Connections {
+        target: stack
+        function onBusyChanged() {
+            if (stack.busy || !window.callWanted)
+                return
+            window.callWanted = false
+            if (window.ready)
+                window.openCall()
+        }
+    }
     // What a DM call does once the microphone is allowed (joinVoice's
     // channel goes the same way).
     property var afterMicrophone: null
@@ -348,10 +369,11 @@ Window {
                 Native.answerIncoming(ring.callId, false)
                 dmCall.accept(false)
                 window.closeTop(true)
-                window.openCall()
+                window.openCallSoon()
             } else {
+                // Over REST: the shim hands the call back (callAnswered)
+                // only once the server took the answer, and says so if not.
                 Native.answerIncoming(ring.callId, true)
-                window.joinAnswered(ring)
             }
         }, () => {
             // No microphone, no call: the ring is declined, and the
@@ -371,14 +393,46 @@ Window {
             dmCall.decline()
     }
 
-    // A call answered outside the app (its notification, the lock screen)
-    // or over REST: open its DM and join its call once the DM is the open
-    // one (the core knows it then; a cold start's list may still load).
+    // A call answered over REST (its notification, the lock screen, or the
+    // sheet for a ring the core never saw), which the server took: open its
+    // DM and join its call once the DM is the open one and the core sees
+    // the call there (a cold start's list may still load). The join waits
+    // a minute at most (IncomingCalls.ANSWERED_JOIN_MS), and not past
+    // another conversation opening or a sign-out: the microphone goes live
+    // only for the call just answered.
     property string answeredChannel: ""
     property string answeredCaller: ""
+    property string answeredCallId: ""
+    // The conversation open when its DM was asked for (the core's answer
+    // comes later): any other one opening before the DM is the user's.
+    property string answeredFrom: ""
+    property bool answeredOpening: false
+    // Its DM was the open one: leaving it is the user's too.
+    property bool answeredSeen: false
+    Timer {
+        id: answeredTimer
+        interval: 60000
+        onTriggered: window.dropAnswered()
+    }
+    function dropAnswered() {
+        answeredTimer.stop()
+        answeredChannel = ""
+        answeredCaller = ""
+        answeredCallId = ""
+        answeredFrom = ""
+        answeredOpening = false
+        answeredSeen = false
+    }
     function joinAnswered(call) {
-        answeredChannel = call.channelId ?? ""
+        dropAnswered()
+        if ((call.channelId ?? "").length === 0)
+            return
+        answeredChannel = call.channelId
         answeredCaller = call.callerId ?? ""
+        answeredCallId = call.callId ?? ""
+        // What is left of the shim's minute (a cold start took some).
+        answeredTimer.interval = Math.max(1, Math.min(60000, call.leftMs ?? 60000))
+        answeredTimer.restart()
         if (ready)
             openAnswered()
     }
@@ -387,29 +441,59 @@ Window {
             return
         closeTop(true)
         const channelId = answeredChannel
+        answeredFrom = Nav.activeChannelId
+        answeredOpening = true
         openUnseen(() => Nav.openChannel(channelId, ""))
         if (answeredCaller.length > 0)
             pager.showDmWhenOpen(answeredCaller)
         Qt.callLater(joinWhenOpen)
     }
+    // The answered call still rings or goes on in its DM, as the core sees
+    // it: that ring itself, or the DM's call area (someone in its call).
+    // Another ring in the DM is a new call: joining it would answer it.
+    function answeredLive(channelId, callId) {
+        if (dmCall.callChannelId === channelId && dmCall.callId.length > 0 && dmCall.status !== "idle")
+            return dmCall.callId === callId && (dmCall.status === "ringing_incoming" || dmCall.status === "active")
+        return Nav.activeChannelId === channelId && dmCall.shown
+    }
     function joinWhenOpen() {
-        if (!ready || answeredChannel.length === 0 || Nav.activeChannelId !== answeredChannel)
+        if (!ready || answeredChannel.length === 0)
+            return
+        const open = Nav.activeChannelId
+        if (open !== answeredChannel) {
+            if (answeredOpening && open.length > 0 && (answeredSeen || open !== answeredFrom))
+                dropAnswered()
+            return
+        }
+        answeredSeen = true
+        // Not (yet) in the core's view: the view's next change asks again,
+        // until the timer gives up.
+        if (!answeredLive(answeredChannel, answeredCallId))
             return
         const channelId = answeredChannel
-        answeredChannel = ""
-        answeredCaller = ""
+        const callId = answeredCallId
+        dropAnswered()
         withMicrophone(() => {
+            // Still there after the system's question.
+            if (Nav.activeChannelId !== channelId || !window.answeredLive(channelId, callId))
+                return
             Calls.join(channelId, false)
-            window.openCall()
+            window.openCallSoon()
         })
     }
     Connections {
         target: Nav
         function onActiveChannelIdChanged() { window.joinWhenOpen() }
     }
+    Connections {
+        target: dmCall
+        function onShownChanged() { window.joinWhenOpen() }
+        function onStatusChanged() { window.joinWhenOpen() }
+    }
     function takeAnswered() {
         const call = Native.takeAnsweredCall()
-        if ((call.callId ?? "").length === 0)
+        // Signed out: the answer went with the account.
+        if ((call.callId ?? "").length === 0 || Session.phase === Session.SignedOut || Session.phase === Session.DeviceCode)
             return
         handledRing = call.callId
         joinAnswered(call)
@@ -468,6 +552,8 @@ Window {
             openAnswered()
             return
         }
+        dropAnswered()
+        callWanted = false
         stack.pop(null, StackView.Immediate)
         pager.snap()
         if (Session.phase === Session.SignedOut)

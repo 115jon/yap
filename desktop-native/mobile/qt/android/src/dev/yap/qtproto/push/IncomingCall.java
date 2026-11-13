@@ -100,14 +100,20 @@ final class IncomingCall {
 
     /** For the QML (Native.incomingCall). */
     String toJson() {
+        return toJson(-1);
+    }
+
+    /** For the QML; `leftMs` (when not negative): how long it may still join. */
+    String toJson(long leftMs) {
         try {
-            return new JSONObject()
+            JSONObject o = new JSONObject()
                     .put(KEY_CALL_ID, callId)
                     .put(KEY_CHANNEL_ID, channelId)
                     .put(KEY_CALLER_ID, callerId)
                     .put(KEY_CALLER_NAME, callerName)
-                    .put(KEY_CALLER_AVATAR, callerAvatar == null ? "" : callerAvatar)
-                    .toString();
+                    .put(KEY_CALLER_AVATAR, callerAvatar == null ? "" : callerAvatar);
+            if (leftMs >= 0) o.put("leftMs", leftMs);
+            return o.toString();
         } catch (JSONException e) {
             return "{}";
         }
