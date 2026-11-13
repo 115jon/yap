@@ -24,6 +24,7 @@ import {
   pruneProfileActivity,
   recordCallSession,
   recordGameSession,
+  recordListenSession,
   recordServerJoin,
 } from "../../src/services/profile-activity.service";
 import {
@@ -75,6 +76,7 @@ beforeAll(async () => {
   await ensureColumn("users", "display_name", "TEXT");
   await ensureColumn("users", "avatar_url", "TEXT");
   await ensureColumn("users", "share_activity", "INTEGER NOT NULL DEFAULT 1");
+  await ensureColumn("users", "status", "TEXT DEFAULT 'online'");
 });
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
@@ -128,6 +130,35 @@ async function setPlan(
     )
     .bind(userId, tier, expiresAt)
     .run();
+}
+
+async function befriend(a: string, b: string) {
+  for (const [userId, targetId] of [
+    [a, b],
+    [b, a],
+  ]) {
+    await db
+      .prepare(
+        `INSERT INTO relationships (user_id, target_user_id, type) VALUES (?, ?, 0)`,
+      )
+      .bind(userId, targetId)
+      .run();
+  }
+}
+
+async function addDm(id: string, members: string[]) {
+  await db
+    .prepare(
+      `INSERT INTO channels (id, server_id, name, channel_type) VALUES (?, NULL, 'dm', 'dm')`,
+    )
+    .bind(id)
+    .run();
+  for (const member of members) {
+    await db
+      .prepare(`INSERT INTO dm_recipients (channel_id, user_id) VALUES (?, ?)`)
+      .bind(id, member)
+      .run();
+  }
 }
 
 async function block(userId: string, targetId: string) {
@@ -790,6 +821,52 @@ describe("activity writes", () => {
     });
   });
 
+  it("records nothing while invisible or not sharing activity", async () => {
+    const hidden = await addUser(`act-${tag()}`);
+    const quiet = await addUser(`act-${tag()}`);
+    await db
+      .prepare(`UPDATE users SET status = 'offline' WHERE id = ?`)
+      .bind(hidden)
+      .run();
+    await db
+      .prepare(`UPDATE users SET share_activity = 0 WHERE id = ?`)
+      .bind(quiet)
+      .run();
+    const server = `srv-${tag()}`;
+    await addServer(server, hidden, [hidden, quiet]);
+    const channel = `vc-${tag()}`;
+    await addChannel(channel, server, "Lounge");
+
+    for (const userId of [hidden, quiet]) {
+      const call = {
+        userId,
+        sessionKey: `s:${tag()}`,
+        channelId: channel,
+        startedAt: NOW - 3_600_000,
+        endedAt: NOW,
+      };
+      await recordCallSession(db, "voice", call);
+      await recordCallSession(db, "stream", { ...call, sessionKey: "s:2" });
+      await recordListenSession(db, {
+        ...call,
+        sessionKey: "s:3",
+        tracks: 10,
+      });
+      await recordGameSession(db, {
+        userId,
+        name: "Deadlock",
+        startedAt: NOW - 3_600_000,
+        endedAt: NOW,
+      });
+      expect(await events(userId)).toEqual([]);
+      const rollup = await db
+        .prepare(`SELECT COUNT(*) AS n FROM game_sessions WHERE user_id = ?`)
+        .bind(userId)
+        .first<{ n: number }>();
+      expect(rollup?.n).toBe(0);
+    }
+  });
+
   it("records badges from every award path once", async () => {
     const user = await addUser(`act-${tag()}`);
     await awardBadge(
@@ -924,6 +1001,7 @@ describe("activity privacy", () => {
   it("hides hidden kinds and events from others, not from the owner", async () => {
     const owner = await addUser(`priv-${tag()}`);
     const viewer = await addUser(`viewer-${tag()}`);
+    await addServer(`srv-${tag()}`, owner, [owner, viewer]);
     await insertEvent(owner, "game", 1, { name: "Deadlock" });
     await insertEvent(owner, "server_join", 2, { server_name: "Cozy" });
     const hiddenId = await insertEvent(owner, "badge", 3);
@@ -969,7 +1047,9 @@ describe("activity privacy", () => {
   it("names a call's channel only to viewers in that server", async () => {
     const owner = await addUser(`priv-${tag()}`);
     const member = await addUser(`member-${tag()}`);
+    // A friend outside the server: in the audience, not in the server.
     const outsider = await addUser(`outsider-${tag()}`);
+    await befriend(owner, outsider);
     const server = `srv-${tag()}`;
     await addServer(server, owner, [owner, member]);
     await insertEvent(owner, "voice", 1, {
@@ -999,6 +1079,65 @@ describe("activity privacy", () => {
     expect(second.next_cursor).toBeNull();
     const games = (await activity(owner, owner, "?kind=game")).body;
     expect(games.events.every((event) => event.kind === "game")).toBe(true);
+  });
+
+  it("shows the timeline only to the owner's presence audience", async () => {
+    const owner = await addUser(`aud-${tag()}`);
+    const member = await addUser(`member-${tag()}`);
+    const friend = await addUser(`friend-${tag()}`);
+    const dmPartner = await addUser(`dm-${tag()}`);
+    const stranger = await addUser(`stranger-${tag()}`);
+    await addServer(`srv-${tag()}`, owner, [owner, member]);
+    await befriend(owner, friend);
+    await addDm(`dm-${tag()}`, [owner, dmPartner]);
+    await insertEvent(owner, "game", 1, { name: "Deadlock" });
+
+    for (const viewer of [member, friend, dmPartner]) {
+      const seen = await activity(owner, viewer);
+      expect(seen.status).toBe(200);
+      expect(seen.body.events.map((event) => event.kind)).toEqual(["game"]);
+    }
+    const strangers = await activity(owner, stranger);
+    expect(strangers.status).toBe(200);
+    expect(strangers.body).toEqual({
+      events: [],
+      next_cursor: null,
+      is_owner: false,
+    });
+  });
+
+  it("keeps calls outside a server to the owner", async () => {
+    const owner = await addUser(`dmcall-${tag()}`);
+    const friend = await addUser(`friend-${tag()}`);
+    await befriend(owner, friend);
+    const dm = `dm-${tag()}`;
+    await addDm(dm, [owner, friend]);
+    const call = {
+      userId: owner,
+      sessionKey: `s:${tag()}`,
+      channelId: dm,
+      startedAt: NOW - 3_600_000,
+      endedAt: NOW,
+    };
+    await recordCallSession(db, "voice", call);
+    await recordCallSession(db, "stream", { ...call, sessionKey: "s:2" });
+    await recordListenSession(db, {
+      ...call,
+      sessionKey: "s:3",
+      tracks: 10,
+      topTrack: "Song",
+    });
+    await insertEvent(owner, "game", 2, { name: "Deadlock" });
+
+    const mine = (await activity(owner, owner)).body;
+    expect(mine.events.map((event) => event.kind).sort()).toEqual([
+      "game",
+      "listen",
+      "stream",
+      "voice",
+    ]);
+    const theirs = (await activity(owner, friend)).body;
+    expect(theirs.events.map((event) => event.kind)).toEqual(["game"]);
   });
 
   it("refuses the timeline to anyone either side blocked", async () => {
