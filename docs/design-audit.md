@@ -12,7 +12,7 @@ drawer internals are kept for the record but marked **superseded**; re-run the
 audit on those four areas after the next screenshot pass rather than planning
 work from them.
 
-Screenshots: `C:\Users\jon\AppData\Local\Temp\ds-audit\<view>-<width>-<theme>.png`
+Screenshots: `%TEMP%\ds-audit\<view>-<width>-<theme>.png`
 (widths 390 / 768 / 1280, themes dark / light, 2x DPR; 390 and 768 captured
 with touch emulation so `pointer: coarse` matched). `diag-summary.txt` in the
 same folder lists, per capture, horizontal overflow and every interactive
@@ -480,7 +480,7 @@ report). Supersession tags added where a merged branch replaced the code.
 
 > Superseded: SH-20 (drawer focus ring) and SH-51 (search pill) — `ui/drawer` and `ui/search` are merged; re-check.
 
-Scope: shell, shell-empty, shell-dm, no-channel, mobile, mobile-sidebar, mobile-home-{servers,messages,notifications,you (tab bar only)}, menus (ContextMenu + InviteModal), drawer, action-sheet. Rules are cited from `docs/design-system.md`. Paths are relative to `F:\dev\TS\CLOUDFLARE\ralph-meet-quietpro\src\components\`. Screenshots are 2x DPR, so every px value below is CSS px.
+Scope: shell, shell-empty, shell-dm, no-channel, mobile, mobile-sidebar, mobile-home-{servers,messages,notifications,you (tab bar only)}, menus (ContextMenu + InviteModal), drawer, action-sheet. Rules are cited from `docs/design-system.md`. Paths are relative to `<quietpro-worktree>\src\components\`. Screenshots are 2x DPR, so every px value below is CSS px.
 
 **Capture failures (re-run before trusting the scores):**
 
@@ -1207,7 +1207,7 @@ Screen measurements are in CSS px. The design-system checker finds **201 issues 
 
 ### Voice and calls (VC)
 
-Root: `F:\dev\TS\CLOUDFLARE\ralph-meet-quietpro\`. All paths below are relative to that root. Rules cite `docs/design-system.md`. Screenshots are in `C:\Users\jon\AppData\Local\Temp\ds-audit\`. The PNGs are 2x, so every px value here is CSS px.
+Root: `<quietpro-worktree>\`. All paths below are relative to that root. Rules cite `docs/design-system.md`. Screenshots are in `%TEMP%\ds-audit\`. The PNGs are 2x, so every px value here is CSS px.
 
 #### Inventory
 
@@ -1503,7 +1503,7 @@ Root: `F:\dev\TS\CLOUDFLARE\ralph-meet-quietpro\`. All paths below are relative 
 
 ### Settings (ST)
 
-Paths are relative to `F:\dev\TS\CLOUDFLARE\ralph-meet-quietpro\src\components\` unless they start with `src/` or `docs/`. Rule numbers refer to `docs/design-system.md`. Regex counts come from that audit script.
+Paths are relative to `<quietpro-worktree>\src\components\` unless they start with `src/` or `docs/`. Rule numbers refer to `docs/design-system.md`. Regex counts come from that audit script.
 
 **Screenshot capture failures (shoot these again):**
 
@@ -2065,7 +2065,7 @@ The reachable part is the `asModal` editor. It is the worst file in the repo by 
 
 ### Auth and public pages (AU)
 
-Paths below are relative to `F:\dev\TS\CLOUDFLARE\ralph-meet-quietpro\src\`. Rule numbers refer to `docs/design-system.md`. Screenshots are in `C:\Users\jon\AppData\Local\Temp\ds-audit\`. The dev-tools widget is ignored.
+Paths below are relative to `<quietpro-worktree>\src\`. Rule numbers refer to `docs/design-system.md`. Screenshots are in `%TEMP%\ds-audit\`. The dev-tools widget is ignored.
 
 **Theme note:** every "-light" screenshot renders in dark (sign-in, sign-up, activate, invite, home 1280). The pages do not follow `prefers-color-scheme` (see AU-05). In practice the dark/light pairs are two dark captures, so light, miku and spiderman were checked from code only.
 
@@ -2246,7 +2246,7 @@ Paths below are relative to `F:\dev\TS\CLOUDFLARE\ralph-meet-quietpro\src\`. Rul
 
 Paths are relative to the repo root. "Fixture" is yes only for surfaces captured in this pass; rows marked no† have an unlisted `UiFixtures` surface (search, command menu).
 
-Worktree: `F:/dev/TS/CLOUDFLARE/ralph-meet-quietpro` (read only). Component paths are absolute and point at the root JSX `return` (or the `createPortal(` call) of the view or state. "Phone form" is the layout below `md` (768px). Phone "n/a" means the trigger isn't rendered below `md` (for example, the desktop UserPanel is `hidden md:flex`).
+Worktree: `<quietpro-worktree>` (read only). Component paths are absolute and point at the root JSX `return` (or the `createPortal(` call) of the view or state. "Phone form" is the layout below `md` (768px). Phone "n/a" means the trigger isn't rendered below `md` (for example, the desktop UserPanel is `hidden md:flex`).
 
 Column rules:
 

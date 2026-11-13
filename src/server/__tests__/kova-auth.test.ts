@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AuthUnavailable, Unauthenticated } from "@/server/errors";
 import {
+  appSessionCredentials,
   authenticate,
   KovaAuth,
+  signedInIdentity,
   type Credentials,
   type KovaOptions,
 } from "@/server/kova-auth";
@@ -40,7 +42,6 @@ function fakeKova(...answers: Array<Response | Error | "hang">) {
 const cookieOnly: Credentials = {
   authorization: null,
   cookie: "kova.session=abc",
-  queryToken: null,
 };
 
 function run(credentials: Credentials, kova: ReturnType<typeof fakeKova>) {
@@ -60,7 +61,6 @@ describe("KovaAuth.lookup", () => {
       {
         authorization: "Bearer t1",
         cookie: "kova.session=abc",
-        queryToken: null,
       },
       kova,
     );
@@ -77,10 +77,7 @@ describe("KovaAuth.lookup", () => {
 
   it("is Unauthenticated without asking Kova when there are no credentials", async () => {
     const kova = fakeKova(Response.json(SIGNED_IN));
-    const result = await run(
-      { authorization: null, cookie: null, queryToken: null },
-      kova,
-    );
+    const result = await run({ authorization: null, cookie: null }, kova);
 
     expect(result.ok).toBe(false);
     expect(!result.ok && result.error).toBeInstanceOf(Unauthenticated);
@@ -131,7 +128,7 @@ describe("authenticate", () => {
   it("tries the bearer token alone when the request headers find no session", async () => {
     const kova = fakeKova(Response.json(null), Response.json(SIGNED_IN));
     const result = await run(
-      { authorization: "Bearer desktop", cookie: "stale=1", queryToken: null },
+      { authorization: "Bearer desktop", cookie: "stale=1" },
       kova,
     );
 
@@ -142,17 +139,27 @@ describe("authenticate", () => {
     });
   });
 
-  it("uses ?token= when there is no bearer header", async () => {
-    const kova = fakeKova(Response.json(null), Response.json(SIGNED_IN));
-    const result = await run(
-      { authorization: null, cookie: "stale=1", queryToken: "from-query" },
-      kova,
+  it("never reads a session token from the query string", async () => {
+    const kova = fakeKova(Response.json(SIGNED_IN));
+    const request = new Request(
+      "https://yap.test/api/users/me?token=from-query",
+    );
+    const result = await Effect.runPromise(
+      signedInIdentity(request).pipe(
+        Effect.map((identity) => ({ ok: true as const, identity })),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
+        Effect.provide(kova.layer),
+      ),
     );
 
-    expect(result.ok).toBe(true);
-    expect(kova.calls[1].headers.get("authorization")).toBe(
-      "Bearer from-query",
-    );
+    expect(!result.ok && result.error).toBeInstanceOf(Unauthenticated);
+    for (const call of kova.calls) {
+      expect(call.headers.get("authorization")).toBeNull();
+    }
+    expect(appSessionCredentials(request)).toEqual({
+      authorization: null,
+      cookie: null,
+    });
   });
 
   it("stays AuthUnavailable when Kova was down for the headers and says no to the token", async () => {
@@ -161,7 +168,7 @@ describe("authenticate", () => {
       Response.json(null),
     );
     const result = await run(
-      { authorization: "Bearer desktop", cookie: null, queryToken: null },
+      { authorization: "Bearer desktop", cookie: null },
       kova,
     );
 
@@ -171,7 +178,7 @@ describe("authenticate", () => {
   it("is AuthUnavailable when only the token check cannot reach Kova", async () => {
     const kova = fakeKova(Response.json(null), new TypeError("fetch failed"));
     const result = await run(
-      { authorization: "Bearer desktop", cookie: null, queryToken: null },
+      { authorization: "Bearer desktop", cookie: null },
       kova,
     );
 
@@ -181,7 +188,7 @@ describe("authenticate", () => {
   it("is Unauthenticated when both checks say no", async () => {
     const kova = fakeKova(Response.json(null));
     const result = await run(
-      { authorization: "Bearer desktop", cookie: null, queryToken: null },
+      { authorization: "Bearer desktop", cookie: null },
       kova,
     );
 

@@ -86,7 +86,7 @@ on visibility brought idle to 0.03 %.
 
 ### What resonance gives us
 
-- Static Qt **6.6.3** at `F:\Files\Downloads\qt\src\6.6.3`:
+- Static Qt **6.6.3** at `<downloads>\qt\src\6.6.3`:
   - MSVC 19.43, `-static -static-runtime`, so `/MT`;
   - OpenSSL is loaded at runtime, not linked. Schannel and OpenSSL TLS
     backends are both built as static plugins.
@@ -267,7 +267,7 @@ citations. In short:
 | build libwebrtc from source (C++) | yes                                                           | yes                  | yes                           | yes               | hours of builds and about 20 GB |
 
 The existing Rust `native_share.rs` (desktop screen share) and the RNNoise
-work (`F:\dev\C++\JUCE\noise-suppression-for-voice`) can be reused.
+work (a local `noise-suppression-for-voice` checkout) can be reused.
 
 ## 4. Scope to parity (one engineer, rough)
 

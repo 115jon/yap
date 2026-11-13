@@ -6,10 +6,12 @@
 // (the user typed past it). A URL still being typed at the end of the field
 // is left alone, so `https://youtu` never reaches the server. Each URL is
 // asked for once per session. Failures are ignored: the send path resolves
-// the embed as before.
+// the embed as before. Links that look like they carry a credential (magic
+// links, resets, signed URLs; looksPrivateLink) are never prefetched: fetching
+// one could spend it before the user decides to send it.
 
 import { apiPost } from "@/lib/api-client";
-import { matchEmbedUrls } from "@/lib/embed-urls";
+import { looksPrivateLink, matchEmbedUrls } from "@/lib/embed-urls";
 
 /** How long typing must pause before a finished URL is prefetched. */
 export const EMBED_PREFETCH_DEBOUNCE_MS = 350;
@@ -35,6 +37,7 @@ export function findPrefetchableUrls(
       // Typed past: whitespace somewhere after it (`(link). ` counts).
       .filter(({ end }) => options.pasted || /\s/.test(text.slice(end)))
       .map(({ url }) => url)
+      .filter((url) => !looksPrivateLink(url))
   );
 }
 

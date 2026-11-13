@@ -28,6 +28,10 @@ vi.mock("@/lib/api-helpers", () => ({
   requireAuth: mocks.requireAuth,
 }));
 
+vi.mock("@/lib/media-auth", () => ({
+  requireMediaAuth: mocks.requireAuth,
+}));
+
 vi.mock("@/lib/cache", () => ({
   CacheKey: { serverSoundboard: (serverId: string) => serverId },
   cacheDel: mocks.cacheDel,
@@ -192,6 +196,25 @@ describe("soundboard upload GET", () => {
       "attachments/channel-1/sound-1/airhorn.mp3",
       { range: { offset: 8, length: 4 } },
     );
+  });
+
+  it("sends a media capability (m1) through media auth, not the DM capability check", async () => {
+    mocks.requireAuth.mockResolvedValue(
+      Response.json({ error: "Unauthorized" }, { status: 401 }),
+    );
+    const bucket = { head: vi.fn(), get: vi.fn() };
+    mocks.getBucket.mockReturnValue(bucket);
+
+    const response = await GET({
+      request: new Request(
+        "https://meet.test/api/soundboard/uploads/sound-1?cap=m1.dXNlcg.1.sig",
+      ),
+      params: { id: "sound-1" },
+    });
+
+    expect(mocks.requireAuth).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(401);
+    expect(bucket.head).not.toHaveBeenCalled();
   });
 
   it("rejects an invalid soundboard media capability before reading R2", async () => {

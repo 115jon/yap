@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
 
+import { issueMediaGrant } from "@/lib/media-capability";
+import {
+  resetMediaGrantForTests,
+  seedMediaGrantForTests,
+} from "@/lib/media-grant";
 import type { ListenTogetherStateSnapshot } from "@/lib/listen-together";
 import { useListenTogetherStore } from "@/stores/useListenTogetherStore";
 import { useListenTogetherAudioSettingsStore } from "@/stores/useListenTogetherAudioSettingsStore";
@@ -139,12 +144,17 @@ describe("VoiceListenTogetherManager", () => {
     vi.unstubAllGlobals();
     useListenTogetherStore.setState({ rooms: {} });
     localStorage.clear();
+    resetMediaGrantForTests();
     delete (window as typeof window & { __TAURI_INTERNALS__?: unknown })
       .__TAURI_INTERNALS__;
   });
 
-  it("refreshes the audio stream src when the desktop auth token changes", async () => {
+  it("signs the stream URL and keeps the playing track when the grant is refreshed", async () => {
     const sfu = makeSfu();
+    seedMediaGrantForTests(
+      issueMediaGrant("test-secret", "user-1", Date.now()),
+      "desktop-token-1",
+    );
 
     render(
       <VoiceListenTogetherManager
@@ -154,23 +164,25 @@ describe("VoiceListenTogetherManager", () => {
       />,
     );
 
+    let firstSrc = "";
     await waitFor(() => {
       expect(MockAudio.instances).toHaveLength(2);
-      expect(MockAudio.instances[0]?.src).toContain("token=desktop-token-1");
+      firstSrc = MockAudio.instances[0]?.src ?? "";
+      expect(firstSrc).toContain("cap=m1.");
     });
+    expect(firstSrc).not.toContain("token=");
 
     act(() => {
-      localStorage.setItem("desktop_auth_token", "desktop-token-2");
-      window.dispatchEvent(
-        new CustomEvent("ralphmeet:desktop-token-change", {
-          detail: "desktop-token-2",
-        }),
+      // A refresh issued in a later hour: a new key and expiry.
+      seedMediaGrantForTests(
+        issueMediaGrant("test-secret", "user-1", Date.now() + 3 * 3600_000),
+        "desktop-token-1",
       );
     });
 
-    await waitFor(() => {
-      expect(MockAudio.instances[0]?.src).toContain("token=desktop-token-2");
-    });
+    // A fresh capability alone does not reload the track mid-song.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(MockAudio.instances[0]?.src).toBe(firstSrc);
   });
 
   it("uses anonymous CORS mode for music tracks to enable audio processing", async () => {

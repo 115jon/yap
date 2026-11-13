@@ -38,7 +38,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$PresentMon = "C:\Users\jon\scoop\apps\rtss\7.3.7\Plugins\Client\PresentMonDataProvider\PresentMon-2.3.1-x64.exe"
+$PresentMon = "$env:USERPROFILE\scoop\apps\rtss\7.3.7\Plugins\Client\PresentMonDataProvider\PresentMon-2.3.1-x64.exe"
 if (-not (Test-Path $PresentMon)) {
     $found = Get-ChildItem "$env:USERPROFILE\scoop\apps" -Recurse -Filter "PresentMon-2*.exe" -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notmatch "DLSS" } | Select-Object -First 1

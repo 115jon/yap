@@ -1,10 +1,6 @@
-import {
-  apiError,
-  getBucket,
-  getDB,
-  getEnv,
-  requireAuth,
-} from "@/lib/api-helpers";
+import { apiError, getBucket, getDB, getEnv } from "@/lib/api-helpers";
+import { requireMediaAuth } from "@/lib/media-auth";
+import { isMediaCap } from "@/lib/media-capability";
 import {
   getR2ObjectRangeBounds,
   resolveR2ByteRangeHeader,
@@ -34,7 +30,9 @@ const GET = async ({
     content_type: string;
   } | null;
 
-  if (capabilityToken !== null) {
+  // A DM call's soundboard capability (sbm1); a media capability (m1) or
+  // the session goes through requireMediaAuth below.
+  if (capabilityToken !== null && !isMediaCap(capabilityToken)) {
     const env = getEnv() as CloudflareEnv & {
       REALTIME_TICKET_SECRET?: string;
     };
@@ -78,7 +76,7 @@ const GET = async ({
         content_type: string;
       }>();
   } else {
-    const authResult = await requireAuth(request);
+    const authResult = await requireMediaAuth(request);
     if (authResult instanceof Response) return authResult;
 
     attachment = await getDB()

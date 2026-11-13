@@ -1,12 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import {
-  apiError,
-  getBucket,
-  getCorsHeaders,
-  getDB,
-  requireAuth,
-} from "@/lib/api-helpers";
+import { apiError, getBucket, getCorsHeaders, getDB } from "@/lib/api-helpers";
+import { requireMediaAuth } from "@/lib/media-auth";
 import { getVoiceStatusMediaAssetById } from "@/services/voice-status-media.service";
 
 const DANGEROUS_CONTENT_TYPES = new Set([
@@ -26,7 +21,7 @@ function parseAssetId(params: { _splat?: string } | undefined): string | null {
 }
 
 const GET = async ({ request, params }: any) => {
-  const authResult = await requireAuth(request);
+  const authResult = await requireMediaAuth(request);
   if (authResult instanceof Response) return authResult;
   const { userId } = authResult;
 

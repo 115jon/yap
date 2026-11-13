@@ -77,6 +77,18 @@ describe("extractEmbedUrls", () => {
     ]);
   });
 
+  it("gives no embed to a URL in angle brackets", () => {
+    expect(
+      extractEmbedUrls("<https://quiet.test/a> but https://loud.test/b"),
+    ).toEqual(["https://loud.test/b"]);
+    // The bracket closes the URL as typed, before punctuation is trimmed.
+    expect(extractEmbedUrls("<https://quiet.test/file_>")).toEqual([]);
+    // A lone bracket on one side does not suppress it.
+    expect(extractEmbedUrls("<https://half.test/a")).toEqual([
+      "https://half.test/a",
+    ]);
+  });
+
   it("takes the URL out of a markdown link", () => {
     expect(extractEmbedUrls("[docs](https://docs.test/page)")).toEqual([
       "https://docs.test/page",

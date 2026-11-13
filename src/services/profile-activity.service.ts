@@ -9,9 +9,15 @@
  * never write it twice. Like the stats writes, they run beside the change
  * that caused them (waitUntil) and a failure is logged, never thrown.
  *
- * Reads filter for the viewer: the owner sees everything; others never see
- * hidden events or kinds, and voice and stream events lose the channel and
- * server names when the viewer is not in that server.
+ * Nothing is written while the user is invisible (status 'offline' while
+ * connected) or has "Share my activity" off (users.share_activity = 0), as
+ * of when the session ends: the writes check the users row (RECORDS_ACTIVITY).
+ *
+ * Reads filter for the viewer: the owner sees everything. Others must be in
+ * the owner's presence audience (a shared server, a friendship or a DM, as
+ * game activity on presence; inPresenceAudience), never see hidden events or
+ * kinds or calls outside a server (DM calls), and voice and stream events
+ * lose the channel and server names when the viewer is not in that server.
  */
 
 import type {
@@ -35,6 +41,13 @@ import {
 import { getProfilePrefs } from "@/services/profile-prefs.service";
 
 const DAY_MS = 86_400_000;
+
+/**
+ * The users row `u` lets the timeline record: "Share my activity" on and not
+ * invisible (a chosen status of 'offline').
+ */
+const RECORDS_ACTIVITY =
+  "u.share_activity != 0 AND COALESCE(u.status, 'online') != 'offline'";
 
 function iso(at: number | Date): string {
   return (typeof at === "number" ? new Date(at) : at).toISOString();
@@ -100,20 +113,22 @@ export function gameSessionStatements(
     db
       .prepare(
         `INSERT INTO game_sessions (user_id, day, game_key, name, icon_url, seconds, sessions)
-         SELECT ?, ?, ?, ?, ?, ?, 1
-         WHERE NOT EXISTS (SELECT 1 FROM profile_activity WHERE id = ?)
+         SELECT u.id, ?, ?, ?, ?, ?, 1 FROM users u
+         WHERE u.id = ? AND ${RECORDS_ACTIVITY}
+           AND NOT EXISTS (SELECT 1 FROM profile_activity WHERE id = ?)
          ON CONFLICT(user_id, day, game_key) DO UPDATE SET
            seconds = game_sessions.seconds + excluded.seconds,
            sessions = game_sessions.sessions + 1,
            name = excluded.name,
            icon_url = COALESCE(excluded.icon_url, game_sessions.icon_url)`,
       )
-      .bind(input.userId, endedIso.slice(0, 10), key, name, icon, capped, id),
+      .bind(endedIso.slice(0, 10), key, name, icon, capped, input.userId, id),
     db
       .prepare(
         `INSERT OR IGNORE INTO profile_activity
            (id, user_id, kind, ref, data, started_at, ended_at, seconds)
-         SELECT ?, id, 'game', ?, ?, ?, ?, ? FROM users WHERE id = ?`,
+         SELECT ?, u.id, 'game', ?, ?, ?, ?, ? FROM users u
+         WHERE u.id = ? AND ${RECORDS_ACTIVITY}`,
       )
       .bind(
         id,
@@ -175,7 +190,7 @@ function callStatement(
        FROM users u
        LEFT JOIN channels c ON c.id = ?
        LEFT JOIN servers s ON s.id = c.server_id
-       WHERE u.id = ?`,
+       WHERE u.id = ? AND ${RECORDS_ACTIVITY}`,
     )
     .bind(
       id,
@@ -243,7 +258,7 @@ export function listenSessionStatements(
          FROM users u
          LEFT JOIN channels c ON c.id = ?
          LEFT JOIN servers s ON s.id = c.server_id
-         WHERE u.id = ?`,
+         WHERE u.id = ? AND ${RECORDS_ACTIVITY}`,
       )
       .bind(
         id,
@@ -428,6 +443,39 @@ export function decodeActivityCursor(
   }
 }
 
+/**
+ * Whether `viewerId` is in `ownerId`'s presence audience: they share a
+ * server, a friendship or a DM, as for game activity on presence
+ * (realtime/meeting-room/game-activity.ts AUDIENCE_QUERIES). A DM counts
+ * only once the owner has written in it: anyone can open a DM with anyone,
+ * so an empty one would let a stranger in.
+ */
+export async function inPresenceAudience(
+  db: D1Database,
+  ownerId: string,
+  viewerId: string,
+): Promise<boolean> {
+  if (ownerId === viewerId) return true;
+  const row = await db
+    .prepare(
+      `SELECT 1 AS shared WHERE
+         EXISTS (SELECT 1 FROM server_members mine
+                   JOIN server_members other ON other.server_id = mine.server_id
+                  WHERE mine.user_id = ? AND other.user_id = ?)
+         OR EXISTS (SELECT 1 FROM relationships
+                     WHERE user_id = ? AND target_user_id = ? AND type = 0)
+         OR EXISTS (SELECT 1 FROM dm_recipients mine
+                      JOIN dm_recipients other ON other.channel_id = mine.channel_id
+                     WHERE mine.user_id = ? AND other.user_id = ?
+                       AND EXISTS (SELECT 1 FROM messages m
+                                    WHERE m.channel_id = mine.channel_id
+                                      AND m.author_id = mine.user_id))`,
+    )
+    .bind(ownerId, viewerId, ownerId, viewerId, ownerId, viewerId)
+    .first<{ shared: number }>();
+  return row?.shared === 1;
+}
+
 /** Servers among `serverIds` that `viewerId` is a member of. */
 async function viewerServers(
   db: D1Database,
@@ -474,7 +522,7 @@ export interface ListActivityInput {
 /**
  * One page of `ownerId`'s timeline as `viewerId` may see it, newest first.
  * Events past the owner's retention are left out even before the cron
- * deletes them.
+ * deletes them. Callers check the presence audience (inPresenceAudience).
  */
 export async function listProfileActivity(
   db: D1Database,
@@ -494,6 +542,10 @@ export async function listProfileActivity(
   ];
   if (!isOwner) {
     where.push("hidden = 0");
+    // Calls outside a server (DM and group DM calls) are the owner's alone.
+    where.push(
+      "NOT (kind IN ('voice', 'stream', 'listen') AND json_extract(data, '$.server_id') IS NULL)",
+    );
     if (settings.hidden_kinds.length > 0) {
       where.push(
         `kind NOT IN (${settings.hidden_kinds.map(() => "?").join(",")})`,

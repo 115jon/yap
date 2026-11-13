@@ -4,7 +4,7 @@ This pass measures the native client against the Tauri desktop app and
 against its own video-phase numbers. It then fixes the hot spots in this
 order: idle CPU, memory, scroll jank and startup.
 
-- Base: the tree at 6dae4cc8, rebuilt in `F:/ct/yapn/rel` (the exe there
+- Base: the tree at 6dae4cc8, rebuilt in `<scratch>/yapn/rel` (the exe there
   was older than HEAD).
 - After: the same tree with the fixes below (build "fix5").
 - Machine: the user's PC with an RTX 3080 and three 1080p60 monitors,
@@ -18,7 +18,7 @@ account.
 
 ### Tools
 
-The tools live in `F:/ct/yapn/tools`. Every script that stops a process
+The tools live in `<scratch>/yapn/tools`. Every script that stops a process
 does so by PID, and only a process it started.
 
 | tool                         | what it measures                                                                                                                                                                                                                                                           |
@@ -363,7 +363,7 @@ final build of this pass. Same machine and method as pass 1.
   `QSG_RENDER_TIMING=1` for the render rate.
 - Scroll: the render thread's `syncAndRender: start, elapsed since last
 call` intervals, inside the two wheel windows only (the pause between
-  them is left out). Scripts: `F:/ct/yapn/tools/p2/` (`idle.ps1`,
+  them is left out). Scripts: `<scratch>/yapn/tools/p2/` (`idle.ps1`,
   `scroll.ps1`, `popups.ps1`, `spike.ps1`, `linkflags.ps1`, `hover.ps1`).
 - The displays were checked awake (59 Hz vblank) for the CPU samples. One
   earlier sample (0.65 %) was taken with them asleep and is not used.
@@ -598,10 +598,10 @@ build.
 # In-call video (batch N6b, 2026-11-06)
 
 Hardware H.264 for shares and camera backgrounds. Before is the build of
-a9a54bd1 (kept as `F:/ct/yapn/n6b-before`), after is this batch's; same
+a9a54bd1 (kept as `<scratch>/yapn/n6b-before`), after is this batch's; same
 machine (Ryzen 9 7900X, RTX 3080, driver 32.0.16.1047), `--profile spike` on
 the owner test account in General (Native Spike Lab), the peer test account
-in headless Edge (`F:/ct/yapn/run/n6b/peer-n6b.mjs`: fake media, a 1920x1080
+in headless Edge (`<scratch>/yapn/run/n6b/peer-n6b.mjs`: fake media, a 1920x1080
 canvas share, `getStats` every 5 s). CPU is the whole process over 15-20 s
 (`tools/measure-native.ps1 -Mode sample -TargetPid`), in % of one core.
 Shares are of `share-test-window.ps1` windows only (`YAP_SHARE_ONLY_OURS`).
@@ -668,8 +668,8 @@ This pass works on the brief's five targets:
 5. a 1440p60 share number.
 
 Before is e1985388 (the 0.2.1 build); after is the final build of this pass
-(`F:/ct/yapn/tmp/p3-final.exe`). Both were built from the `native/perf3`
-worktree into `F:/ct/yapn/rel-perf`.
+(`<scratch>/yapn/tmp/p3-final.exe`). Both were built from the `native/perf3`
+worktree into `<scratch>/yapn/rel-perf`.
 
 ## Conditions
 
@@ -678,7 +678,7 @@ worktree into `F:/ct/yapn/rel-perf`.
   depends on frame pacing could be measured honestly: scroll timing,
   animated idle CPU or a 60 fps share. See the targets below.
 - **Another agent was using the owner test account for most of the
-  session.** A `--profile spike` process from `F:/ct/yapn/run/sweep7` was
+  session.** A `--profile spike` process from `<scratch>/yapn/run/sweep7` was
   running, and at 03:41 the sidebar showed a voice session as the owner, so
   my session was stopped at once. Memory was therefore measured in two
   ways:
@@ -728,7 +728,7 @@ The tools:
 - **`YAP_FIXTURE_ICON=<url>`** and **`YAP_FIXTURE_GIF=<url>`**
   (`fixture.rs`) add a server icon (a GIF one animates) and two GIF
   attachments to the fixture. They take local `file://` URLs
-  (`F:/ct/yapn/tmp/anim`), giving an animated scene without an account.
+  (`<scratch>/yapn/tmp/anim`), giving an animated scene without an account.
 
 ## Where the idle memory goes
 
@@ -991,9 +991,9 @@ custom Qt and Rust `opt-level = "s"` in real calls, focused animated idle
 under 3 %, idle memory towards 120 MB, hardware video decode, and a 1440p60
 share number.
 
-Before is the pass 3 build (59acb1e5, `F:/ct/yapn/tmp/p4/soak0.exe`); after
-is this pass's final build (`F:/ct/yapn/tmp/p4/final.exe`). For the Qt and
-opt-level A/B, `F:/ct/yapn/rel-base4` is this pass's source built with the
+Before is the pass 3 build (59acb1e5, `<scratch>/yapn/tmp/p4/soak0.exe`); after
+is this pass's final build (`<scratch>/yapn/tmp/p4/final.exe`). For the Qt and
+opt-level A/B, `<scratch>/yapn/rel-base4` is this pass's source built with the
 stock static Qt 6.6.3 and Rust at opt-level 3
 (`CARGO_PROFILE_RELEASE_OPT_LEVEL=3`).
 
@@ -1044,7 +1044,7 @@ stock static Qt 6.6.3 and Rust at opt-level 3
   - `YAP_NULL_SPEAKER=1` now also silences the UI sounds (`sound.rs`). The
     first soak smoke test played the message sound through the real
     speakers and raised real toasts; these two switches cover both.
-- **Tools** (`F:/ct/yapn/tools/p4/`):
+- **Tools** (`<scratch>/yapn/tools/p4/`):
   - `soak.ps1`: a soak run with counters every minute, a Settings
     open/close and a scroll every 4 min, and optional heap dumps;
   - `ab-soak.ps1`: two exes side by side on the soak;
@@ -1057,7 +1057,7 @@ stock static Qt 6.6.3 and Rust at opt-level 3
     and `cam-cpu.ps1`: the owner account on profile `perf`, the headless
     web peer with a camera, and posted clicks to our window only;
   - `cpu.ps1`, and `build.ps1` (a pass build into any build dir);
-  - `F:/ct/yapn/tools/p4-sampler.ps1`: read-only counters by PID.
+  - `<scratch>/yapn/tools/p4-sampler.ps1`: read-only counters by PID.
 - **Profile names are lowercase only** (`profile.cpp`); an invalid one
   falls back to the default profile.
   - One A/B run used `perf4ab-A` and wrote three files of the default
@@ -1318,9 +1318,9 @@ The brief, in order:
 5. hardware decode for watched shares;
 6. a 1440p60 share number.
 
-Before is 04c8d8e5 built on the custom Qt 6.6.3 (`F:/ct/yapn/tmp/p5/before.exe`,
+Before is 04c8d8e5 built on the custom Qt 6.6.3 (`<scratch>/yapn/tmp/p5/before.exe`,
 63,847,424 B). After is this pass's final build on the custom Qt 6.11.3
-(`F:/ct/yapn/tmp/p5/c7.exe`, 59,124,224 B). Both were built from the
+(`<scratch>/yapn/tmp/p5/c7.exe`, 59,124,224 B). Both were built from the
 `native/perf3` worktree.
 
 ## Conditions
@@ -1347,7 +1347,7 @@ Before is 04c8d8e5 built on the custom Qt 6.6.3 (`F:/ct/yapn/tmp/p5/before.exe`,
 
 ## Method (new)
 
-Tools are in `F:/ct/yapn/tools/p5/`:
+Tools are in `<scratch>/yapn/tools/p5/`:
 
 - `build.ps1`: the pass build with a link map, VS 2022;
 - `anim-idle.ps1`: pass 4's, on profile `perf5`; it now waits for the
@@ -1378,7 +1378,7 @@ The share and watch runs used two of our instances: the owner on profile
 
 ## 1. Qt 6.11.3, the default
 
-- **`build.ps1`** now uses `F:/ct/qt-custom-6.11/6.11.3-yap` and refuses to
+- **`build.ps1`** now uses `<scratch>/qt-custom-6.11/6.11.3-yap` and refuses to
   run without a Qt 6.11. It also takes Visual Studio 2022 explicitly, the
   MSVC Qt is built with: Qt's libraries are link-time code (`-ltcg`), and
   LTCG cannot mix two compiler versions. The newest Visual Studio here is
@@ -1649,9 +1649,9 @@ The brief, in order:
 The coordinator added a sixth: the startup cost of making all QML
 bytecode-only in pass 5.
 
-Before is pass 5's final build (`F:/ct/yapn/tmp/p6/before`, the same
+Before is pass 5's final build (`<scratch>/yapn/tmp/p6/before`, the same
 binary as `tmp/p5/c7.exe`, 59,124,224 B). After is this pass's final build
-(`F:/ct/yapn/tmp/p6/final`). Intermediate builds, all from the `native/perf3`
+(`<scratch>/yapn/tmp/p6/final`). Intermediate builds, all from the `native/perf3`
 worktree:
 
 | build | what it adds                                                                      |
@@ -1671,7 +1671,7 @@ worktree:
   another agent's builds (`link.exe` at ~1.8 cores) ran for part of it. CPU
   numbers are compared only within interleaved runs.
 - **The other agent's session.** At 14:02 a `--profile spike` session from
-  `F:/ct/yapn/run/sweep10` was running; nothing of mine started until it had
+  `<scratch>/yapn/run/sweep10` was running; nothing of mine started until it had
   ended. The pass 6 tools refuse to start while another agent's YapNative or
   node peer runs (`tools/p6/app.ps1`; pass 5's copy carried a tab character
   in its own path and so matched nothing of its own).
@@ -1682,7 +1682,7 @@ worktree:
 
 ## Method (new)
 
-Tools are in `F:/ct/yapn/tools/p6/`:
+Tools are in `<scratch>/yapn/tools/p6/`:
 
 - `owner.ps1`: the owner on profile `perf6` sharing the synthetic source
   (`YAP_FAKE_SHARE_SOURCE`) at 1440p60 or 1080p60, by posted clicks;
@@ -2080,9 +2080,9 @@ The coordinator added a sixth: a Qt rebuild with UI pass 11's DirectWrite
 contrast patch (§6).
 
 Before is c4e8c212 with the one-line `view.rs` fix that spike/qt-desktop
-also carries (`F:/ct/yapn/tmp/p7/before/`, 59,525,120 B). The other builds
+also carries (`<scratch>/yapn/tmp/p7/before/`, 59,525,120 B). The other builds
 are from the `native/perf3` worktree, on the pass 6 Qt
-(`F:/ct/qt-custom-6.11p6`) unless noted:
+(`<scratch>/qt-custom-6.11p6`) unless noted:
 
 | build   | what it adds                                                                                |
 | ------- | ------------------------------------------------------------------------------------------- |
@@ -2110,7 +2110,7 @@ are from the `native/perf3` worktree, on the pass 6 Qt
 
 ## Method (new)
 
-Tools are in `F:/ct/yapn/tools/p7/`, copied from p6 with paths and profiles
+Tools are in `<scratch>/yapn/tools/p7/`, copied from p6 with paths and profiles
 moved to `tmp/p7` and `perf7`:
 
 - `idle.ps1`: idle memory on `-Fixture chat-10k` or `soak`. Soak is the
@@ -2384,7 +2384,7 @@ Paced animated idle, 40 s runs, the builds interleaved over three rounds:
 ## 5. CI
 
 LIBRARIES.md §13.3 has the steps. Nothing was uploaded. The archive to pack
-is now `F:/ct/qt-custom-6.11p7/6.11.3-yap` (§6).
+is now `<scratch>/qt-custom-6.11p7/6.11.3-yap` (§6).
 
 ## 6. Qt rebuild with DirectWrite's enhanced contrast
 
@@ -2393,9 +2393,9 @@ UI pass 11 wrote `patches/qt/6.11.3/0005-directwrite-enhanced-contrast.patch`
 system's enhanced-contrast curve to DirectWrite's glyph coverage, as
 Direct2D and Chromium do (LIBRARIES.md §13.3).
 
-- **Built** with `build-qt.ps1 -Root F:/ct/qt-custom-6.11p7 -Clean`:
+- **Built** with `build-qt.ps1 -Root <scratch>/qt-custom-6.11p7 -Clean`:
   `0001`-`0005` on the 6.11.3 source zip, into
-  `F:/ct/qt-custom-6.11p7/6.11.3-yap`. `F:/ct/qt-custom-6.11` and `-6.11p6`
+  `<scratch>/qt-custom-6.11p7/6.11.3-yap`. `<scratch>/qt-custom-6.11` and `-6.11p6`
   were not touched.
 - **The patches applied in full.** `0005` is a plain diff. `0001`, `0002`
   and `0004` carry `diff --git` headers, but the source is extracted outside
@@ -2486,14 +2486,14 @@ measures how heavy light-on-dark glyphs are:
 ## Build, tests, clippy
 
 - Builds: `tools/p7/build.ps1`, which is `build.ps1` with a link map, into
-  `F:/ct/yapn/rel-perf` (logs `F:/ct/yapn/build-perf7-1..5.log`; all exit 0).
-  `Qt6_DIR` is `F:/ct/qt-custom-6.11p7/6.11.3-yap/lib/cmake/Qt6` after build 5.
-- Qt: `F:/ct/yapn/qt-p7-build.log` (exit 0).
-- Tests (`CARGO_TARGET_DIR=F:/ct/yapn/check-perf`, `LK_CUSTOM_WEBRTC` as
+  `<scratch>/yapn/rel-perf` (logs `<scratch>/yapn/build-perf7-1..5.log`; all exit 0).
+  `Qt6_DIR` is `<scratch>/qt-custom-6.11p7/6.11.3-yap/lib/cmake/Qt6` after build 5.
+- Qt: `<scratch>/yapn/qt-p7-build.log` (exit 0).
+- Tests (`CARGO_TARGET_DIR=<scratch>/yapn/check-perf`, `LK_CUSTOM_WEBRTC` as
   `build.ps1` sets it): the workspace without `yap_native`, plus `yap-audio`
-  on its own. 1,464 passed, 0 failed, on the pass 6 Qt and again on the p7 Qt (`F:/ct/yapn/test-perf7.log`).
+  on its own. 1,464 passed, 0 failed, on the pass 6 Qt and again on the p7 Qt (`<scratch>/yapn/test-perf7.log`).
 - `cargo clippy --workspace --all-targets -- -D warnings`, with QMAKE at the
-  p7 Qt: exit 0, no warnings (`F:/ct/yapn/clippy-perf7.log`).
+  p7 Qt: exit 0, no warnings (`<scratch>/yapn/clippy-perf7.log`).
 
 ## Files
 
@@ -2526,7 +2526,7 @@ Source (worktree `native/perf3`):
   - `patches/vendor.ps1`: its comment.
 - Docs: this section, and LIBRARIES.md §12.1, §13.1 and §13.3.
 
-Tools (outside the repo, `F:/ct/yapn/tools/p7/`): `idle.ps1`,
+Tools (outside the repo, `<scratch>/yapn/tools/p7/`): `idle.ps1`,
 `etlstacks.py`, `mft-probe.ps1`, `cam.ps1`, `share-test-window.ps1`,
 `wgc-start.ps1`, `text-shot.ps1`, `textcmp.py`, `web-shot.mjs` (with `--dpr`),
 and the p6 copies (`app.ps1`, `owner.ps1`, `watch.ps1`, `leave.ps1`,
@@ -2631,7 +2631,7 @@ file.md.mp4`, so HD first). A KLIPY still or an `sm`/`md` mp4 as a
   `yap_anim_decode`'s `max_frames`, `decode_frames` (with a test).
 - `cpp/main.cpp`: media counts in the `YAP_DEBUG_ANIMATIONS` dump.
 
-Tools (outside the repo, `F:/ct/yapn/tmp/clips/`): `launch.ps1`,
+Tools (outside the repo, `<scratch>/yapn/tmp/clips/`): `launch.ps1`,
 `nav.ps1`, `tap.ps1`, `measure.ps1`, `scroll.ps1`, `hover2.ps1`,
 `test.ps1`.
 
@@ -2643,7 +2643,7 @@ it in `cpp/` with no Qt patch and no new Qt build.
 
 ## Method
 
-Tools are in `F:/ct/yapn/tools/rs/`:
+Tools are in `<scratch>/yapn/tools/rs/`:
 
 - `rsprobe.exe` (`rsprobe.cpp`): resizes **our** window by PID with
   `SetWindowPos`, wrapped in `WM_ENTERSIZEMOVE` / `WM_EXITSIZEMOVE` as a
@@ -2771,11 +2771,11 @@ Qt's own switch.
   the edge, and a step is half as long. One step is what DWM itself
   allows: the new bounds are composed a frame before the content drawn for
   them.
-- **Captures:** `F:/ct/yapn/tmp/resize/captures/before-thumb.png` shows the
+- **Captures:** `<scratch>/yapn/tmp/resize/captures/before-thumb.png` shows the
   black strips along the right and bottom edges, about 16 px wide.
   `after-thumb.png` has none.
 - **Raw data:** per-run frames, steps and saved frames are in
-  `F:/ct/yapn/tmp/resize/run-*` and `thumb-*`.
+  `<scratch>/yapn/tmp/resize/run-*` and `thumb-*`.
 
 Idle and scroll, same machine, interleaved:
 
@@ -2823,11 +2823,11 @@ accounts, and the cost per step here is presentation, not layout.
 Checks:
 
 - `cargo test --workspace --exclude yap_native --exclude yap-audio` and
-  `cargo test -p yap-audio` (`CARGO_TARGET_DIR=F:/ct/yapn/check-resize`,
+  `cargo test -p yap-audio` (`CARGO_TARGET_DIR=<scratch>/yapn/check-resize`,
   `LK_CUSTOM_WEBRTC` as `build.ps1` sets it): all passed
-  (`F:/ct/yapn/test-resize.log`).
+  (`<scratch>/yapn/test-resize.log`).
 - `cargo clippy --workspace --all-targets -- -D warnings`: exit 0
-  (`F:/ct/yapn/clippy-resize.log`).
+  (`<scratch>/yapn/clippy-resize.log`).
 
 ## Files
 
@@ -2843,7 +2843,7 @@ Source (worktree `native/resize`):
 - `CMakeLists.txt`: links `comctl32`.
 - Docs: this section, and LIBRARIES.md §13.3 (the swapchain note).
 
-Tools (outside the repo, `F:/ct/yapn/tools/rs/`): `rsprobe.cpp` and
+Tools (outside the repo, `<scratch>/yapn/tools/rs/`): `rsprobe.cpp` and
 `rsprobe.exe`, `sweep.ps1`, `thumb.ps1`, `app.ps1`, `build.ps1` (with
 `/MAP`), `test.ps1`, `anim-idle.ps1`, `static-idle.ps1` and `scroll.ps1`.
 
@@ -2854,7 +2854,7 @@ switching channels and servers").
 
 ## Method
 
-- Build: `F:/ct/yapn/rel-cache` (worktree `native/cache`), profile `spike`
+- Build: `<scratch>/yapn/rel-cache` (worktree `native/cache`), profile `spike`
   (the test owner) in "Native Spike Lab", whose #general holds 18 messages
   with a YouTube card and #cache-test (made for the run, 3 messages,
   deleted after) holds 3.
@@ -2952,7 +2952,7 @@ from the offline measurement only.
   at 1080p60 into a call in Native Spike Lab, NVENC. Process CPU over
   25 s after 25 s of settling (`share-run.ps1` in `tmp/hdr`), and
   `YAP_CAPTURE_TIMING=1` for per-frame GPU and CPU time. "Before" is the
-  spike build at 9cabefd9 (`F:/ct/yapn/rel`), whose capture and voice code
+  spike build at 9cabefd9 (`<scratch>/yapn/rel`), whose capture and voice code
   is this branch's base.
 - The machine was shared with other agents' builds and VMs (total CPU at
   96 % during one run), so the push time (the I420 conversion and hand-off
@@ -3131,12 +3131,12 @@ each. Only the call's own stream reached the canceller's far end.
 
 ## Build, tests, clippy
 
-- `build.ps1 -BuildDir F:/ct/yapn/rel-audio`: exit 0 (`build-audio-7.log`).
+- `build.ps1 -BuildDir <scratch>/yapn/rel-audio`: exit 0 (`build-audio-7.log`).
   The live runs used build 6. Build 7 adds one fix: the player's thread
   stays awake until its last events and the meter's final 0 are sent.
 - `cargo test --workspace --exclude yap_native --exclude yap-audio`:
   2131 passed, 0 failed. `cargo test -p yap-audio`: 100 passed, 0 failed
-  (`CARGO_TARGET_DIR=F:/ct/yapn/check-audio`, `LK_CUSTOM_WEBRTC` set).
+  (`CARGO_TARGET_DIR=<scratch>/yapn/check-audio`, `LK_CUSTOM_WEBRTC` set).
 - `cargo clippy --workspace --all-targets -- -D warnings` (`QMAKE` set):
   exit 0.
 
@@ -3421,8 +3421,8 @@ late frame.
 
 ## Build, tests, clippy
 
-The checks used `QMAKE` at `F:/ct/qt-custom-6.11p8`, `LK_CUSTOM_WEBRTC` and
-`--target-dir F:/ct/yapn/check-gifdeps`. Logs are in `F:/ct/yapn/`.
+The checks used `QMAKE` at `<scratch>/qt-custom-6.11p8`, `LK_CUSTOM_WEBRTC` and
+`--target-dir <scratch>/yapn/check-gifdeps`. Logs are in `<scratch>/yapn/`.
 
 - **Tests**: the workspace without `yap_native` and `yap-audio` passed
   2,116 with 0 failed (`test-gifdeps-2.log`). `yap-audio` on its own
@@ -3432,7 +3432,7 @@ The checks used `QMAKE` at `F:/ct/qt-custom-6.11p8`, `LK_CUSTOM_WEBRTC` and
   this change.
 - **Clippy**: `cargo clippy --workspace --all-targets -- -D warnings`
   exited 0 with no warnings (`clippy-gifdeps-3.log`).
-- **Builds**: `build.ps1 -BuildDir F:/ct/yapn/rel-gifdeps` exited 0 five
+- **Builds**: `build.ps1 -BuildDir <scratch>/yapn/rel-gifdeps` exited 0 five
   times (`build-gifdeps-1..5.log`). Build 2 added `/MAP` for LIBRARIES.md
   §18.3. The exe is 58.6 MB.
 - **The final build** (round-robin worker, the frame-size guard, rest when

@@ -7,8 +7,8 @@ All paths are relative to the repo root. `file:N` means a line number. **UNVERIF
 Visual references:
 
 - The dev-only `/ui-fixtures?surface=<id>&theme=<theme>` route (`src/routes/ui-fixtures.tsx:7-20`) renders every surface with mocked data. The dispatch is in `src/components/dev/UiFixtures.tsx`.
-- The full surface matrix is in `C:\Users\jon\.cache\ralph-shots\jobs.json`: 289 frames, six themes, 1440x900 and 1280x720. Its capture harness is `capture.mjs` in the same folder. No capture PNGs of the fixture matrix were kept on disk.
-- Stills that do exist: `F:\ct\brand\yap\shots\yap-02-chat.png`, `yap-04-chat-dark.png`, `yap-06-coldload.png`, `yap-08-desktop.png` and `yap-26-signin-frames.png`; themed marks in `F:\ct\brand\yap\themed\*.png`; marketing screenshots in `public/screenshots/home/{chat,tree,voice,share,share-stage,soundboard,listen}-{dark,light}.webp`; and `C:\Users\jon\.cache\ralph-shots\perf\desktop-prod\signin-{a,b,c}.png`.
+- The full surface matrix is in `%USERPROFILE%\.cache\ralph-shots\jobs.json`: 289 frames, six themes, 1440x900 and 1280x720. Its capture harness is `capture.mjs` in the same folder. No capture PNGs of the fixture matrix were kept on disk.
+- Stills that do exist: `<scratch>\brand\yap\shots\yap-02-chat.png`, `yap-04-chat-dark.png`, `yap-06-coldload.png`, `yap-08-desktop.png` and `yap-26-signin-frames.png`; themed marks in `<scratch>\brand\yap\themed\*.png`; marketing screenshots in `public/screenshots/home/{chat,tree,voice,share,share-stage,soundboard,listen}-{dark,light}.webp`; and `%USERPROFILE%\.cache\ralph-shots\perf\desktop-prod\signin-{a,b,c}.png`.
 - The component kit picks are at `/ui-fixtures?surface=component-kit` (`src/components/dev/component-kit-mockups.tsx`, DESIGN.md:241).
 
 ---

@@ -28,6 +28,8 @@
 
 #include "native.h"
 #include "rustnetwork.h"
+#include "videohub.h"
+#include "videoitem.h"
 #include "yap_ui.h"
 
 extern "C" void yap_mobile_init(const char* data_dir, const char* device_name);
@@ -77,13 +79,18 @@ int main(int argc, char* argv[])
   // The mobile side of the shared QML's seams (Yap.Ui imports
   // Yap.Platform): this app's own files, under the names the shared QML
   // uses. The desktop registers its own.
-  for (const char* name : { "EmbedCard", "MessageMedia", "NameplateLayer", "VoiceStatusLine", "VoiceStreamHoverCard" })
+  for (const char* name :
+       { "EmbedCard", "MessageMedia", "NameplateLayer", "VideoSurface", "VoiceStatusLine", "VoiceStreamHoverCard" })
     qmlRegisterType(QUrl(QStringLiteral("qrc:/qt/qml/com/yap/mobile/qml/seams/%1.qml").arg(QLatin1String(name))),
                     "Yap.Platform", 1, 0, name);
   auto* shell = new MobileShell(&app);
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "DesktopShell", shell);
   auto* native = new Native(&app);
   qmlRegisterSingletonInstance("Yap.Mobile", 1, 0, "Native", native);
+  // Call video (seams/VideoSurface.qml draws with it). The hub is made here,
+  // on the GUI thread, before a call's media thread can ask for it.
+  VideoHub::instance();
+  qmlRegisterType<VideoView>("Yap.Mobile", 1, 0, "VideoView");
 
   QQmlApplicationEngine engine;
   // Network pictures over the core's rustls client, with a disk cache in

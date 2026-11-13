@@ -15,6 +15,10 @@ vi.mock("@/lib/api-helpers", () => ({
   requireAuth: mocks.requireAuth,
 }));
 
+vi.mock("@/lib/media-auth", () => ({
+  requireMediaAuth: mocks.requireAuth,
+}));
+
 vi.mock("@/lib/require-channel-access", () => ({
   requireChannelAccess: mocks.requireChannelAccess,
 }));

@@ -1367,6 +1367,7 @@ fn show(tiles: &[(&str, u32, u32)], stage: Option<&str>) -> Input {
             })
             .collect(),
         stage: stage.map(str::to_owned),
+        suspended: false,
     }))
 }
 
@@ -1608,6 +1609,102 @@ fn unwatching_a_share_should_hide_it_and_keep_its_pull() {
         sends(&fx, Socket::Voice)[0]["d"]["type"],
         "stream.watch.stop"
     );
+}
+
+/// A watched share shown in a tile, pulled on `m-share`.
+fn watching_a_share() -> CallMachine {
+    let mut m = joined_with_user();
+    m.handle(Input::Voice(VoiceEvent::Video {
+        participant_id: "ana".into(),
+        tracks: vec![share("ana", "sfu-ana-share")],
+    }));
+    m.handle(Input::Command(UserCommand::SetWatched(
+        ["ana".to_owned()].into(),
+    )));
+    m.handle(show(&[("screen-video-ana", 1280, 720)], None));
+    m.handle(done("sfu-ana-share", "m-share"));
+    m
+}
+
+fn suspended() -> Input {
+    Input::Command(UserCommand::SetVideo(VideoIntent {
+        suspended: true,
+        ..VideoIntent::default()
+    }))
+}
+
+fn share_release_timer(fx: &[Effect]) -> Option<Timer> {
+    fx.iter().find_map(|e| match e {
+        Effect::ArmTimer {
+            timer: timer @ Timer::ReleaseVideo { track, .. },
+            ..
+        } if track == "screen-video-ana" => Some(timer.clone()),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_suspended_host_should_release_a_watched_share_and_keep_it_watched() {
+    let mut m = watching_a_share();
+    let fx = m.handle(suspended());
+    assert_eq!(sinks(&fx), vec![("m-share".to_owned(), None)]);
+    assert!(
+        sends(&fx, Socket::Voice).is_empty(),
+        "still watched: no stream.watch.stop"
+    );
+    let timer = share_release_timer(&fx).expect("a release timer for the share");
+    let fx = m.handle(Input::Timer(timer));
+    assert_eq!(closes(&fx), vec![vec!["m-share".to_owned()]]);
+}
+
+#[test]
+fn a_host_back_from_suspension_should_pull_a_watched_share_again() {
+    let mut m = watching_a_share();
+    let fx = m.handle(suspended());
+    let timer = share_release_timer(&fx).expect("a release timer for the share");
+    m.handle(Input::Timer(timer));
+
+    // Back in the foreground: the share is still watched, so it is pulled
+    // again (afresh) without a new SetWatched.
+    let fx = m.handle(show(&[("screen-video-ana", 1280, 720)], None));
+    assert_eq!(pulls(&fx), vec!["sfu-ana-share"]);
+    let fresh: Vec<bool> = fx
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Pull(r) => Some(r.fresh),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fresh, vec![true]);
+    assert!(sends(&fx, Socket::Voice).is_empty(), "no new watch.start");
+    let fx = m.handle(done("sfu-ana-share", "m-share-2"));
+    assert_eq!(
+        sinks(&fx),
+        vec![("m-share-2".to_owned(), Some("screen-video-ana".to_owned()))]
+    );
+}
+
+#[test]
+fn a_host_back_before_the_delay_should_keep_the_share_pull() {
+    let mut m = watching_a_share();
+    let fx = m.handle(suspended());
+    let timer = share_release_timer(&fx).expect("a release timer for the share");
+    m.handle(show(&[("screen-video-ana", 1280, 720)], None));
+    let fx = m.handle(Input::Timer(timer));
+    assert!(closes(&fx).is_empty());
+}
+
+#[test]
+fn a_watched_share_nothing_shows_should_stay_pulled_unsuspended() {
+    // The desktop's default: Watch pulls the share whether or not a tile
+    // shows it right now, and the intent is never suspended.
+    let mut m = watching_a_share();
+    let fx = m.handle(Input::Command(
+        UserCommand::SetVideo(VideoIntent::default()),
+    ));
+    assert!(!VideoIntent::default().suspended);
+    assert!(share_release_timer(&fx).is_none());
+    assert!(closes(&fx).is_empty());
 }
 
 #[test]
@@ -2290,6 +2387,7 @@ fn shown(alias: &str) -> VideoIntent {
         .into_iter()
         .collect(),
         stage: None,
+        suspended: false,
     }
 }
 

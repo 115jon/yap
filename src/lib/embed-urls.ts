@@ -36,6 +36,11 @@ export interface EmbedUrlMatch {
   end: number;
 }
 
+/** A URL written as `<https://...>`: linked, but asked for no embed. */
+function isSuppressed(text: string, start: number, end: number): boolean {
+  return text[start - 1] === "<" && text[end] === ">";
+}
+
 /** {@link extractEmbedUrls} with where each URL ends in `content`. */
 export function matchEmbedUrls(
   content: string,
@@ -50,6 +55,9 @@ export function matchEmbedUrls(
   const seen = new Set<string>();
   for (const match of withoutCode.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
     const candidate = trimUnbalancedClosers(match[0]);
+    const start = match.index ?? 0;
+    // The bracket closes what was matched, before any trimming.
+    if (isSuppressed(withoutCode, start, start + match[0].length)) continue;
     let normalized: string;
     try {
       const parsed = new URL(candidate);
@@ -61,10 +69,7 @@ export function matchEmbedUrls(
     // Keep what the user typed, dedupe on the parsed form.
     if (seen.has(normalized)) continue;
     seen.add(normalized);
-    matches.push({
-      url: candidate,
-      end: (match.index ?? 0) + candidate.length,
-    });
+    matches.push({ url: candidate, end: start + candidate.length });
     if (matches.length >= limit) break;
   }
   return matches;
@@ -75,11 +80,63 @@ export function matchEmbedUrls(
  * linkifies (MarkdownRenderer): trailing punctuation and an unbalanced closing
  * bracket are not part of the URL (`(see https://a.b/c).` -> `https://a.b/c`),
  * and URLs inside inline code or code blocks are not linkified so they get no
- * embed either.
+ * embed either. A URL in angle brackets (`<https://a.b/c>`) asks for no embed.
  */
 export function extractEmbedUrls(
   content: string,
   limit = MAX_EMBEDS_PER_MESSAGE,
 ): string[] {
   return matchEmbedUrls(content, limit).map((match) => match.url);
+}
+
+// ── Links not to fetch before they are sent ─────────────────────────────────
+
+/**
+ * Query (or fragment) keys that carry a credential: tokens, one-time codes,
+ * signatures, keys, passwords. Matched as a whole key or a word inside one
+ * (`access_token`, `X-Amz-Signature`, `api_key`).
+ */
+const SECRET_PARAM =
+  /(?:^|[^a-z])(?:token|code|key|sig|signature|auth|magic|otp|password|passwd|pwd|pass|secret|credential|session|sid|ticket|nonce|hmac)s?(?:$|[^a-z])|token|signature|password|secret|apikey|authkey|sessid/i;
+
+/** Whole path segments of sign-in, magic-link, verification and reset pages. */
+const AUTH_PATH =
+  /(?:^|\/)(?:magic[-_]?links?|auth|authorize|oauth2?|sso|saml|login|log[-_]?in|sign[-_]?in|callback|verify|verify[-_]?email|verification|confirm|confirm[-_]?email|activate|reset[-_]?password|password[-_]?reset|reset|recover|recovery|unsubscribe|one[-_]?time)(?:$|\/)/i;
+
+/** A path segment this long and opaque is a token (a JWT, a signed id). */
+const OPAQUE_SEGMENT = /(?:^|\/)[A-Za-z0-9_\-.~%=]{40,}(?:$|\/)/;
+
+/** An opaque value this long is treated as a credential whatever its key. */
+const OPAQUE_VALUE = /^[A-Za-z0-9_\-.~%+/=]{40,}$/;
+
+function hasSecretParams(params: URLSearchParams): boolean {
+  for (const [key, value] of params) {
+    // `sessionId`, `authCode` read as `session_id`, `auth_code`.
+    const words = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2");
+    if (SECRET_PARAM.test(words) || OPAQUE_VALUE.test(value)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a link looks like it carries a credential or opens a sign-in step:
+ * a magic link, a password reset, an OAuth callback, a signed URL. Pasting
+ * one must not spend it, so the composer's prefetch skips these; sending the
+ * message still embeds it as usual.
+ */
+export function looksPrivateLink(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.username || parsed.password) return true;
+  if (AUTH_PATH.test(parsed.pathname)) return true;
+  if (OPAQUE_SEGMENT.test(parsed.pathname)) return true;
+  if (hasSecretParams(parsed.searchParams)) return true;
+  const fragment = parsed.hash.slice(1);
+  return (
+    fragment.includes("=") && hasSecretParams(new URLSearchParams(fragment))
+  );
 }

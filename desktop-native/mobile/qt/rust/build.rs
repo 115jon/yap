@@ -3,8 +3,8 @@ use cxx_qt_build::{CxxQtBuilder, QmlFile, QmlModule};
 /// The mobile shell (`com.yap.mobile`): the window, the pager and its pages,
 /// and the mobile side of each seam the shared QML (`Yap.Ui`, from the
 /// yap-ui crate) imports from `Yap.Platform`: rich embeds, media, the voice
-/// status line, the stream card and the nameplate. main.cpp registers those five under
-/// Yap.Platform.
+/// status line, the stream card, the nameplate and the call's video surface.
+/// main.cpp registers those six under Yap.Platform.
 const QML: &[&str] = &[
     "qml/Main.qml",
     "qml/SignInPage.qml",
@@ -26,6 +26,7 @@ const QML: &[&str] = &[
     "qml/UploadTray.qml",
     "qml/ImageViewerPage.qml",
     "qml/CallPage.qml",
+    "qml/CallVideo.qml",
     "qml/CallBar.qml",
     "qml/DmCallStrip.qml",
     "qml/IncomingCallSheet.qml",
@@ -47,6 +48,7 @@ const QML: &[&str] = &[
     "qml/seams/EmbedCard.qml",
     "qml/seams/MessageMedia.qml",
     "qml/seams/NameplateLayer.qml",
+    "qml/seams/VideoSurface.qml",
     "qml/seams/VoiceStatusLine.qml",
     "qml/seams/VoiceStreamHoverCard.qml",
 ];
