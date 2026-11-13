@@ -13,6 +13,7 @@ import {
   useKovaAuthTokenSync,
 } from "@/lib/desktop-auth";
 import { getKovaAuthConfig } from "@/lib/kova-auth-config";
+import { installMediaCapRepair } from "@/lib/media-repair";
 import { inviteCodeFromDeepLink } from "@/lib/desktop-deep-link";
 import { getHost } from "@/lib/host";
 import { getPublicWebUrl, isDesktop, isTauri } from "@/lib/platform";
@@ -144,6 +145,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 function RootComponent() {
   // Intercept external link clicks on desktop → open in system browser
   useExternalLinkHandler();
+  // Private media that failed unsigned or expired is signed again.
+  useEffect(() => installMediaCapRepair(), []);
   const [sessionToken, setSessionToken] = useState<string | undefined>();
   const sessionTokenStateRef = useRef({ seenSessionToken: false });
 

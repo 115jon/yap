@@ -1,9 +1,6 @@
 import { getPublicWebUrl } from "@/lib/platform";
 import { clog } from "@/lib/console-logger";
-import {
-  getDesktopAuthHandoffToken,
-  subscribeDesktopTokenChanges,
-} from "@/lib/desktop-auth";
+import { getMediaGrantVersion, subscribeMediaGrant } from "@/lib/media-grant";
 import {
   getListenTogetherPositionMs,
   getListenTogetherTrackDuration,
@@ -258,12 +255,14 @@ function redactListenTogetherStreamUrl(rawUrl: string | null) {
         ? window.location.origin
         : getPublicWebUrl(),
     );
-    if (parsed.searchParams.has("token")) {
-      parsed.searchParams.set("token", "[redacted]");
+    for (const name of ["token", "cap"]) {
+      if (parsed.searchParams.has(name)) {
+        parsed.searchParams.set(name, "[redacted]");
+      }
     }
     return parsed.toString();
   } catch {
-    return rawUrl.replace(/([?&]token=)[^&]+/i, "$1[redacted]");
+    return rawUrl.replace(/([?&](?:token|cap)=)[^&]+/gi, "$1[redacted]");
   }
 }
 
@@ -348,8 +347,9 @@ export function VoiceListenTogetherManager({
   const [sourceAttempt, setSourceAttempt] = useState(0);
   const [audioContextRevision, setAudioContextRevision] = useState(0);
   const [playbackSyncEpoch, setPlaybackSyncEpoch] = useState(0);
-  const [desktopAuthToken, setDesktopAuthToken] = useState<string | null>(() =>
-    getDesktopAuthHandoffToken(),
+  // The stream URL is signed with the media grant: rebuild it when that changes.
+  const [mediaGrantVersion, setMediaGrantVersion] = useState(() =>
+    getMediaGrantVersion(),
   );
   useEffect(() => {
     playbackErrorRef.current = playbackError;
@@ -406,21 +406,18 @@ export function VoiceListenTogetherManager({
   }, [currentEntryId, voiceSessionId]);
 
   useEffect(() => {
-    return subscribeDesktopTokenChanges((nextToken) => {
-      const normalizedToken = nextToken ?? null;
-      setDesktopAuthToken((currentToken) => {
-        if (currentToken === normalizedToken) return currentToken;
+    return subscribeMediaGrant(() => {
+      const nextVersion = getMediaGrantVersion();
+      setMediaGrantVersion((currentVersion) => {
+        if (currentVersion === nextVersion) return currentVersion;
 
-        log.info(
-          "Desktop auth token changed; refreshing listen together media URL",
-          {
-            roomSlug,
-            hasToken: !!normalizedToken,
-            voiceSessionId,
-          },
-        );
+        log.info("Media grant changed; refreshing listen together media URL", {
+          roomSlug,
+          hasGrant: !!nextVersion,
+          voiceSessionId,
+        });
         playbackRecoveryRef.current = null;
-        return normalizedToken;
+        return nextVersion;
       });
     });
   }, [roomSlug, voiceSessionId]);
@@ -1143,7 +1140,7 @@ export function VoiceListenTogetherManager({
         ? getTrackIdentifier(snapshot.currentEntry.track)
         : null,
       voiceSessionId,
-      hasDesktopAuthToken: !!desktopAuthToken,
+      hasMediaGrant: !!mediaGrantVersion,
       preferredFormat: preferredFormatRef.current,
       streamUrl: redactListenTogetherStreamUrl(streamUrl),
       currentSrc: redactListenTogetherStreamUrl(currentSrcRef.current),
@@ -1283,7 +1280,7 @@ export function VoiceListenTogetherManager({
   }, [
     channelId,
     clearLocalPlaybackIfMatches,
-    desktopAuthToken,
+    mediaGrantVersion,
     roomSlug,
     serverId,
     setError,

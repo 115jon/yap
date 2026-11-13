@@ -1,4 +1,5 @@
-import { apiError, getBucket, getDB, requireAuth } from "@/lib/api-helpers";
+import { apiError, getBucket, getDB } from "@/lib/api-helpers";
+import { requireMediaAuth } from "@/lib/media-auth";
 import { requireChannelAccess } from "@/lib/require-channel-access";
 import {
   getR2ObjectRangeBounds,
@@ -23,7 +24,7 @@ const DANGEROUS_CONTENT_TYPES = new Set([
 // GET /api/attachments/{channelId}/{attachmentId}/{filename}
 // R2 key = attachments/{channelId}/{attachmentId}/{filename}
 export const GET = async ({ request, params }: any) => {
-  const authResult = await requireAuth(request);
+  const authResult = await requireMediaAuth(request);
   if (authResult instanceof Response) return authResult;
 
   const { _splat } = params as { _splat?: string };

@@ -1,11 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import {
-  apiError,
-  getBucket,
-  getCorsHeaders,
-  requireAuth,
-} from "@/lib/api-helpers";
+import { apiError, getBucket, getCorsHeaders } from "@/lib/api-helpers";
+import { requireMediaAuth } from "@/lib/media-auth";
 import {
   DELETE as deleteBackground,
   GET as listBackgrounds,
@@ -37,7 +33,7 @@ const GET = async (context: any) => {
   const splatPath = getSplatPath(params as { _splat?: string });
   if (!splatPath) return listBackgrounds(context);
 
-  const authResult = await requireAuth(request);
+  const authResult = await requireMediaAuth(request);
   if (authResult instanceof Response) return authResult;
 
   const key = `${BACKGROUND_PREFIX}/${authResult.userId}/${splatPath}`;
