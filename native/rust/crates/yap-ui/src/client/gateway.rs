@@ -58,11 +58,19 @@ pub async fn run(
     // that ([`no_network`]).
     let offline = Arc::new(AtomicBool::new(false));
     let last_offline = Arc::clone(&offline);
+    let ticket_events = events.clone();
     let tickets = move || -> yap_realtime::TicketFuture {
         let api = api.clone();
         let last_offline = Arc::clone(&last_offline);
+        let events = ticket_events.clone();
         Box::pin(async move {
             let ticket = api.gateway_ticket().await;
+            // Refused while the account waits for deletion: the store
+            // closes this connection (no retries) and shows the restore
+            // screen.
+            if ticket.as_ref().is_err_and(ApiError::is_pending_deletion) {
+                events.pending_deletion();
+            }
             let no_network = no_network(ticket.as_ref().err(), || {
                 crate::platform::installed().and_then(|p| p.network_up())
             });

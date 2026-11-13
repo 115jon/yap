@@ -232,6 +232,11 @@ impl GatewayEvents {
         self.send(GatewayEvent::SessionExpired);
     }
 
+    /// The ticket was refused: the account is waiting for deletion.
+    pub fn pending_deletion(&self) {
+        self.send(GatewayEvent::PendingDeletion);
+    }
+
     /// Decodes a dispatch and forwards it if the store handles it.
     pub fn dispatch(&self, event: &str, data: Value) {
         if let Some(dispatch) = Dispatch::decode(event, data) {

@@ -188,6 +188,9 @@ impl Fixture {
                     .unwrap_or(crate::store::FriendsResponse::Done),
             ),
             ApiRequest::Sessions => ApiResponse::Sessions(Vec::new()),
+            ApiRequest::Deletion(_) => {
+                ApiResponse::Deletion(crate::account_deletion::DeletionStatus::Active)
+            }
             ApiRequest::Shares => ApiResponse::Shares(Vec::new()),
             ApiRequest::KovaSession => ApiResponse::KovaEmail(None),
             ApiRequest::KovaAccounts => ApiResponse::KovaAccounts(Vec::new()),

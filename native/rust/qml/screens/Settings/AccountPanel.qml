@@ -396,6 +396,173 @@ Column {
         }
     }
 
+    // Delete account (AccountPanel.tsx DeleteAccountRow): a warning that
+    // names the date 30 days out, the username typed to confirm it, then
+    // `POST /api/account/deletion`; once scheduled the session signs out
+    // as Sign out does. A refusal (servers still owned, a wrong name)
+    // stays in the strip.
+    SettingsCard {
+        width: parent.width
+        sectionId: "delete-account"
+
+        SettingsRow {
+            id: deleteRow
+            rowId: "delete-account"
+            layout: "inline"
+            property bool armed: false
+            readonly property var deletion: JSON.parse(Session.deletion.length > 0 ? Session.deletion : "{}")
+
+            function close() {
+                armed = false
+                Session.dismissDeleteAccount()
+                root.host.popEscape(deleteRow)
+                deleteKey.forceActiveFocus()
+            }
+            function dismiss() {
+                if (!deletion.deleting)
+                    close()
+            }
+            Component.onDestruction: root.host.popEscape(deleteRow)
+
+            KitButton {
+                id: deleteKey
+                variant: "destructive"
+                iconName: "trash"
+                text: qsTr("Delete account")
+                visible: !deleteRow.armed
+                onClicked: {
+                    deleteRow.armed = true
+                    root.host.pushEscape(deleteRow)
+                }
+            }
+            footer: Loader {
+                width: deleteRow.width
+                active: deleteRow.armed
+                sourceComponent: DeleteStrip {
+                    busy: deleteRow.deletion.deleting === true
+                    error: deleteRow.deletion.deleteError ?? ""
+                    onCancelled: deleteRow.close()
+                }
+            }
+        }
+    }
+
+    // The delete confirm: ConfirmStrip's look (danger edge, Cancel and the
+    // solid danger key) with the username field between the warning and
+    // the keys. The key works only once the field names this account.
+    component DeleteStrip: Item {
+        id: strip
+
+        property bool busy: false
+        property string error
+        // Fixed as the strip opens, as the web's warning does.
+        readonly property string deleteOn: Session.deletionDateFromNow()
+        readonly property bool matches: Session.confirmsUsername(confirmField.text)
+
+        signal cancelled()
+
+        function confirm() {
+            if (!strip.busy && strip.matches)
+                Session.deleteAccount(confirmField.text)
+        }
+
+        width: parent ? parent.width : 0
+        implicitHeight: 12 + box.height
+        Component.onCompleted: confirmField.forceActiveFocus()
+
+        Rectangle {
+            id: box
+            y: 12
+            width: parent.width
+            height: content.implicitHeight + 24
+            radius: Theme.radius
+            color: Theme.tint1
+            Rectangle {
+                width: 2
+                height: parent.height
+                color: Theme.dangerInk
+            }
+            Column {
+                id: content
+                x: 12
+                y: 12
+                width: parent.width - 24
+                spacing: 12
+                Text {
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    text: qsTr("Delete your account on %1?").arg(strip.deleteOn)
+                    wrapMode: Text.Wrap
+                    color: Theme.ink1
+                    font: Theme.type.setting
+                    Accessible.role: Accessible.Heading
+                }
+                Text {
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    text: qsTr("You leave every server, are shown to others as “Deleted user” and are signed out everywhere now. On that date your profile, board, friends, settings and uploaded files are deleted. Messages you sent stay, from “Deleted user”. Sign in before then to restore your account. Your Kova sign-in is not deleted.")
+                    wrapMode: Text.Wrap
+                    color: Theme.ink1
+                    font: Theme.type.description
+                    Accessible.role: Accessible.StaticText
+                }
+                Text {
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    text: qsTr("Type @%1 to confirm.").arg(Session.meUsername)
+                    wrapMode: Text.Wrap
+                    color: Theme.ink2
+                    font: Theme.type.description
+                }
+                KitField {
+                    id: confirmField
+                    width: Math.min(parent.width, 320)
+                    leadingInset: 14
+                    maximumLength: 64
+                    enabled: !strip.busy
+                    placeholderText: Session.meUsername
+                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData
+                    Accessible.name: qsTr("Type %1 to confirm").arg(Session.meUsername)
+                    Keys.onReturnPressed: strip.confirm()
+                    Keys.onEnterPressed: strip.confirm()
+                    Text {
+                        x: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "@"
+                        color: Theme.ink2
+                        font: Theme.type.message
+                    }
+                }
+                Row {
+                    anchors.right: parent.right
+                    spacing: 8
+                    KitButton {
+                        variant: "ghost"
+                        text: qsTr("Cancel")
+                        enabled: !strip.busy
+                        onClicked: strip.cancelled()
+                    }
+                    KitButton {
+                        variant: "danger"
+                        text: qsTr("Delete account")
+                        enabled: strip.matches
+                        loading: strip.busy
+                        onClicked: strip.confirm()
+                    }
+                }
+                RowError {
+                    above: 0
+                    text: strip.error
+                }
+            }
+        }
+        Keys.onEscapePressed: event => {
+            event.accepted = true
+            if (!strip.busy)
+                strip.cancelled()
+        }
+    }
+
     component ValueText: Text {
         textFormat: Text.PlainText
         width: Math.min(implicitWidth, 320)

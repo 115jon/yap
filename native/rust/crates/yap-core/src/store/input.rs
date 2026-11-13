@@ -325,6 +325,8 @@ pub enum Command {
     RemoveEmbeds(String),
     /// The inbox, who reacted, the details tabs and the other extras.
     Extras(super::extras::ExtrasCommand),
+    /// Delete account, and the restore screen.
+    Deletion(super::deletion::DeletionCommand),
     /// DM calls, moves, stickers and the voice details.
     Calls(super::calls::CallsCommand),
     /// The app is quitting: leave the call (its sockets close cleanly).
@@ -472,6 +474,8 @@ pub enum GatewayEvent {
     },
     /// A ticket fetch got a 401.
     SessionExpired,
+    /// A ticket fetch got 403 `ACCOUNT_PENDING_DELETION`.
+    PendingDeletion,
     Dispatch(Dispatch),
 }
 

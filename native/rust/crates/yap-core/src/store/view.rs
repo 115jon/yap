@@ -1171,6 +1171,8 @@ pub struct SettingsView {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewUpdate {
     Phase(Phase),
+    /// Delete account and the restore screen.
+    Deletion(super::deletion::DeletionView),
     DeviceCode {
         user_code: String,
         url: String,

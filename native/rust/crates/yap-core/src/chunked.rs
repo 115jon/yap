@@ -111,6 +111,7 @@ impl UploadError {
         match error {
             ApiError::Unauthorized => Self::http(401, "session expired"),
             ApiError::Http { status, message } => Self::http(status, message),
+            ApiError::Deletion(refusal) => Self::http(refusal.status(), refusal.to_string()),
             ApiError::Network(message) => Self::network(message),
             ApiError::Decode(message) => Self::http(200, message),
         }

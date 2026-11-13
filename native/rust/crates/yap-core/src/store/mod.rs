@@ -14,6 +14,7 @@ pub mod apps;
 pub mod backgrounds;
 pub mod board;
 pub mod calls;
+pub mod deletion;
 mod effect;
 pub mod embeds;
 pub mod extras;

@@ -179,6 +179,25 @@ pub const PANELS: &[PanelDef] = &[
                     ),
                 ],
             ),
+            section(
+                "delete-account",
+                "Delete account",
+                "Deletes your Yap account after 30 days. Sign in before then to restore it.",
+                &[row(
+                    "delete-account",
+                    "Delete account",
+                    "Your profile, friends, settings and files are deleted. Messages you sent stay, from \"Deleted user\".",
+                    &[
+                        "delete",
+                        "remove",
+                        "close account",
+                        "erase",
+                        "deactivate",
+                        "data",
+                        "privacy",
+                    ],
+                )],
+            ),
         ],
     },
     PanelDef {
@@ -1312,11 +1331,7 @@ pub fn describe_api_error(error: &ApiError, action: &str) -> String {
             crate::limits::limit_for_action(action),
         );
     }
-    let status = match error {
-        ApiError::Unauthorized => Some(401),
-        ApiError::Http { status, .. } => Some(*status),
-        ApiError::Network(_) | ApiError::Decode(_) => None,
-    };
+    let status = error.status();
     match status {
         Some(401) => format!("Your session has ended. Sign in again to {action}."),
         Some(403) => format!("You don't have permission to {action}."),
