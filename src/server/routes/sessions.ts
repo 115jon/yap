@@ -10,12 +10,16 @@
 // Until Kova has the app-session endpoints (kova-auth.ts), GET answers the
 // caller's own session alone with `othersListed: false`, and DELETE 501. GET
 // does the same when the list call fails: the caller's own row is known.
+//
+// A revoked session's push tokens are deleted with it (push.service
+// deleteSessionPushTokens), so the signed-out device stops getting pushes.
 
 import { Effect, Option, Schema, type Layer } from "effect";
 
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 import { describeSessionClient, requestGeo } from "@/lib/session-activity";
 import { validateBody } from "@/lib/validate-body";
+import { Database } from "@/server/bindings";
 import { runRoute, type RouteServices } from "@/server/edge";
 import {
   appSessionCredentials,
@@ -24,6 +28,7 @@ import {
   type KovaAppSession,
   type KovaAuthSession,
 } from "@/server/kova-auth";
+import { deleteSessionPushTokens } from "@/services/push.service";
 
 /** One row of `GET /api/sessions`. Earlier fields are what clients read. */
 export interface SessionRow {
@@ -214,6 +219,17 @@ const revokeSessions = Effect.fn("sessions.revoke")(function* (
       request,
     );
   }
+
+  const db = yield* Database;
+  yield* Effect.promise(() =>
+    deleteSessionPushTokens(
+      db,
+      identity.user.id,
+      body.sessionId
+        ? { sessionId: body.sessionId }
+        : { allExcept: identity.session.id ?? "" },
+    ),
+  );
 
   // A session that was already gone counts 0: the device is signed out.
   // Null when Kova did not say how many.

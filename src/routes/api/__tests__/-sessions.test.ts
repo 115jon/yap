@@ -4,6 +4,7 @@
 import { Effect, Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createMockD1 } from "@/lib/__tests__/mock-d1";
 import { AuthUnavailable } from "@/server/errors";
 import {
   KovaAuth,
@@ -208,6 +209,7 @@ describe("GET /api/sessions", () => {
 describe("DELETE /api/sessions", () => {
   function revoking(answer: Option.Option<number | null>) {
     const asked: AppSessionRevocation[] = [];
+    const db = createMockD1();
     const routes = sessionRoutes(
       testServices({
         auth: memoryAuth(SESSIONS, {
@@ -216,13 +218,14 @@ describe("DELETE /api/sessions", () => {
             return Effect.succeed(answer);
           },
         }),
+        db,
       }),
     );
-    return { asked, routes };
+    return { asked, db, routes };
   }
 
-  it("signs out one other session", async () => {
-    const { asked, routes } = revoking(Option.some(1));
+  it("signs out one other session and deletes its push tokens", async () => {
+    const { asked, db, routes } = revoking(Option.some(1));
 
     const response = await routes.DELETE({
       request: call("DELETE", { sessionId: "phone" }),
@@ -231,10 +234,15 @@ describe("DELETE /api/sessions", () => {
     expect(response.status).toBe(200);
     expect(await read(response)).toEqual({ revoked: 1 });
     expect(asked).toEqual([{ sessionId: "phone" }]);
+    // Tokens from before they were bound to a session (NULL) go too.
+    db.assertCalledWith(
+      /DELETE FROM push_tokens\s+WHERE user_id = \? AND \(session_id = \? OR session_id IS NULL\)/,
+      ["user-1", "phone"],
+    );
   });
 
-  it("signs out all other sessions", async () => {
-    const { asked, routes } = revoking(Option.some(3));
+  it("signs out all other sessions and keeps only the caller's push tokens", async () => {
+    const { asked, db, routes } = revoking(Option.some(3));
 
     const response = await routes.DELETE({
       request: call("DELETE", { allOthers: true }),
@@ -242,10 +250,14 @@ describe("DELETE /api/sessions", () => {
 
     expect(await read(response)).toEqual({ revoked: 3 });
     expect(asked).toEqual([{ allOthers: true }]);
+    db.assertCalledWith(
+      /DELETE FROM push_tokens\s+WHERE user_id = \? AND \(session_id != \? OR session_id IS NULL\)/,
+      ["user-1", CURRENT],
+    );
   });
 
   it("refuses the caller's own session and an ambiguous or bad body", async () => {
-    const { asked, routes } = revoking(Option.some(1));
+    const { asked, db, routes } = revoking(Option.some(1));
 
     const own = await routes.DELETE({
       request: call("DELETE", { sessionId: CURRENT }),
@@ -265,10 +277,11 @@ describe("DELETE /api/sessions", () => {
     expect(notString.status).toBe(400);
     expect((await read(notString)).code).toBe("INVALID_BODY");
     expect(asked).toEqual([]);
+    expect(db.calls).toHaveLength(0);
   });
 
   it("answers 501 while Kova cannot revoke another session", async () => {
-    const { routes } = revoking(Option.none());
+    const { db, routes } = revoking(Option.none());
 
     const response = await routes.DELETE({
       request: call("DELETE", { sessionId: "phone" }),
@@ -276,6 +289,7 @@ describe("DELETE /api/sessions", () => {
 
     expect(response.status).toBe(501);
     expect((await read(response)).code).toBe("SESSION_REVOKE_UNSUPPORTED");
+    expect(db.calls).toHaveLength(0);
   });
 });
 
@@ -298,7 +312,10 @@ describe("Kova's app-session endpoints over HTTP", () => {
         return (answers.shift() ?? new Response(null, { status: 404 })).clone();
       },
     });
-    return { calls, routes: sessionRoutes(testServices({ auth: layer })) };
+    return {
+      calls,
+      routes: sessionRoutes(testServices({ auth: layer, db: createMockD1() })),
+    };
   }
 
   it("lists with the caller's bearer alone and no token in the answer", async () => {

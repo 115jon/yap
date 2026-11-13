@@ -7,6 +7,7 @@ import {
   buildMessagePush,
   buildNativeMessagePush,
   deletePushToken,
+  deleteSessionPushTokens,
   hasNotificationsSinceLastRead,
   sendMessagePushes,
   sendReadPushes,
@@ -93,6 +94,7 @@ describe("push tokens", () => {
       platform: "android",
       appVariant: "development",
       pushFormat: "native",
+      sessionId: "session-1",
     });
 
     db.assertCalledWith(
@@ -104,6 +106,7 @@ describe("push tokens", () => {
         "android",
         "development",
         "native",
+        "session-1",
         expect.any(String),
         expect.any(String),
       ],
@@ -118,6 +121,26 @@ describe("push tokens", () => {
     db.assertCalledWith(
       "DELETE FROM push_tokens WHERE token = ? AND user_id = ?",
       ["tok", "user-1"],
+    );
+  });
+
+  it("deletes a signed-out session's tokens and the unbound ones", async () => {
+    const db = createMockD1();
+
+    await deleteSessionPushTokens(db as never, "user-1", {
+      sessionId: "phone",
+    });
+    await deleteSessionPushTokens(db as never, "user-1", {
+      allExcept: "laptop",
+    });
+
+    db.assertCalledWith(
+      /WHERE user_id = \? AND \(session_id = \? OR session_id IS NULL\)/,
+      ["user-1", "phone"],
+    );
+    db.assertCalledWith(
+      /WHERE user_id = \? AND \(session_id != \? OR session_id IS NULL\)/,
+      ["user-1", "laptop"],
     );
   });
 });

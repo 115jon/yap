@@ -50,6 +50,8 @@ describe("POST /api/push-tokens", () => {
       "android",
       "development",
       "native",
+      // memoryAuth names the caller's session after the user.
+      "session-user-1",
       expect.any(String),
       expect.any(String),
     ]);
@@ -75,6 +77,7 @@ describe("POST /api/push-tokens", () => {
       "ios",
       null,
       null,
+      "session-user-1",
       expect.any(String),
       expect.any(String),
     ]);
@@ -115,7 +118,7 @@ describe("POST /api/push-tokens", () => {
 });
 
 describe("DELETE /api/push-tokens", () => {
-  it("deletes the caller's token", async () => {
+  it("deletes the caller's token and its session's other tokens", async () => {
     const db = createMockD1();
     const routes = pushTokenRoutes(
       testServices({ auth: memoryAuth(SESSIONS), db }),
@@ -127,8 +130,8 @@ describe("DELETE /api/push-tokens", () => {
 
     expect(response.status).toBe(200);
     db.assertCalledWith(
-      "DELETE FROM push_tokens WHERE token = ? AND user_id = ?",
-      ["fcm-token", "user-1"],
+      /DELETE FROM push_tokens\s+WHERE user_id = \? AND \(token = \? OR session_id = \?\)/,
+      ["user-1", "fcm-token", "session-user-1"],
     );
   });
 });

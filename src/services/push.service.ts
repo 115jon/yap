@@ -18,9 +18,14 @@ export interface PushTokenInput {
   appVariant: string | null;
   /** NULL = legacy app (system-rendered push); "native" = data-only pushes. */
   pushFormat: "native" | null;
+  /** The Kova session registering it; signing that session out deletes it. */
+  sessionId: string | null;
 }
 
-/** Registers `token` for `userId`, taking it over from any previous owner. */
+/**
+ * Registers `token` for `userId` and the session registering it, taking it
+ * over from any previous owner or session.
+ */
 export async function upsertPushToken(
   db: D1Database,
   userId: string,
@@ -32,13 +37,14 @@ export async function upsertPushToken(
     .prepare(
       `INSERT INTO push_tokens
          (id, user_id, token, platform, app_variant, push_format,
-          created_at, last_seen_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          session_id, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(token) DO UPDATE SET
          user_id = excluded.user_id,
          platform = excluded.platform,
          app_variant = excluded.app_variant,
          push_format = excluded.push_format,
+         session_id = excluded.session_id,
          last_seen_at = excluded.last_seen_at`,
     )
     .bind(
@@ -48,21 +54,75 @@ export async function upsertPushToken(
       input.platform,
       input.appVariant,
       input.pushFormat,
+      input.sessionId,
       now,
       now,
     )
     .run();
 }
 
-/** Unregisters `token`, only if `userId` owns it. */
+/**
+ * Unregisters `token`, only if `userId` owns it, and with it every token the
+ * signing-out session (`sessionId`) registered, so a token that rotated
+ * since goes too.
+ */
 export async function deletePushToken(
   db: D1Database,
   userId: string,
   token: string,
+  sessionId: string | null = null,
 ): Promise<void> {
+  if (!sessionId) {
+    await db
+      .prepare(`DELETE FROM push_tokens WHERE token = ? AND user_id = ?`)
+      .bind(token, userId)
+      .run();
+    return;
+  }
   await db
-    .prepare(`DELETE FROM push_tokens WHERE token = ? AND user_id = ?`)
-    .bind(token, userId)
+    .prepare(
+      `DELETE FROM push_tokens
+       WHERE user_id = ? AND (token = ? OR session_id = ?)`,
+    )
+    .bind(userId, token, sessionId)
+    .run();
+}
+
+/**
+ * Which of a user's tokens go when sessions are signed out: the tokens one
+ * session registered, or those of every session but the caller's own.
+ */
+export type SignedOutSessions =
+  | { readonly sessionId: string }
+  | { readonly allExcept: string };
+
+/**
+ * Deletes the tokens the signed-out sessions registered, and the user's
+ * tokens registered before tokens were bound to sessions (session_id NULL):
+ * those may belong to the signed-out device and nothing says which. A live
+ * device that loses one registers again on its next start.
+ */
+export async function deleteSessionPushTokens(
+  db: D1Database,
+  userId: string,
+  sessions: SignedOutSessions,
+): Promise<void> {
+  if ("sessionId" in sessions) {
+    await db
+      .prepare(
+        `DELETE FROM push_tokens
+         WHERE user_id = ? AND (session_id = ? OR session_id IS NULL)`,
+      )
+      .bind(userId, sessions.sessionId)
+      .run();
+    return;
+  }
+  await db
+    .prepare(
+      `DELETE FROM push_tokens
+       WHERE user_id = ? AND (session_id != ? OR session_id IS NULL)`,
+    )
+    .bind(userId, sessions.allExcept)
     .run();
 }
 
