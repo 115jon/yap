@@ -29,6 +29,8 @@ const QML: &[&str] = &[
     "qml/CallBar.qml",
     "qml/BottomSheet.qml",
     "qml/SheetRow.qml",
+    "qml/ServerSheet.qml",
+    "qml/InviteLandingPage.qml",
     "qml/EmojiGlyph.qml",
     "qml/MessageActions.qml",
     "qml/MessageSheet.qml",

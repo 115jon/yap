@@ -62,6 +62,7 @@ qt_add_executable(yapqt
   cpp/main.cpp
   cpp/native.cpp cpp/native.h
   cpp/push.cpp
+  cpp/links.cpp
   cpp/keystore.cpp
   cpp/voice.cpp
   cpp/rustnetwork.cpp cpp/rustnetwork.h)

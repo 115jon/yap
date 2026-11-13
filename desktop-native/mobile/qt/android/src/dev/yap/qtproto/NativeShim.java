@@ -391,12 +391,14 @@ public final class NativeShim {
         });
     }
 
-    public static void share(String text) {
+    /** The share sheet on `text`; `title` heads the sheet (none: empty). */
+    public static void share(String text, String title) {
         if (activity == null) return;
         Intent send = new Intent(Intent.ACTION_SEND)
                 .setType("text/plain")
                 .putExtra(Intent.EXTRA_TEXT, text);
-        activity.runOnUiThread(() -> activity.startActivity(Intent.createChooser(send, null)));
+        CharSequence heading = title == null || title.isEmpty() ? null : title;
+        activity.runOnUiThread(() -> activity.startActivity(Intent.createChooser(send, heading)));
     }
 
     public static void leave() {
