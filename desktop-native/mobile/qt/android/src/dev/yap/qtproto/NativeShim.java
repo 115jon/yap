@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ProviderInfo;
 import android.content.pm.ResolveInfo;
 import android.database.Cursor;
 import android.graphics.Bitmap;
@@ -551,19 +552,43 @@ public final class NativeShim {
 
     /**
      * The photo picker for one picture (an avatar or a banner): images only,
-     * one item, no permission (API 33+), else the documents UI on images.
-     * Its result comes back through mediaPicked like the composer's, the
-     * copy normalised (normalisePicture).
+     * single select (no EXTRA_PICK_IMAGES_MAX, as PickVisualMedia sends it),
+     * so one tap returns the picture; no permission (API 33+), else the
+     * documents UI on images, one item. Its result comes back through
+     * mediaPicked like the composer's, the copy normalised
+     * (normalisePicture).
      */
     public static Intent pickImageIntent(long limitBytes) {
         pickLimit = limitBytes > 0 ? limitBytes : Long.MAX_VALUE;
         pickPicture = true;
         if (Build.VERSION.SDK_INT >= 33) {
-            return new Intent(MediaStore.ACTION_PICK_IMAGES).setType("image/*");
+            return systemPhotoPicker(new Intent(MediaStore.ACTION_PICK_IMAGES)
+                    .setType("image/*")
+                    .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false));
         }
         return new Intent(Intent.ACTION_GET_CONTENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
-                .setType("image/*");
+                .setType("image/*")
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false);
+    }
+
+    /**
+     * The photo picker itself: the intent pinned to the media provider's
+     * package, where the system picker lives, so another app taking the
+     * action (a gallery with its own multi-select view) does not answer it.
+     * Unchanged when that package cannot be seen or does not take it.
+     */
+    private static Intent systemPhotoPicker(Intent intent) {
+        if (activity == null) return intent;
+        try {
+            PackageManager pm = activity.getPackageManager();
+            ProviderInfo media = pm.resolveContentProvider(MediaStore.AUTHORITY, 0);
+            if (media == null) return intent;
+            Intent pinned = new Intent(intent).setPackage(media.packageName);
+            return pm.resolveActivity(pinned, 0) != null ? pinned : intent;
+        } catch (RuntimeException e) {
+            return intent;
+        }
     }
 
     /**
