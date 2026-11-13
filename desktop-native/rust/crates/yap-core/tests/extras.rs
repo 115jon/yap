@@ -678,5 +678,8 @@ fn a_refused_upload_should_say_so() {
     );
     let status = view(&fx).expect("view").voice_status;
     assert!(!status.uploading);
-    assert!(!status.error.is_empty());
+    assert_eq!(
+        status.error,
+        "Only GIF, PNG, JPG, WEBP, MP4, and WEBM files are supported."
+    );
 }

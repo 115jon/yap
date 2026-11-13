@@ -16,6 +16,12 @@ import { hasPerk, type Entitlement } from "@/lib/entitlements";
 import { genId } from "@/lib/id";
 import { validateImageBuffer } from "@/lib/image-validation";
 import {
+  metadataResponseFields,
+  stripMetadataInPlace,
+  UNCHECKED_UPLOAD_CODE,
+  uncheckedUploadError,
+} from "@/lib/upload-metadata/strip-upload";
+import {
   ACTIVITY_RETENTION_DAYS,
   isActivityKind,
   newWidgetId,
@@ -299,6 +305,12 @@ export function createProfileBoardHandlers(deps: ProfileBoardDeps) {
           "ANIMATED_NEEDS_LOUD",
         );
       }
+      const metadata = await stripMetadataInPlace(buffer, {
+        route: "profile-board",
+        userId: session.userId,
+      });
+      const unclean = uncheckedUploadError(metadata);
+      if (unclean) return error(unclean, 415, UNCHECKED_UPLOAD_CODE);
       const asset = `${newWidgetId()}${newWidgetId()}.${checked.ext}`;
       await deps.bucket.put(
         `${widgetAssetPrefix(session.userId)}${asset}`,
@@ -316,6 +328,7 @@ export function createProfileBoardHandlers(deps: ProfileBoardDeps) {
           url: widgetAssetUrl(session.userId, asset),
           content_type: checked.mimeType,
           size: file.size,
+          ...metadataResponseFields(metadata),
         },
         201,
       );

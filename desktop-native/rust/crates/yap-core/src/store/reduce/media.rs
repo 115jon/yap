@@ -65,6 +65,9 @@ const GIF_MIN_NEW: usize = 8;
 
 /// `describeApiError(error, action)` (api-errors.ts).
 pub(super) fn describe_error(error: &ApiError, action: &str) -> String {
+    if let Some(sentence) = error.refusal_sentence() {
+        return sentence.to_owned();
+    }
     match error {
         ApiError::Unauthorized => format!("Your session has ended. Sign in again to {action}."),
         ApiError::Http { status: 403, .. } => format!("You don't have permission to {action}."),

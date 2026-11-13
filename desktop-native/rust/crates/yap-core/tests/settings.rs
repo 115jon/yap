@@ -851,12 +851,35 @@ fn a_failed_nameplate_upload_should_name_the_step() {
     let (id, _) = patch(&fx);
     let fx = client.answer(id, Ok(ApiResponse::Done));
     let (upload, _, _) = upload_of(&fx).expect("upload");
-    let fx = client.answer(upload, Err(http_error(415)));
+    let fx = client.answer(upload, Err(http_error(400)));
     let view = settings(&fx).expect("view");
     assert_eq!(
         view.profile_error,
         "Unable to upload your nameplate. Check the details and try again."
     );
+}
+
+#[test]
+fn a_refused_avatar_should_show_the_servers_reason() {
+    let sentence =
+        "This image format can't be checked for location data. Use JPEG, PNG, WebP or GIF.";
+    let mut client = Client::online();
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        avatar: Some((r"C:\tmp\me.avif".into(), "image/avif".into())),
+        ..draft()
+    })));
+    let (id, _) = patch(&fx);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    let (upload, _, _) = upload_of(&fx).expect("upload");
+    let fx = client.answer(
+        upload,
+        Err(ApiError::Http {
+            status: 415,
+            message: sentence.into(),
+        }),
+    );
+    let view = settings(&fx).expect("view");
+    assert_eq!(view.profile_error, sentence);
 }
 
 #[test]

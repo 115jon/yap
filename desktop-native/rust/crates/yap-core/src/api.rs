@@ -48,9 +48,29 @@ pub enum ApiError {
     Decode(String),
 }
 
+/// The message of an error response whose body had no `error`.
+const NO_SERVER_MESSAGE: &str = "request failed";
+
 impl ApiError {
     pub fn is_unauthorized(&self) -> bool {
         matches!(self, Self::Unauthorized)
+    }
+
+    /// A 415's own sentence: only upload routes send one, and each says
+    /// which formats it takes or why a file was refused (it couldn't be
+    /// checked for location data), so it is shown as written. None for
+    /// anything else, or a 415 whose body had no `error`.
+    pub fn refusal_sentence(&self) -> Option<&str> {
+        match self {
+            Self::Http {
+                status: 415,
+                message,
+            } => {
+                let message = message.trim();
+                (!message.is_empty() && message != NO_SERVER_MESSAGE).then_some(message)
+            }
+            _ => None,
+        }
     }
 
     /// The request never left this device: the host name did not resolve
@@ -199,7 +219,7 @@ impl Api {
             let message = body
                 .get("error")
                 .and_then(Value::as_str)
-                .unwrap_or("request failed")
+                .unwrap_or(NO_SERVER_MESSAGE)
                 .to_owned();
             return Err(ApiError::Http {
                 status: status.as_u16(),
@@ -415,6 +435,21 @@ mod tests {
         ] {
             assert!(media_needs_auth(BASE, &format!("{BASE}{path}")), "{path}");
         }
+    }
+
+    #[test]
+    fn only_a_415_with_a_sentence_should_be_shown_as_written() {
+        use super::ApiError;
+        let http = |status, message: &str| ApiError::Http {
+            status,
+            message: message.into(),
+        };
+        let sentence = "This image format can't be checked for location data.";
+        assert_eq!(http(415, sentence).refusal_sentence(), Some(sentence));
+        assert_eq!(http(415, super::NO_SERVER_MESSAGE).refusal_sentence(), None);
+        assert_eq!(http(415, " ").refusal_sentence(), None);
+        assert_eq!(http(400, sentence).refusal_sentence(), None);
+        assert_eq!(ApiError::Network(sentence.into()).refusal_sentence(), None);
     }
 
     #[test]

@@ -10,6 +10,17 @@ import {
   createMultipartUploadHandlers,
   type MultipartUploadDeps,
 } from "../../src/services/multipart-upload.service";
+import {
+  box,
+  concat,
+  contains,
+  exifSegment,
+  FAKE_ISO6709,
+  FAKE_MAKE,
+  jpegWith,
+  latitudeBytes,
+  text,
+} from "../../src/lib/__tests__/fixtures/metadata-files";
 
 // The chunked-upload routes against miniflare's D1 and R2. Auth, channel
 // access and permissions are stubs keyed by an `x-test-user` header; the
@@ -374,6 +385,121 @@ describe("chunked uploads: happy path", () => {
       ),
     );
     expect(row!.content_type).toBe("application/octet-stream");
+  });
+});
+
+describe("chunked uploads: metadata", () => {
+  /** Uploads `data` in parts and completes it; returns the response body. */
+  async function uploadWhole(
+    h: ReturnType<typeof handlers>,
+    f: Fixture,
+    data: Uint8Array<ArrayBuffer>,
+    filename: string,
+    contentType: string,
+  ) {
+    const session = await startUpload(h, f, data.length, {
+      filename,
+      content_type: contentType,
+    });
+    for (let n = 1; n <= session.part_count; n += 1) {
+      expect(
+        (await putPart(h, f, session.upload_id, n, slicePart(data, n))).status,
+      ).toBe(200);
+    }
+    const done = await h.complete(
+      req(
+        "POST",
+        `/api/channels/${f.channel}/uploads/${session.upload_id}/complete`,
+        f.user,
+      ),
+      { channelId: f.channel, uploadId: session.upload_id },
+    );
+    expect(done.status).toBe(201);
+    return (await done.json()) as {
+      file_url: string;
+      metadata_stripped?: string[];
+      metadata_unchecked?: string;
+    };
+  }
+
+  function owned(data: Uint8Array): Uint8Array<ArrayBuffer> {
+    const out = new Uint8Array(new ArrayBuffer(data.length));
+    out.set(data);
+    return out;
+  }
+
+  it("removes the location from a video whose moov is in the last part", async () => {
+    const f = fixture();
+    const h = handlers(f);
+    const moov = box(
+      "moov",
+      box("mvhd", new Uint8Array(100)),
+      box("udta", box([0xa9, 0x78, 0x79, 0x7a], text(FAKE_ISO6709))),
+    );
+    const data = owned(
+      concat(
+        box("ftyp", text("isom"), [0, 0, 0, 0], text("isom")),
+        box("mdat", bytes(2 * PART)),
+        moov,
+      ),
+    );
+
+    const attachment = await uploadWhole(h, f, data, "clip.mp4", "video/mp4");
+    expect(attachment.metadata_stripped).toEqual(["gps"]);
+
+    const object = await bucket.get(attachment.file_url.slice("/api/".length));
+    expect(object?.size).toBe(data.length);
+    expect(object?.httpMetadata?.contentType).toBe("video/mp4");
+    const stored = new Uint8Array(await object!.arrayBuffer());
+    expect(contains(stored, text(FAKE_ISO6709))).toBe(false);
+    // Everything before the moov (the media) is byte for byte the same.
+    const mediaEnd = data.length - moov.length;
+    expect(await sha256(owned(stored.subarray(0, mediaEnd)))).toBe(
+      await sha256(owned(data.subarray(0, mediaEnd))),
+    );
+  });
+
+  it("removes GPS EXIF from a large JPEG and leaves the rest alone", async () => {
+    const f = fixture();
+    const h = handlers(f);
+    const image = jpegWith(exifSegment({ orientation: 6 }));
+    // A camera JPEG with a large trailer (an MPF preview, a motion photo).
+    const data = owned(concat(image, bytes(PART + 4096)));
+
+    const attachment = await uploadWhole(h, f, data, "photo.jpg", "image/jpeg");
+    expect(attachment.metadata_stripped).toEqual(
+      expect.arrayContaining(["gps", "camera", "exif"]),
+    );
+    const object = await bucket.get(attachment.file_url.slice("/api/".length));
+    const stored = new Uint8Array(await object!.arrayBuffer());
+    expect(stored.length).toBe(data.length);
+    expect(contains(stored.subarray(0, image.length), latitudeBytes())).toBe(
+      false,
+    );
+    expect(contains(stored.subarray(0, image.length), text(FAKE_MAKE))).toBe(
+      false,
+    );
+    expect(await sha256(owned(stored.subarray(image.length)))).toBe(
+      await sha256(owned(data.subarray(image.length))),
+    );
+  });
+
+  it("stores a file with nothing to strip unchanged and says nothing", async () => {
+    const f = fixture();
+    const h = handlers(f);
+    const data = bytes(PART + 10);
+    data.set([0x50, 0x4b, 0x03, 0x04]); // a zip
+    const attachment = await uploadWhole(
+      h,
+      f,
+      data,
+      "a.zip",
+      "application/zip",
+    );
+    expect(attachment.metadata_stripped).toBeUndefined();
+    expect(attachment.metadata_unchecked).toBeUndefined();
+    const object = await bucket.get(attachment.file_url.slice("/api/".length));
+    expect(await sha256(await object!.arrayBuffer())).toBe(await sha256(data));
   });
 });
 
