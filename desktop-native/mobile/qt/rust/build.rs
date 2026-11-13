@@ -17,6 +17,8 @@ const QML: &[&str] = &[
     "qml/MembersPage.qml",
     "qml/ProfilePage.qml",
     "qml/SettingsPage.qml",
+    "qml/ProfileEditPage.qml",
+    "qml/AvatarFramePage.qml",
     "qml/FriendsPage.qml",
     "qml/ThreadPage.qml",
     "qml/PageHeader.qml",

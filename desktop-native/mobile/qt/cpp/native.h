@@ -22,8 +22,9 @@
 //                  copied into the cache for the core; Paste with files or a
 //                  picture on the clipboard, and pictures the keyboard
 //                  inserts (commitContent, org/qtproject/qt/android/
-//                  YapEditText.java); and a picture saved into the gallery
-//                  (MediaStore, Pictures/Yap)
+//                  YapEditText.java); the photo picker for one picture
+//                  (an avatar, a banner); and a picture saved into the
+//                  gallery (MediaStore, Pictures/Yap)
 //   push           FCM's token for the core, a notification's tap, Reply and
 //                  Mark as read, the conversation on screen (its pushes stay
 //                  quiet) and the notification permission (cpp/push.cpp,
@@ -154,6 +155,12 @@ public:
   // Swaps in the text view that takes the keyboard's pictures (main.cpp,
   // once the window shows).
   void installContent() const;
+  // The photo picker for one picture (an avatar, a banner), no permission
+  // needed; its copy arrives as mediaPicked too.
+  Q_INVOKABLE void pickImage(qreal limitBytes);
+  // Deletes a picked copy (a mediaPicked path) and its folder once the app
+  // is done with it; a path outside the picks' folder is left alone.
+  Q_INVOKABLE void discardPicked(const QString& path) const;
   // Save image: where to download a picture named `name` first (a fresh
   // folder under the cache; empty off Android), then the download into the
   // gallery's Pictures/Yap. The outcome arrives as imageSaved.

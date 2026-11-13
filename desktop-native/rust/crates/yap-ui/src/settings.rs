@@ -131,6 +131,18 @@ pub mod qobject {
         #[cxx_name = "nameplateType"]
         fn nameplate_type(self: &Settings, path: &QString) -> QString;
 
+        /// The profile's text limits in characters as JSON: `{displayName,
+        /// pronouns, bio, customStatus}`.
+        #[qinvokable]
+        #[cxx_name = "profileLimits"]
+        fn profile_limits(self: &Settings) -> QString;
+
+        /// Why `name` cannot be the display name (the core's check, the
+        /// copy its save would show), or empty when it can.
+        #[qinvokable]
+        #[cxx_name = "checkDisplayName"]
+        fn check_display_name(self: &Settings, name: &QString) -> QString;
+
         #[qinvokable]
         #[cxx_name = "loadAccount"]
         fn load_account(self: &Settings);
@@ -158,7 +170,8 @@ pub mod qobject {
         fn save_display_name(self: &Settings, name: &QString);
 
         /// The profile editor's draft as JSON: `{pronouns, bio,
-        /// customStatus, accentColor, backgroundColor, bannerColor,
+        /// customStatus (sent when `customStatusChanged`), accentColor,
+        /// backgroundColor, bannerColor,
         /// avatarPath, removeAvatar, avatarUrl, bannerPath, removeBanner,
         /// crop ({x, y, width, height} in percent, or null; sent when
         /// `cropChanged`), nameStyle (sent when `nameStyleChanged`),
@@ -508,7 +521,10 @@ impl Drop for SettingsRust {
 struct Draft {
     pronouns: String,
     bio: String,
+    /// What the field holds; it goes out only when the user changed it
+    /// from what the editor loaded.
     custom_status: String,
+    custom_status_changed: bool,
     accent_color: String,
     background_color: String,
     banner_color: String,
@@ -554,6 +570,16 @@ fn image_content_type(path: &str) -> Option<&'static str> {
 fn picked(path: &str) -> Option<(String, String)> {
     let content_type = image_content_type(path)?;
     Some((path.to_owned(), content_type.to_owned()))
+}
+
+fn profile_limits_json() -> String {
+    json!({
+        "displayName": settings::DISPLAY_NAME_MAX,
+        "pronouns": settings::PRONOUNS_MAX,
+        "bio": settings::BIO_MAX,
+        "customStatus": settings::CUSTOM_STATUS_MAX,
+    })
+    .to_string()
 }
 
 fn color(text: &str) -> Option<String> {
@@ -605,6 +631,17 @@ impl qobject::Settings {
             .unwrap_or_default()
     }
 
+    pub fn profile_limits(&self) -> QString {
+        q(&profile_limits_json())
+    }
+
+    pub fn check_display_name(&self, name: &QString) -> QString {
+        settings::validate_display_name(&name.to_string())
+            .err()
+            .map(q)
+            .unwrap_or_default()
+    }
+
     pub fn load_account(&self) {
         client::command(Command::LoadAccount);
     }
@@ -634,7 +671,7 @@ impl qobject::Settings {
         client::command(Command::SaveProfile(Box::new(ProfileDraft {
             pronouns: draft.pronouns,
             bio: draft.bio,
-            custom_status: draft.custom_status,
+            custom_status: draft.custom_status_changed.then_some(draft.custom_status),
             accent_color: color(&draft.accent_color),
             background_color: color(&draft.background_color),
             banner_color: color(&draft.banner_color),
@@ -699,5 +736,14 @@ mod tests {
     #[test]
     fn other_files_are_not_images() {
         assert_eq!(image_content_type("notes.txt"), None);
+    }
+
+    #[test]
+    fn profile_limits_are_the_cores() {
+        let limits: serde_json::Value = serde_json::from_str(&profile_limits_json()).unwrap();
+        assert_eq!(limits["displayName"], 80);
+        assert_eq!(limits["pronouns"], 40);
+        assert_eq!(limits["bio"], 190);
+        assert_eq!(limits["customStatus"], 128);
     }
 }

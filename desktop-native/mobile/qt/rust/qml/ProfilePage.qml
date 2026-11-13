@@ -7,9 +7,9 @@ import Yap.Ui
 
 // Someone's profile, a full-height sheet over the pager, on the desktop's
 // Profile object (show, close): the banner, the avatar with presence, the
-// name and handle, their status, Message, then About, roles and Member
-// since. Opened from a message's avatar or name, a member row, a DM row's
-// avatar or a DM's header.
+// name and handle, their status, Message (Edit profile on your own), then
+// About, roles and Member since. Opened from a message's avatar or name, a
+// member row, a DM row's avatar or a DM's header.
 //
 // TODO: present it in the shared BottomSheet (drag to dismiss) once that
 // is on main; until then it is a page of the stack that rises from the
@@ -30,6 +30,8 @@ Rectangle {
     signal closeRequested()
     // Message: the DM with them, opened by the caller.
     signal messageRequested(string userId)
+    // Edit profile (your own), opened by the caller.
+    signal editRequested()
 
     readonly property bool loaded: Profile.userId === userId
     // Read once for the page: content that scrolls or sits at an inset
@@ -193,6 +195,20 @@ Rectangle {
                 font: Theme.type.description
             }
 
+            Item {
+                width: parent.width
+                height: editKey.height + 16
+                visible: root.loaded && Profile.me
+                KitButton {
+                    id: editKey
+                    x: 20 + root.leftInset
+                    width: parent.width - 2 * x
+                    variant: "secondary"
+                    iconName: "edit"
+                    text: qsTr("Edit profile")
+                    onClicked: root.editRequested()
+                }
+            }
             Item {
                 width: parent.width
                 height: messageKey.height + 16
