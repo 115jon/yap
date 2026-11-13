@@ -161,6 +161,13 @@ fn ring(client: &mut Client) -> Vec<Effect> {
     )
 }
 
+/// Our DM header's call key: op 36 for Alice's DM.
+fn start(client: &mut Client) -> Vec<Effect> {
+    client.calls(CallsCommand::Start {
+        channel_id: DM.into(),
+    })
+}
+
 #[test]
 fn a_ring_should_play_the_ring_toast_and_show_the_incoming_call() {
     let mut c = Client::online();
@@ -200,6 +207,237 @@ fn accept_should_send_op_37_and_the_accepted_stop_should_join_the_dm_room() {
 }
 
 #[test]
+fn an_accepted_stop_answered_on_another_device_should_end_the_ring_quietly() {
+    let mut c = Client::online();
+    ring(&mut c);
+    // Another device of ours answered: the server tells every session.
+    let fx = c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": "call-1", "reason": "accepted" }),
+    );
+    assert!(voice_start(&fx).is_none(), "no join, no microphone");
+    assert!(gateway_frames(&fx).is_empty());
+    assert!(sounds(&fx).is_empty(), "no connect or end tone");
+    assert!(fx.contains(&Effect::View(ViewUpdate::StopSound(Sound::Ring))));
+    assert_eq!(c.view.status, RingStatus::Idle);
+    assert_eq!(c.view.end_reason, "answered_elsewhere");
+    assert!(!c.view.joined);
+    assert!(c.state.voice().is_none());
+}
+
+#[test]
+fn joining_the_ringing_dm_from_its_lobby_should_answer_it_here() {
+    let mut c = Client::online();
+    ring(&mut c);
+    let fx = c.calls(CallsCommand::Join {
+        channel_id: DM.into(),
+        video: false,
+    });
+    assert!(voice_start(&fx).is_some());
+    // The server's acceptRingOnJoin: this device is the one that answered.
+    let fx = c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": "call-1", "reason": "accepted" }),
+    );
+    assert!(sounds(&fx).contains(&Sound::CallConnect));
+    assert_eq!(c.view.status, RingStatus::Active);
+    assert!(c.state.voice().is_some());
+}
+
+#[test]
+fn a_call_started_on_another_device_should_not_ring_or_join_here() {
+    let mut c = Client::online();
+    // No op 36 from this device: another session of ours placed the call.
+    let fx = c.dispatch(
+        "CALL_RINGING",
+        json!({ "call_id": "call-2", "callee_id": ALICE, "channel_id": DM }),
+    );
+    assert!(sounds(&fx).is_empty(), "no outgoing ring here");
+    assert_eq!(c.view.status, RingStatus::Idle);
+    for reason in ["accepted", "timeout", "declined"] {
+        let fx = c.dispatch(
+            "CALL_RING_STOP",
+            json!({ "call_id": "call-2", "reason": reason }),
+        );
+        assert!(voice_start(&fx).is_none(), "{reason}: no join");
+        assert!(sounds(&fx).is_empty(), "{reason}: no tone");
+        assert_eq!(c.view.status, RingStatus::Idle);
+        assert!(c.state.voice().is_none());
+    }
+}
+
+#[test]
+fn an_accepted_stop_should_join_the_caller_that_started_the_call() {
+    let mut c = Client::online();
+    start(&mut c);
+    let fx = c.dispatch(
+        "CALL_RINGING",
+        json!({ "call_id": "call-2", "callee_id": ALICE, "channel_id": DM }),
+    );
+    assert!(sounds(&fx).contains(&Sound::OutgoingRing));
+    let fx = c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": "call-2", "reason": "accepted" }),
+    );
+    assert!(sounds(&fx).contains(&Sound::CallConnect));
+    assert!(voice_start(&fx).is_some());
+    assert_eq!(c.view.status, RingStatus::Active);
+}
+
+#[test]
+fn a_refused_start_should_not_take_up_a_later_ring_from_another_device() {
+    let mut c = Client::online();
+    start(&mut c);
+    // The server refuses our op 36 (the callee is busy).
+    c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": null, "reason": "busy" }),
+    );
+    c.dispatch(
+        "CALL_RINGING",
+        json!({ "call_id": "call-3", "callee_id": ALICE, "channel_id": DM }),
+    );
+    assert_eq!(c.view.status, RingStatus::Idle);
+}
+
+impl Client {
+    fn gateway(&mut self, event: GatewayEvent) -> Vec<Effect> {
+        let session = self.state.session().expect("session").id;
+        self.input(Input::Gateway { session, event })
+    }
+}
+
+/// Another device of ours placed a call in Alice's DM: its CALL_RINGING
+/// and accepted stop must neither ring nor join here.
+fn assert_ignores_a_call_from_another_device(c: &mut Client, call_id: &str) {
+    let fx = c.dispatch(
+        "CALL_RINGING",
+        json!({ "call_id": call_id, "callee_id": ALICE, "channel_id": DM }),
+    );
+    assert!(sounds(&fx).is_empty(), "no outgoing ring here");
+    assert_eq!(c.view.status, RingStatus::Idle);
+    let fx = c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": call_id, "reason": "accepted" }),
+    );
+    assert!(voice_start(&fx).is_none(), "no join, no microphone");
+    assert!(c.state.voice().is_none());
+}
+
+#[test]
+fn a_start_while_offline_should_say_so_and_not_take_up_a_later_ring() {
+    let mut c = Client::online();
+    c.gateway(GatewayEvent::Closed);
+    let fx = start(&mut c);
+    assert!(gateway_frames(&fx).is_empty(), "op 36 cannot go out");
+    assert!(fx.contains(&Effect::View(ViewUpdate::Notice(
+        "You're offline. Try again in a moment.".into()
+    ))));
+    // The old session comes back; another device of ours places a call.
+    c.gateway(GatewayEvent::Resumed);
+    assert_ignores_a_call_from_another_device(&mut c, "call-3");
+}
+
+#[test]
+fn a_refused_start_while_a_ring_is_up_should_not_take_up_a_later_ring() {
+    let mut c = Client::online();
+    // Alice calls us as we call her: the server refuses our op 36, on this
+    // socket only, while her ring is up here.
+    ring(&mut c);
+    start(&mut c);
+    c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": null, "reason": "busy" }),
+    );
+    // The refusal ends her ring here too (chat-gateway.ts does the same).
+    assert_eq!(c.view.status, RingStatus::Idle);
+    assert_ignores_a_call_from_another_device(&mut c, "call-3");
+}
+
+fn reconnecting() -> GatewayEvent {
+    GatewayEvent::Reconnecting {
+        attempt: 1,
+        offline: false,
+    }
+}
+
+#[test]
+fn a_start_lost_with_its_socket_should_not_take_up_a_later_ring() {
+    let drops = [
+        // The Resume replays nothing: the server never got our op 36.
+        vec![GatewayEvent::Closed, GatewayEvent::Resumed],
+        vec![GatewayEvent::Closed, reconnecting(), GatewayEvent::Resumed],
+        // The Resume failed: a fresh session.
+        vec![GatewayEvent::Closed, reconnecting(), GatewayEvent::Ready],
+        vec![GatewayEvent::Ready],
+    ];
+    for events in drops {
+        let mut c = Client::online();
+        // op 36 goes out, but the socket drops before its CALL_RINGING.
+        start(&mut c);
+        for event in events {
+            c.gateway(event);
+        }
+        assert_ignores_a_call_from_another_device(&mut c, "call-3");
+    }
+}
+
+#[test]
+fn a_start_whose_ring_is_replayed_by_the_resume_should_ring_and_join() {
+    for drop in [
+        vec![GatewayEvent::Closed],
+        vec![GatewayEvent::Closed, reconnecting()],
+    ] {
+        let mut c = Client::online();
+        // The server took our op 36, but the socket dropped before its
+        // CALL_RINGING reached us.
+        start(&mut c);
+        for event in drop {
+            c.gateway(event);
+        }
+        // The Resume replays the missed CALL_RINGING before Resumed.
+        let fx = c.dispatch(
+            "CALL_RINGING",
+            json!({ "call_id": "call-2", "callee_id": ALICE, "channel_id": DM }),
+        );
+        assert!(sounds(&fx).contains(&Sound::OutgoingRing));
+        assert_eq!(c.view.status, RingStatus::RingingOutgoing);
+        c.gateway(GatewayEvent::Resumed);
+        assert_eq!(c.view.status, RingStatus::RingingOutgoing);
+        let fx = c.dispatch(
+            "CALL_RING_STOP",
+            json!({ "call_id": "call-2", "reason": "accepted" }),
+        );
+        assert!(voice_start(&fx).is_some(), "our own call joins here");
+        assert_eq!(c.view.status, RingStatus::Active);
+    }
+}
+
+#[test]
+fn a_late_stop_for_a_declined_ring_should_not_drop_our_new_call() {
+    let mut c = Client::online();
+    ring(&mut c);
+    c.calls(CallsCommand::Decline);
+    // We call Alice back before the server's stop for her call arrives.
+    start(&mut c);
+    c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": "call-1", "reason": "declined" }),
+    );
+    let fx = c.dispatch(
+        "CALL_RINGING",
+        json!({ "call_id": "call-2", "callee_id": ALICE, "channel_id": DM }),
+    );
+    assert!(sounds(&fx).contains(&Sound::OutgoingRing));
+    let fx = c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": "call-2", "reason": "accepted" }),
+    );
+    assert!(voice_start(&fx).is_some(), "our own call joins here");
+    assert_eq!(c.view.status, RingStatus::Active);
+}
+
+#[test]
 fn decline_should_send_op_38_and_end_the_call() {
     let mut c = Client::online();
     ring(&mut c);
@@ -228,6 +466,7 @@ fn start_should_ring_the_dm_recipient_with_op_36() {
 #[test]
 fn a_declined_outgoing_ring_should_keep_the_caller_in_the_call_room() {
     let mut c = Client::online();
+    start(&mut c);
     let fx = c.dispatch(
         "CALL_RINGING",
         json!({ "call_id": "call-2", "callee_id": ALICE, "callee_display_name": "Alice", "channel_id": DM }),
@@ -245,6 +484,7 @@ fn a_declined_outgoing_ring_should_keep_the_caller_in_the_call_room() {
 #[test]
 fn cancel_should_send_op_39() {
     let mut c = Client::online();
+    start(&mut c);
     c.dispatch(
         "CALL_RINGING",
         json!({ "call_id": "call-2", "callee_id": ALICE, "channel_id": DM }),
@@ -319,6 +559,7 @@ fn an_accept_racing_a_cancelled_stop_should_end_the_call_and_ignore_the_expired_
 #[test]
 fn quit_while_an_outgoing_ring_goes_should_cancel_it_and_silence_the_ring() {
     let mut c = Client::online();
+    start(&mut c);
     c.dispatch(
         "CALL_RINGING",
         json!({ "call_id": "call-2", "callee_id": ALICE, "channel_id": DM }),
@@ -356,6 +597,7 @@ fn signing_out_while_a_ring_goes_should_silence_it_and_reset_the_calls() {
 #[test]
 fn a_busy_stop_should_end_the_ring_silently() {
     let mut c = Client::online();
+    start(&mut c);
     c.dispatch(
         "CALL_RINGING",
         json!({ "call_id": "call-2", "callee_id": ALICE, "channel_id": DM }),

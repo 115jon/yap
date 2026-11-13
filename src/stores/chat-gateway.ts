@@ -146,6 +146,19 @@ export function createChatGateway(
   /** SET_GATEWAY_FAILURE "auth" is on screen. */
   let authFailureShown = false;
 
+  // The server sends a call's ring, CALL_RINGING and CALL_RING_STOP to every
+  // session of both users, without saying which one answered. Only the tab
+  // that started the call (op 36) or answered it (op 37) joins its room.
+  /**
+   * The DM this tab rang (op 36), until its CALL_RINGING, a refusal, or a
+   * Resumed or Ready that came without that CALL_RINGING.
+   */
+  let initiatingChannelId: string | null = null;
+  /** That op 36 still waits in the socket's queue for the next Ready. */
+  let initiateQueued = false;
+  /** The call this tab started or answered. */
+  let ownCallId: string | null = null;
+
   // The socket's lifecycle (tickets, reconnects, heartbeat, wake); this
   // store keeps the protocol.
   const socket: RealtimeSocket<ChatGatewayServerMessage> = new RealtimeSocket({
@@ -200,6 +213,8 @@ export function createChatGateway(
         identified = false;
         resumeInFlight = false;
         resetSubscriptions();
+        // A call this tab started stays ours: a Resume replays its
+        // CALL_RINGING if the server took the op 36 (handleGatewayReady).
       },
       // The slow auth retry is not a reconnect attempt: the strip keeps
       // showing "Signed out", so only backoff retries count here.
@@ -888,6 +903,11 @@ export function createChatGateway(
           callee_avatar,
           channel_id,
         } = d.data;
+        // Another session of ours placed the call: it rings and joins
+        // there, not here.
+        if (initiatingChannelId !== channel_id) break;
+        initiatingChannelId = null;
+        ownCallId = call_id;
         const callState = useCallStore.getState();
         const currentUser = get().user;
 
@@ -939,23 +959,37 @@ export function createChatGateway(
           break;
         }
 
+        // A null id is our op 36 being refused (busy, unavailable).
+        if (call_id === null) initiatingChannelId = null;
+
         playRingStop();
         playOutgoingRingStop();
 
-        // If the ringing stopped because it was accepted, we transition the Ringing state to Active!
-        // This ensures the duration timer starts running and the remoteUser is preserved for the lobby UI.
-        if (reason === "accepted") {
-          playCallConnect();
+        // Accepted: the call goes on. A caller whose ring timed out or was
+        // declined is already in the call room and stays there, so they can
+        // retry or leave manually.
+        const callGoesOn =
+          reason === "accepted" ||
+          (callState.status === "ringing_outgoing" &&
+            (reason === "timeout" || reason === "declined"));
+        const ours =
+          callState.hasJoinedSFU || (call_id !== null && call_id === ownCallId);
+        if (callGoesOn && ours) {
+          // Active: the duration timer starts, the remoteUser stays for the
+          // lobby UI, and CallVoiceManager joins the room.
+          if (reason === "accepted") playCallConnect();
           callState.acceptCall();
-        } else if (
-          callState.status === "ringing_outgoing" &&
-          (reason === "timeout" || reason === "declined")
-        ) {
-          // The callee didn't answer or declined, but the caller is already
-          // connected to the SFU/voice channel. Keep them in the call room so
-          // they can stay, retry, or leave manually. Transition to "active"
-          // so the outgoing ringing modal closes and the call dashboard shows.
-          callState.acceptCall();
+        } else if (callGoesOn) {
+          // Another session of ours answered or placed it: the ring ends
+          // here without joining (no microphone, no tones).
+          if (
+            callState.status === "ringing_incoming" ||
+            callState.status === "ringing_outgoing"
+          ) {
+            callState.endCall(
+              reason === "accepted" ? "answered_elsewhere" : reason,
+            );
+          }
         } else {
           // Otherwise, the ring was cancelled, declined (for callee), or timed out (for callee).
           const wasActive = callState.status !== "idle";
@@ -1013,7 +1047,16 @@ export function createChatGateway(
         d: { game_activity: gameActivity },
       });
     }
+    const initiateWentOut = initiateQueued;
     socket.markReady();
+    // The queue went out on this socket.
+    initiateQueued = false;
+    // A Resumed comes after the replayed frames, so the CALL_RINGING of an
+    // op 36 the server took has been taken up by now; a Ready starts a
+    // session it never reaches. One still awaited was lost with the old
+    // socket, and waiting on would take up a later call another session of
+    // ours places in that DM. An op 36 the queue just sent waits on.
+    if (!initiateWentOut) initiatingChannelId = null;
 
     const servers = get().servers;
     for (const server of servers) {
@@ -1108,7 +1151,10 @@ export function createChatGateway(
   };
 
   const disconnectGateway = () => {
+    // stop() clears the send queue, a queued op 36 included.
     socket.stop();
+    initiatingChannelId = null;
+    initiateQueued = false;
     releaseReconnectSoundSuppression?.();
     releaseReconnectSoundSuppression = null;
     resetSubscriptions();
@@ -1185,9 +1231,8 @@ export function createChatGateway(
     }
   };
 
-  const sendWhenReady = (msg: OutboundFrame) => {
-    socket.sendWhenReady(msg);
-  };
+  /** Sends now or queues for the next Ready; false only if a send failed. */
+  const sendWhenReady = (msg: OutboundFrame) => socket.sendWhenReady(msg);
 
   const subscribeChannel = (channelId: string) => {
     if (subscribedChannelId === channelId) return;
@@ -1254,13 +1299,22 @@ export function createChatGateway(
     sendVoiceStateUpdate: (data) =>
       sendWhenReady({ op: GatewayOp.VoiceStateUpdate, d: data }),
     sendGateway,
-    sendCallInitiate: (targetUserId: string, channelId: string) =>
-      sendWhenReady({
+    sendCallInitiate: (targetUserId: string, channelId: string) => {
+      initiatingChannelId = channelId;
+      initiateQueued = !socket.isReady;
+      const sent = sendWhenReady({
         op: GatewayOp.CallInitiate,
         d: { target_user_id: targetUserId, channel_id: channelId },
-      }),
-    sendCallAccept: (callId: string) =>
-      sendWhenReady({ op: GatewayOp.CallAccept, d: { call_id: callId } }),
+      });
+      if (!sent) {
+        initiatingChannelId = null;
+        initiateQueued = false;
+      }
+    },
+    sendCallAccept: (callId: string) => {
+      ownCallId = callId;
+      sendWhenReady({ op: GatewayOp.CallAccept, d: { call_id: callId } });
+    },
     sendCallDecline: (callId: string) =>
       sendWhenReady({ op: GatewayOp.CallDecline, d: { call_id: callId } }),
     sendCallEnd: (callId: string) =>
