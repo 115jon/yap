@@ -265,7 +265,8 @@ pub struct CallsView {
 pub struct CallsState {
     pub ring: Option<Ring>,
     /// The DM whose call this device asked for (op 36), until its
-    /// `CALL_RINGING`, a refusal or a gateway drop.
+    /// `CALL_RINGING`, a refusal, or a Resumed or Ready that came without
+    /// that `CALL_RINGING`.
     pub initiating: Option<String>,
     pub end_reason: String,
     pub details_open: bool,

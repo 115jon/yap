@@ -3731,6 +3731,12 @@ impl State {
             GatewayEvent::Resumed => {
                 current.gateway.ready = true;
                 current.gateway.was_ready = true;
+                // The Resume replays missed frames before Resumed, so a
+                // CALL_RINGING for our op 36 has been taken up by now: one
+                // still awaited was lost with the old socket, and waiting on
+                // would take up a later call another device of ours places
+                // in that DM.
+                self.calls.initiating = None;
                 // The old socket's activity went with it: restated below.
                 self.activity_socket_changed();
                 self.set_connected(fx, true);
@@ -3744,10 +3750,8 @@ impl State {
             }
             GatewayEvent::Closed => {
                 current.gateway.ready = false;
-                // Our op 36 may be lost with the socket; its CALL_RINGING
-                // must not be waited for, or we take up a later call
-                // another device of ours places in that DM.
-                self.calls.initiating = None;
+                // A call we started stays ours: a Resume replays its
+                // CALL_RINGING if the server took the op 36 (see Resumed).
                 self.activity_socket_changed();
                 self.set_connected(fx, false);
             }
@@ -3755,7 +3759,6 @@ impl State {
                 // Also before the first ready (a launch from the cache with
                 // no network): the shell is up, so the strip says why.
                 current.gateway.ready = false;
-                self.calls.initiating = None;
                 if self.connected {
                     self.set_connected(fx, false);
                 }

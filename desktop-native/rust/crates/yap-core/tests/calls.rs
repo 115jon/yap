@@ -354,17 +354,21 @@ fn a_refused_start_while_a_ring_is_up_should_not_take_up_a_later_ring() {
     assert_ignores_a_call_from_another_device(&mut c, "call-3");
 }
 
+fn reconnecting() -> GatewayEvent {
+    GatewayEvent::Reconnecting {
+        attempt: 1,
+        offline: false,
+    }
+}
+
 #[test]
-fn a_gateway_drop_after_a_start_should_not_take_up_a_later_ring() {
+fn a_start_lost_with_its_socket_should_not_take_up_a_later_ring() {
     let drops = [
+        // The Resume replays nothing: the server never got our op 36.
         vec![GatewayEvent::Closed, GatewayEvent::Resumed],
-        vec![
-            GatewayEvent::Reconnecting {
-                attempt: 1,
-                offline: false,
-            },
-            GatewayEvent::Resumed,
-        ],
+        vec![GatewayEvent::Closed, reconnecting(), GatewayEvent::Resumed],
+        // The Resume failed: a fresh session.
+        vec![GatewayEvent::Closed, reconnecting(), GatewayEvent::Ready],
         vec![GatewayEvent::Ready],
     ];
     for events in drops {
@@ -375,6 +379,37 @@ fn a_gateway_drop_after_a_start_should_not_take_up_a_later_ring() {
             c.gateway(event);
         }
         assert_ignores_a_call_from_another_device(&mut c, "call-3");
+    }
+}
+
+#[test]
+fn a_start_whose_ring_is_replayed_by_the_resume_should_ring_and_join() {
+    for drop in [
+        vec![GatewayEvent::Closed],
+        vec![GatewayEvent::Closed, reconnecting()],
+    ] {
+        let mut c = Client::online();
+        // The server took our op 36, but the socket dropped before its
+        // CALL_RINGING reached us.
+        start(&mut c);
+        for event in drop {
+            c.gateway(event);
+        }
+        // The Resume replays the missed CALL_RINGING before Resumed.
+        let fx = c.dispatch(
+            "CALL_RINGING",
+            json!({ "call_id": "call-2", "callee_id": ALICE, "channel_id": DM }),
+        );
+        assert!(sounds(&fx).contains(&Sound::OutgoingRing));
+        assert_eq!(c.view.status, RingStatus::RingingOutgoing);
+        c.gateway(GatewayEvent::Resumed);
+        assert_eq!(c.view.status, RingStatus::RingingOutgoing);
+        let fx = c.dispatch(
+            "CALL_RING_STOP",
+            json!({ "call_id": "call-2", "reason": "accepted" }),
+        );
+        assert!(voice_start(&fx).is_some(), "our own call joins here");
+        assert_eq!(c.view.status, RingStatus::Active);
     }
 }
 
