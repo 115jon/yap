@@ -179,7 +179,8 @@ Window {
         stack.sheet = false
         stack.push(settingsPage)
     }
-    // Edit profile, over Settings or your own profile.
+    // Edit profile, over Settings, your own profile or from the account
+    // panel.
     function openProfileEditor() {
         if (stack.busy || stack.currentItem?.isProfileEditor === true)
             return
@@ -522,6 +523,7 @@ Window {
 
     // Close what is on top, or everything down to the pager.
     function closeTop(all) {
+        accountPanel.close()
         if (stack.depth < 2)
             return
         stack.sheet = stack.currentItem.sheet
@@ -531,12 +533,16 @@ Window {
             stack.pop()
     }
 
-    // Back, in order: a sheet or stacked page, then what is over the chat
-    // (its image viewer), the pager's pages (members, chat), then out of
-    // the app from the drawer.
+    // Back, in order: the account panel, a sheet or stacked page, then what
+    // is over the chat (its image viewer), the pager's pages (members,
+    // chat), then out of the app from the drawer.
     function goBack() {
         if (!ready) {
             Native.leave()
+            return
+        }
+        if (accountPanel.shown) {
+            accountPanel.close()
             return
         }
         // A join in flight holds the landing.
@@ -562,6 +568,7 @@ Window {
         }
         dropAnswered()
         callWanted = false
+        accountPanel.close()
         stack.pop(null, StackView.Immediate)
         pager.snap()
         if (Session.phase === Session.SignedOut)
@@ -607,7 +614,7 @@ Window {
             initialItem: Pager {
                 id: pager
                 onProfileRequested: userId => window.openProfile(userId)
-                onSettingsRequested: window.openSettings()
+                onAccountRequested: plate => accountPanel.openFrom(plate)
                 onFriendsRequested: window.openFriends()
                 onVoiceRequested: channelId => window.joinVoice(channelId)
                 onCallRequested: window.openCall()
@@ -756,6 +763,30 @@ Window {
         }
     }
 
+    // The account panel, grown out of the drawer's account plate: presence,
+    // custom status, profile, theme and Settings.
+    AccountPanel {
+        id: accountPanel
+        anchors.fill: parent
+        anchors.bottomMargin: Native.clippedBottom
+        onSettingsRequested: {
+            accountPanel.close()
+            window.openSettings()
+        }
+        onProfileRequested: userId => {
+            accountPanel.close()
+            window.openProfile(userId)
+        }
+        onProfileEditRequested: {
+            accountPanel.close()
+            window.openProfileEditor()
+        }
+        onCallRequested: {
+            accountPanel.close()
+            window.openCall()
+        }
+    }
+
     // A DM call ringing us: over everything, the lock screen included.
     IncomingCallSheet {
         anchors.fill: parent
@@ -771,7 +802,12 @@ Window {
         function onBackProgressed(progress) {
             if (!window.ready)
                 return
-            if (stack.depth > 1)
+            // The shim ends a committed gesture with a progress of 0 before
+            // it invokes Back: the panel leaves from where the finger left it.
+            if (accountPanel.shown) {
+                if (progress > 0)
+                    accountPanel.backProgress = progress
+            } else if (stack.depth > 1)
                 stack.currentItem.backProgress = progress
             else
                 pager.backPreview(progress)
@@ -779,7 +815,9 @@ Window {
         function onBackCancelled() {
             if (!window.ready)
                 return
-            if (stack.depth > 1)
+            if (accountPanel.shown)
+                accountPanel.backProgress = 0
+            else if (stack.depth > 1)
                 stack.currentItem.backProgress = 0
             else
                 pager.backCancel()
@@ -795,6 +833,6 @@ Window {
     Binding {
         target: Native
         property: "handlesBack"
-        value: window.ready && (stack.depth > 1 || pager.canGoBack)
+        value: window.ready && (accountPanel.shown || stack.depth > 1 || pager.canGoBack)
     }
 }
