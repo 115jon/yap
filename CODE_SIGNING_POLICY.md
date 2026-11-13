@@ -36,11 +36,12 @@ release workflow (`.github/workflows/desktop-native-release.yml`) signs:
 files (`graphics-hook*.dll`, `inject-helper*.exe`, `get-graphics-offsets*.exe`)
 or Microsoft's ONNX Runtime: they ship as their vendors released them, with
 their vendors' signatures. `desktop-native/tools/package.ps1` fails the build
-if the OBS files' hashes differ from `desktop/packaging/obs-signed-hook.lock.json`.
+if the OBS files' hashes differ from
+`desktop-native/packaging/obs-signed-hook.lock.json`.
 
-The Tauri app's releases (3.x, `.github/workflows/desktop-release.yml`)
-signed its app, launcher stub, `YapSetup.exe` and the project's custom CEF
-binaries the same way.
+The Tauri app's releases (3.x, built by `desktop-release.yml`, now on the
+`archive/tauri-desktop` branch) signed its app, launcher stub, `YapSetup.exe`
+and the project's custom CEF binaries the same way.
 
 ## Release controls
 
@@ -55,7 +56,7 @@ Each release follows this sequence:
    scripts, gets neither the OIDC token nor a write token.
 3. CI signs `Yap.exe`, then Velopack signs `Update.exe`, the stub and
    `Setup.exe` as it packs them.
-4. `desktop/scripts/verify-authenticode.ps1` runs `signtool verify /pa` on every
+4. `desktop-native/tools/verify-authenticode.ps1` runs `signtool verify /pa` on every
    signed file and checks the signer name and timestamp. Any failure stops the
    release.
 5. Only then does CI upload the packages and publish the release.

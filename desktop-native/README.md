@@ -177,7 +177,7 @@ the decisions.
   hook (on by default, `gameCaptureHook`). The blocklist, the web app's
   remote blocklist, the learned skips and OBS's `OpenProcess` preflight
   run before anything is injected; the six files pinned in
-  `desktop/packaging/obs-signed-hook.lock.json` are verified (SHA-256,
+  `packaging/obs-signed-hook.lock.json` are verified (SHA-256,
   Authenticode, signer) and staged under the profile's `capture-hook`
   folder. WGC keeps running underneath and carries the share whenever the
   hook is not delivering. DX11 and DX12 games; Vulkan only when an

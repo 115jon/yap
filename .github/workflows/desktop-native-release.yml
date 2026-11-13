@@ -554,7 +554,7 @@ jobs:
 
       # OIDC federated credential on AZURE_CLIENT_ID: main and v* tags only.
       # The service principal holds only Artifact Signing Certificate Profile
-      # Signer (docs/desktop/code-signing.md).
+      # Signer (desktop-native/docs/code-signing.md).
       - name: Azure login for Artifact Signing
         if: needs.plan.outputs.dry_run != 'true'
         uses: azure/login@053f7285eb20bf5469ef084617b0b24d3cec53fc # v3.1.0

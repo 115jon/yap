@@ -88,7 +88,7 @@ steps:
 ```
 
 Then check the result with `signtool verify /pa`, or copy
-`desktop/scripts/verify-authenticode.ps1` from this repo. Sign before any step
+`desktop-native/tools/verify-authenticode.ps1` from this repo. Sign before any step
 that hashes or signs the final bytes (installers that embed the file, updater
 signatures, checksums), and never re-sign third-party files that must keep
 their vendor's signature.

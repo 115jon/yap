@@ -6,9 +6,13 @@ development-only. Researched 2026-11-01 against `main` at `e3880f50`, OBS Studio
 (latest, released 2026-10-29), and the 3.7.0 install on a second Windows 11 machine. The research below is kept as
 written; where it disagrees with the implementation section, the implementation section is current.
 
+It was written for the Tauri app, which is archived on the `archive/tauri-desktop` branch: paths under `desktop/`
+and the linked `native-share.md` and `packaging.md` live there. The lock and the fetch script now live in
+`desktop-native/packaging/` and `desktop-native/tools/`.
+
 This document answers one question: could the native share drive the graphics hook that OBS Studio ships, signed by
 the OBS Project, instead of the hook we build from source? It then proposes how to do that without losing what the
-fork provides. It builds on [native-share.md](native-share.md) and [packaging.md](packaging.md), and on PR #129
+fork provides. It builds on `native-share.md` and `packaging.md`, and on PR #129
 (fallback reason for a hook that never delivers, anti-cheat marker detection), which it does not repeat.
 
 ## Summary
@@ -291,7 +295,7 @@ description states the account risk in one sentence. It is off by default. A cur
 
 - **Bundled, pinned copy** (recommended): the six files, about 1.1 MB, under `obs-capture/obs-signed/` in the
   payload. Download-on-demand adds a network dependency and a second verification path, and saves almost nothing.
-- **Lock file** `desktop/packaging/obs-signed-hook.lock.json`: OBS version, tag commit, release asset name and
+- **Lock file** `desktop-native/packaging/obs-signed-hook.lock.json`: OBS version, tag commit, release asset name and
   SHA-256, and per file the in-zip path, SHA-256, PE `FileVersion`, and expected signer thumbprints (primary and
   nested). Also the `HOOK_VER` the host was tested against.
 - **Never re-sign or touch the bytes.** The future Authenticode step for our own binaries must exclude
@@ -403,8 +407,8 @@ the fork from the default path.
 | unprotected                                                                                | `ObsSigned`; `Own` only with `RALPH_CAPTURE_HOOK_FLAVOR=own` (dev)     |
 | a verified OBS-signed hook is already resident and idle (our earlier share, or OBS's copy) | attach without injecting (signal `Restart`), after checking its signer |
 
-- Files: `desktop/packaging/obs-signed-hook.lock.json` pins OBS 33.0.1 (zip SHA-256, per-file SHA-256, file version,
-  signer thumbprints). `desktop/scripts/fetch-obs-signed-hook.ps1` fetches and checks them in CI and locally;
+- Files: `desktop-native/packaging/obs-signed-hook.lock.json` pins OBS 33.0.1 (zip SHA-256, per-file SHA-256, file version,
+  signer thumbprints). `desktop-native/tools/fetch-obs-signed-hook.ps1` fetches and checks them in CI and locally;
   `stage-payload.ps1` checks the staged bytes; the installer ships them under `obs-capture/obs-signed/`.
 - Before every injection the host opens the three files for the target bitness with read-only sharing, checks
   SHA-256 against the embedded lock and the Authenticode signature (`WinVerifyTrust`, signer "OBS Project, LLC",
