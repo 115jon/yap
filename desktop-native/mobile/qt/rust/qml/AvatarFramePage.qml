@@ -101,8 +101,11 @@ FocusScope {
     Rectangle {
         anchors.fill: parent
         color: Theme.ply0
-        // Taps under the frame stay here.
-        TapHandler {}
+        // Touches under the frame stay here: a handler would let them
+        // through to the edit page below (its keys, fields and scroll).
+        MouseArea {
+            anchors.fill: parent
+        }
     }
 
     Column {
