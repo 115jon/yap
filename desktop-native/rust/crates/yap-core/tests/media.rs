@@ -581,6 +581,64 @@ fn gif_tiles_should_fall_back_from_video_previews_and_alternate_columns() {
     );
 }
 
+fn gif_tiles_for(client: &mut Client, results: Vec<GifItem>) -> Vec<yap_core::store::GifRow> {
+    let fx = client.command(Command::GifSearch {
+        query: "cat".into(),
+        media_type: "gifs".into(),
+        provider: "klipy".into(),
+    });
+    let (id, _) = find(&fx, |r| matches!(r, ApiRequest::Gifs { .. }));
+    let fx = client.answer(
+        id,
+        Ok(ApiResponse::Gifs(GifPage {
+            results,
+            next: None,
+        })),
+    );
+    gif_tiles(&fx)
+}
+
+#[test]
+fn gif_tiles_should_show_the_small_thumb_not_the_sent_gif() {
+    let mut client = Client::online();
+    let mut item = gif("g1");
+    item.send.size_bytes = 22_700_000;
+    item.thumb = Some(GifAsset {
+        url: "https://static.klipy.com/t.gif".into(),
+        width: 220.0,
+        height: 110.0,
+        size_bytes: 180_000,
+        content_type: "image/gif".into(),
+    });
+    let tiles = gif_tiles_for(&mut client, vec![item]);
+    let shape: Vec<(&str, &str, i64)> = tiles
+        .iter()
+        .map(|t| (t.preview.as_str(), t.video.as_str(), t.aspect))
+        .collect();
+    assert_eq!(shape, [("https://static.klipy.com/t.gif", "", 500)]);
+}
+
+#[test]
+fn a_heavy_sent_gif_should_loop_its_small_video_preview_instead() {
+    let mut client = Client::online();
+    let mut heavy = gif("g1");
+    heavy.send.size_bytes = 22_700_000;
+    let mut unknown = gif("g2");
+    unknown.send.size_bytes = 0;
+    let tiles = gif_tiles_for(&mut client, vec![heavy, unknown]);
+    let shape: Vec<(&str, &str)> = tiles
+        .iter()
+        .map(|t| (t.preview.as_str(), t.video.as_str()))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            ("", "https://static.klipy.com/p.mp4"),
+            ("", "https://static.klipy.com/p.mp4")
+        ]
+    );
+}
+
 #[test]
 fn a_picked_gif_should_register_then_post_with_its_attachment() {
     let mut client = Client::online();

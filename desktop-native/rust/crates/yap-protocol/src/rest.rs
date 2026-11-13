@@ -734,6 +734,10 @@ pub struct GifItem {
     pub alt_text: Option<String>,
     #[serde(default)]
     pub preview: GifAsset,
+    /// The lightest picture fit for a tile (`tinygif`, a small webp), from
+    /// newer servers; absent on favourites.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumb: Option<GifAsset>,
     #[serde(default)]
     pub send: GifAsset,
     #[serde(default)]

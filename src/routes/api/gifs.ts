@@ -19,8 +19,10 @@ import {
   inferGifPickerMediaType,
   isGifPickerMediaType,
   MAX_GIF_FAVORITES,
+  gifSearchMediaFilter,
   normalizeKlipyCategory,
   normalizeKlipyGifResult,
+  normalizeKlipyNativeResult,
   normalizeGifPickerContentType,
   normalizeTenorCategory,
   normalizeTenorGifResult,
@@ -28,8 +30,6 @@ import {
   type TenorCacheParamValue,
   type TenorConfig,
   type GifPickerItem,
-  type GifPickerAsset,
-  type GifPickerContentType,
   type GifPickerMediaType,
 } from "@/lib/gif-picker";
 import {
@@ -291,131 +291,6 @@ function normalizeFavoriteProvider(value: unknown): GifProvider {
   if (value === "tenor") return "tenor";
   if (value === "external") return "external";
   return "klipy";
-}
-
-function getKlipyStaticAssetContentType(
-  url: string,
-  mediaType: Exclude<NativeKlipyMediaType, "clips">,
-): GifPickerContentType {
-  const lowerUrl = url.toLowerCase();
-  if (lowerUrl.includes(".webp")) return "image/webp";
-  if (lowerUrl.includes(".png"))
-    return mediaType === "memes" ? "image/png" : "image/apng";
-  return "image/gif";
-}
-
-function normalizeKlipyNativeResult(
-  result: any,
-  mediaType: NativeKlipyMediaType,
-): GifPickerItem | null {
-  if (!result || (!result.id && !result.slug)) return null;
-
-  const id = String(result.id || result.slug);
-  const title = String(
-    result.title ||
-      result.slug ||
-      (mediaType === "stickers"
-        ? "Sticker"
-        : mediaType === "memes"
-          ? "Meme"
-          : "Clip"),
-  );
-
-  let previewUrl = "";
-  let previewWidth = 320;
-  let previewHeight = 320;
-  let previewSize = 0;
-  let previewType: GifPickerAsset["contentType"] = "image/gif";
-
-  let sendUrl = "";
-  let sendWidth = 320;
-  let sendHeight = 320;
-  let sendSize = 0;
-  let sendType: GifPickerAsset["contentType"] = "image/gif";
-
-  if (mediaType === "clips") {
-    const file = result.file || {};
-    const fileMeta = result.file_meta || {};
-
-    const mp4Url = file.mp4 || file.hd?.mp4?.url || file.md?.mp4?.url;
-    const webpUrl = file.webp || file.hd?.webp?.url || file.md?.webp?.url;
-    const gifUrl = file.gif || file.hd?.gif?.url || file.md?.gif?.url;
-
-    const mp4Meta = fileMeta.mp4 || file.hd?.mp4 || file.md?.mp4 || {};
-    const webpMeta = fileMeta.webp || file.hd?.webp || file.md?.webp || {};
-    const gifMeta = fileMeta.gif || file.hd?.gif || file.md?.gif || {};
-
-    sendUrl = mp4Url || webpUrl || gifUrl || "";
-    sendWidth = mp4Meta.width || webpMeta.width || gifMeta.width || 320;
-    sendHeight = mp4Meta.height || webpMeta.height || gifMeta.height || 320;
-    sendSize = mp4Meta.size || webpMeta.size || gifMeta.size || 0;
-    sendType = mp4Url ? "video/mp4" : webpUrl ? "image/webp" : "image/gif";
-
-    previewUrl = webpUrl || mp4Url || gifUrl || "";
-    previewWidth = webpMeta.width || mp4Meta.width || gifMeta.width || 320;
-    previewHeight = webpMeta.height || mp4Meta.height || gifMeta.height || 320;
-    previewSize = webpMeta.size || mp4Meta.size || gifMeta.size || 0;
-    previewType = webpUrl ? "image/webp" : mp4Url ? "video/mp4" : "image/gif";
-  } else {
-    const file = result.file || {};
-    const hd = file.hd || {};
-    const md = file.md || file.sm || hd || {};
-
-    const sendAsset =
-      hd.webp || hd.png || hd.gif || md.webp || md.png || md.gif || {};
-    const previewAsset =
-      md.webp || md.png || md.gif || hd.webp || hd.png || hd.gif || {};
-
-    sendUrl = sendAsset.url || "";
-    sendWidth = sendAsset.width || 320;
-    sendHeight = sendAsset.height || 320;
-    sendSize = sendAsset.size || 0;
-    sendType = sendAsset.url
-      ? getKlipyStaticAssetContentType(sendUrl, mediaType)
-      : "image/gif";
-
-    previewUrl = previewAsset.url || "";
-    previewWidth = previewAsset.width || 320;
-    previewHeight = previewAsset.height || 320;
-    previewSize = previewAsset.size || 0;
-    previewType = previewAsset.url
-      ? getKlipyStaticAssetContentType(previewUrl, mediaType)
-      : "image/gif";
-  }
-
-  if (!sendUrl || !previewUrl) return null;
-
-  return {
-    id,
-    title,
-    provider: "klipy",
-    preview: {
-      url: previewUrl,
-      width: previewWidth,
-      height: previewHeight,
-      sizeBytes: previewSize,
-      contentType: previewType,
-    },
-    send: {
-      url: sendUrl,
-      width: sendWidth,
-      height: sendHeight,
-      sizeBytes: sendSize,
-      contentType: sendType,
-    },
-    sourceUrl: sendUrl,
-    aspectRatio: previewWidth / previewHeight,
-    duration:
-      mediaType === "clips"
-        ? typeof result.duration === "number"
-          ? result.duration
-          : typeof result.duration === "string" &&
-              !isNaN(parseFloat(result.duration))
-            ? parseFloat(result.duration)
-            : undefined
-        : undefined,
-    mediaType,
-  };
 }
 
 function normalizeSuggestions(data: any): string[] {
@@ -984,7 +859,7 @@ const GET = async ({ request }: any) => {
       if (provider === "tenor" && mediaType === "stickers") {
         params.searchfilter = "sticker";
       } else if (mediaType === "gifs") {
-        params.media_filter = "gif,mediumgif,tinygif,mp4,tinymp4";
+        params.media_filter = gifSearchMediaFilter(provider);
       }
     }
 

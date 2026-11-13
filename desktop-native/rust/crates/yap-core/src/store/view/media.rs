@@ -610,16 +610,33 @@ pub(in crate::store) fn upload_rows(
         .collect()
 }
 
-/// The URL a GIF tile shows: the preview, unless it is a video (Qt has no
-/// player here), then the image that would be sent.
+/// The sent GIF stands in for a video preview only up to this size: KLIPY's
+/// full GIFs run to tens of MB.
+const MAX_SEND_AS_PREVIEW_BYTES: u64 = 1_000_000;
+
+/// The picture a GIF tile shows (Qt has no player here): the server's
+/// `thumb`, else an image preview, else the sent image when it is known to
+/// be light or there is no video preview to loop instead.
 pub fn gif_preview(item: &GifItem) -> Option<&str> {
+    gif_preview_asset(item).map(|asset| asset.url.as_str())
+}
+
+fn gif_preview_asset(item: &GifItem) -> Option<&yap_protocol::rest::GifAsset> {
     let image = |asset: &yap_protocol::rest::GifAsset| {
-        (asset.content_type.starts_with("image/") && is_web_url(&asset.url)).then_some(())
+        asset.content_type.starts_with("image/") && is_web_url(&asset.url)
     };
-    if image(&item.preview).is_some() {
-        Some(item.preview.url.as_str())
-    } else if image(&item.send).is_some() {
-        Some(item.send.url.as_str())
+    let video_preview = gif_favorite::normalize_content_type(Some(&item.preview.content_type))
+        == "video/mp4"
+        && is_web_url(&item.preview.url);
+    if let Some(thumb) = item.thumb.as_ref().filter(|t| image(t)) {
+        Some(thumb)
+    } else if image(&item.preview) {
+        Some(&item.preview)
+    } else if image(&item.send)
+        && (!video_preview
+            || (item.send.size_bytes > 0 && item.send.size_bytes <= MAX_SEND_AS_PREVIEW_BYTES))
+    {
+        Some(&item.send)
     } else {
         None
     }
@@ -683,16 +700,12 @@ pub(in crate::store) fn gif_rows(
     let clips = browse.media_type == "clips";
     let shown = browse.items.iter().filter_map(|item| {
         let video = gif_video(item, clips);
-        let image = gif_preview(item);
+        let image = gif_preview_asset(item);
         (video.is_some() || image.is_some()).then_some((item, image, video))
     });
     for (i, (item, image, video)) in shown.enumerate() {
         let column = i % 2;
-        let asset = match (video, image) {
-            (Some(video), _) => video,
-            (None, Some(url)) if item.preview.url == url => &item.preview,
-            _ => &item.send,
-        };
+        let asset = video.or(image).unwrap_or(&item.send);
         let aspect = if asset.width > 0.0 && asset.height > 0.0 {
             // Clamped so one odd asset cannot make a tile a sliver or a tower.
             ((asset.height / asset.width).clamp(0.25, 2.5) * 1000.0).round() as i64
@@ -709,7 +722,7 @@ pub(in crate::store) fn gif_rows(
                 .filter(|t| !t.is_empty())
                 .unwrap_or(&item.title)
                 .to_owned(),
-            preview: image.unwrap_or_default().to_owned(),
+            preview: image.map(|a| a.url.clone()).unwrap_or_default(),
             video: video.map(|a| a.url.clone()).unwrap_or_default(),
             clip: clips && video.is_some(),
             duration: gif_duration(item.duration),
