@@ -777,7 +777,7 @@ core's invites:
   limit (Admin's quick invite on the open server); a channel's Invite to
   channel makes its 7-day link that lands in the channel (Extras' channel
   invite). The link goes to the system share sheet, headed "Invite people
-  to <server>"; one that could not be made says why under its row. The
+  to `<server>`"; one that could not be made says why under its row. The
   rows show only with the server's Create invite permission. The menus
   also carry Mark as read, and a channel's Copy link.
 - **Opening one.** The manifest takes the web's links,
@@ -790,7 +790,7 @@ core's invites:
   `Main.qml` once signed in, which hands it to `Invites.openLink`. An
   invite opens `InviteLandingPage` over the pager: the server's tile,
   who invited, its name and member count, then No thanks and Accept
-  invite, or Open <server> for a server you are in, and the expired,
+  invite, or Open `<server>` for a server you are in, and the expired,
   missing and failed states. A joined server opens on its tree after
   1.5 s. A chat link opens the channel and slides the chat in.
 - **No verified links yet.** The web's `/.well-known/assetlinks.json` names
