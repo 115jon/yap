@@ -16,6 +16,11 @@ Item {
     property string place: dmCall ? qsTr("Call with %1").arg(Voice.channelName) : Voice.channelName
     // The clock ticks once a second only while it shows.
     property bool clockShown: true
+    // From the LED to the word, and whether the place starts under the word
+    // rather than under the LED (the drawer's call bar keeps AccountBar's
+    // columns: 27, under the word).
+    property real gap: 8
+    property bool placeUnderWord: false
 
     readonly property bool inCall: Voice.channelId.length > 0
     readonly property bool settled: inCall && Voice.live && Voice.status === "Connected"
@@ -46,7 +51,7 @@ Item {
         return h > 0 ? "%1:%2:%3".arg(h).arg(String(m).padStart(2, "0")).arg(sec) : "%1:%2".arg(m).arg(sec)
     }
 
-    implicitWidth: Math.max(head.implicitWidth, placeText.implicitWidth)
+    implicitWidth: Math.max(head.implicitWidth, placeText.x + placeText.implicitWidth)
     implicitHeight: head.height + 2 + placeText.implicitHeight
     Accessible.role: Accessible.StaticText
     Accessible.name: "%1, %2".arg(word).arg(place)
@@ -64,7 +69,7 @@ Item {
         Text {
             id: wordText
             anchors.left: led.right
-            anchors.leftMargin: 8
+            anchors.leftMargin: root.gap
             anchors.right: clockText.visible ? clockText.left : parent.right
             anchors.rightMargin: clockText.visible ? 8 : 0
             anchors.verticalCenter: parent.verticalCenter
@@ -88,7 +93,8 @@ Item {
         id: placeText
         anchors.top: head.bottom
         anchors.topMargin: 2
-        width: parent.width
+        x: root.placeUnderWord ? wordText.x : 0
+        width: parent.width - x
         textFormat: Text.PlainText
         text: root.place
         elide: Text.ElideRight

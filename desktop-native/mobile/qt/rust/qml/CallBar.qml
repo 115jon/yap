@@ -37,11 +37,14 @@ Rectangle {
     CallStatusLine {
         id: line
         anchors.left: parent.left
-        anchors.leftMargin: 24 + root.leftInset
+        // AccountBar's columns: the LED at 27, the text at 60.
+        anchors.leftMargin: 12 + 15 + root.leftInset
         anchors.right: glyphs.left
         anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
         clockShown: false
+        gap: 12 + 15
+        placeUnderWord: true
     }
     Row {
         id: glyphs
