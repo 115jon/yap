@@ -1030,8 +1030,13 @@ right now`).
   the app (an activity intent: Android 12+ refuses activity starts from a
   notification's broadcast) and tells the server at once (`POST
 /api/calls/:id/accept`, with the sealed session, as a Reply does), so the
-  caller stops ringing while Qt starts; once signed in, `Main.qml` opens the
-  DM and joins its call (`Native.callAnswered`, `takeAnsweredCall`).
+  caller stops ringing while Qt starts. Only when the server takes the
+  answer does `Main.qml` open the DM and join its call once signed in
+  (`Native.callAnswered`, `takeAnsweredCall`); a refusal (the caller hung
+  up as it was answered) joins nothing and shows a toast. The in-app sheet
+  answers a ring the core never saw the same way. The join waits for the
+  DM to open and for the core to show its call, for a minute at most, and
+  is dropped when another conversation opens or the account signs out.
   Decline (`push/CallActionReceiver.java`) posts `decline` with the app
   killed. The app shows over the lock screen for a ring and for a call
   answered there, until it ends.
@@ -1041,7 +1046,10 @@ right now`).
   (channel `missed_calls`) that opens the DM.
 
 The activity's ring and Answer actions act only on the ring the process
-holds (the activity is exported, so another app could send them).
+holds (the activity is exported, so another app could send them). An
+Answer for a ring a killed process posted acts only while that ring's
+notification is up: it takes the notification down and joins only if the
+server accepts.
 
 Verified on a Galaxy S22 Ultra (Android 16) as Native Spike, side by side
 as `dev.yap.app.dmcalls`, against a headless browser as Spike Peer sending
