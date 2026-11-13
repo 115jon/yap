@@ -104,15 +104,15 @@ impl Platform for Desktop {
     }
 
     fn new_video_surface(&self) -> i32 {
-        crate::video::new_surface()
+        yap_voice::demand::new_surface()
     }
 
     fn report_video(&self, surface: i32, key: &str, width: u32, height: u32) {
-        crate::video::report(surface, key, width, height);
+        yap_voice::demand::report(surface, key, width, height);
     }
 
     fn set_video_stage(&self, participant_id: &str) {
-        crate::video::set_stage(participant_id);
+        yap_voice::demand::set_stage(participant_id);
     }
 
     fn share_only_ours(&self) -> bool {

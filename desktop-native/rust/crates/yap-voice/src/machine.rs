@@ -246,6 +246,12 @@ pub struct VideoIntent {
     /// The participant whose camera or share is focused on stage; their
     /// share audio is audible (SCREEN_SHARE.md "Watching").
     pub stage: Option<String>,
+    /// The host shows no video at all (a phone in the background or with
+    /// its screen off): every video pull is released after its delay,
+    /// watched shares too, and pulled again once this clears. What is
+    /// watched stays as it is, so nobody has to press Watch again. The
+    /// desktop never sets it.
+    pub suspended: bool,
 }
 
 /// What the user asks of a running call.
@@ -2405,9 +2411,12 @@ impl CallMachine {
         }
         self.releasing.remove(alias);
         if let Some(mid) = self.tracks.release(alias) {
-            fx.push(Effect::Log(format!(
-                "[voice] releasing {alias}: nobody shows it"
-            )));
+            let why = if self.video.suspended {
+                "video suspended"
+            } else {
+                "nobody shows it"
+            };
+            fx.push(Effect::Log(format!("[voice] releasing {alias}: {why}")));
             self.layers.remove(alias);
             self.closed_video.insert(alias.to_owned());
             close(fx, vec![mid]);
@@ -2440,7 +2449,8 @@ fn is_share(alias: &str) -> bool {
 
 /// Whether to pull `offer`, and at which layer: audio always (share audio
 /// too: audibility is only its gain); a camera once a visible tile renders
-/// it, at the layer for that size; a share once watched or on stage.
+/// it, at the layer for that size; a share once watched or on stage. No
+/// video while the host is suspended.
 fn wanted(
     offer: &Offer,
     video: &VideoIntent,
@@ -2448,6 +2458,7 @@ fn wanted(
 ) -> Option<Option<String>> {
     match offer.kind {
         Kind::Audio => Some(None),
+        Kind::Video if video.suspended => None,
         Kind::Video if is_camera(&offer.track_name) => {
             let size = video.demand.get(&offer.track_name)?;
             Some(select_rid(
