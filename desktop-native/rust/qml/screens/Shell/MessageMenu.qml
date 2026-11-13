@@ -84,7 +84,7 @@ MenuPanel {
             for (const entry of group) {
                 if (entry.id !== "react")
                     out.push(actionRow.createObject(messageMenu, {
-                        action: entry.id, text: entry.text, glyph: entry.glyph, danger: entry.danger
+                        actionId: entry.id, text: entry.text, glyph: entry.glyph, danger: entry.danger
                     }))
             }
         })
@@ -100,8 +100,9 @@ MenuPanel {
         id: actionRow
         MenuRow {
             id: actionItem
-            required property string action
-            onTriggered: actions.run(actionItem.action, messageMenu.anchorItem, !actionItem.shiftHeld)
+            // `action` is the button's own (an Action).
+            required property string actionId
+            onTriggered: actions.run(actionItem.actionId, messageMenu.anchorItem, !actionItem.shiftHeld)
         }
     }
 
