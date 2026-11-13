@@ -39,7 +39,15 @@ export interface GifPickerItem {
   provider: GifProvider;
   altText?: string;
   query?: string;
+  /** What a picker tile shows. Small, but may be a video (`tinymp4`). */
   preview: GifPickerAsset;
+  /**
+   * The lightest picture rendition fit for a picker tile (`tinygif`, a small
+   * webp): for clients that draw tiles as images, not video. Absent on older
+   * servers and on saved favorites; never the full file unless it is the
+   * only picture there is.
+   */
+  thumb?: GifPickerAsset;
   send: GifPickerAsset;
   sourceUrl: string;
   aspectRatio: number;
@@ -333,6 +341,43 @@ function normalizeTenorAsset(
   };
 }
 
+/** A tile is about this wide on a dense phone screen; smaller looks soft. */
+export const GIF_THUMB_MIN_EDGE = 200;
+
+/**
+ * The tile picture among `candidates` (images only): the fewest bytes among
+ * those at least GIF_THUMB_MIN_EDGE on their long edge, else the biggest of
+ * the small ones. Unknown sizes (0) rank after known ones, then by area.
+ */
+export function pickGifThumb(
+  candidates: readonly (GifPickerAsset | null | undefined)[],
+): GifPickerAsset | undefined {
+  const images = candidates.filter(
+    (asset): asset is GifPickerAsset =>
+      !!asset && asset.contentType !== "video/mp4" && !!asset.url,
+  );
+  if (images.length === 0) return undefined;
+  const edge = (asset: GifPickerAsset) => Math.max(asset.width, asset.height);
+  const bigEnough = images.filter((a) => edge(a) >= GIF_THUMB_MIN_EDGE);
+  if (bigEnough.length === 0) {
+    return images.reduce((best, a) =>
+      edge(a) > edge(best) ||
+      (edge(a) === edge(best) && bytesRank(a) < bytesRank(best))
+        ? a
+        : best,
+    );
+  }
+  return bigEnough.reduce((best, a) => {
+    const diff = bytesRank(a) - bytesRank(best);
+    if (diff !== 0) return diff < 0 ? a : best;
+    return a.width * a.height < best.width * best.height ? a : best;
+  });
+}
+
+function bytesRank(asset: GifPickerAsset): number {
+  return asset.sizeBytes > 0 ? asset.sizeBytes : Number.POSITIVE_INFINITY;
+}
+
 export function normalizeTenorGifResult(result: any): GifPickerItem | null {
   if (!result?.id || !result?.media_formats) return null;
 
@@ -356,6 +401,15 @@ export function normalizeTenorGifResult(result: any): GifPickerItem | null {
         asset.sizeBytes === 0 || asset.sizeBytes <= MAX_GIF_UPLOAD_BYTES,
     ) ?? sendCandidates[0];
   const preview = previewCandidates[0];
+  const thumb = pickGifThumb([
+    normalizeTenorAsset(result.media_formats.tinygif, "image/gif"),
+    normalizeTenorAsset(result.media_formats.nanogif, "image/gif"),
+    normalizeTenorAsset(result.media_formats.tinywebp, "image/webp"),
+    normalizeTenorAsset(result.media_formats.nanowebp, "image/webp"),
+    normalizeTenorAsset(result.media_formats.webp, "image/webp"),
+    normalizeTenorAsset(result.media_formats.mediumgif, "image/gif"),
+    normalizeTenorAsset(result.media_formats.gif, "image/gif"),
+  ]);
 
   if (!send || !preview) return null;
 
@@ -375,6 +429,7 @@ export function normalizeTenorGifResult(result: any): GifPickerItem | null {
     altText: result.content_description || undefined,
     query: undefined,
     preview,
+    thumb,
     send,
     sourceUrl: result.itemurl || result.url || preview.url,
     aspectRatio: preview.width / preview.height,
@@ -425,6 +480,15 @@ export function normalizeKlipyGifResult(result: any): GifPickerItem | null {
         asset.sizeBytes === 0 || asset.sizeBytes <= MAX_GIF_UPLOAD_BYTES,
     ) ?? sendCandidates[0];
   const preview = previewCandidates[0];
+  const thumb = pickGifThumb([
+    normalizeKlipyAsset(result.media_formats.tinygif, "image/gif"),
+    normalizeKlipyAsset(result.media_formats.nanogif, "image/gif"),
+    normalizeKlipyAsset(result.media_formats.tinywebp, "image/webp"),
+    normalizeKlipyAsset(result.media_formats.nanowebp, "image/webp"),
+    normalizeKlipyAsset(result.media_formats.webp, "image/webp"),
+    normalizeKlipyAsset(result.media_formats.mediumgif, "image/gif"),
+    normalizeKlipyAsset(result.media_formats.gif, "image/gif"),
+  ]);
 
   if (!send || !preview) return null;
 
@@ -437,6 +501,7 @@ export function normalizeKlipyGifResult(result: any): GifPickerItem | null {
     altText: result.content_description || result.title || undefined,
     query: undefined,
     preview,
+    thumb,
     send,
     sourceUrl: send.url,
     aspectRatio: preview.width / preview.height,
@@ -536,6 +601,7 @@ const readStoredGifFavorite = readObject<StoredGifFavorite>(
     altText: readString,
     query: readString,
     preview: required(readStoredGifAsset),
+    thumb: readStoredGifAsset,
     send: required(readStoredGifAsset),
   },
   { keepUnknown: true },
@@ -560,4 +626,154 @@ export function parseStoredGifFavorites(
       mediaType: inferGifPickerMediaType(item),
     };
   });
+}
+
+type KlipyNativeMediaType = Exclude<GifPickerMediaType, "gifs">;
+
+const KLIPY_NATIVE_FALLBACK_TITLES: Record<KlipyNativeMediaType, string> = {
+  stickers: "Sticker",
+  memes: "Meme",
+  clips: "Clip",
+};
+
+/** KLIPY's own API serves each item at these sizes, smallest first. */
+const KLIPY_NATIVE_TIERS = ["xs", "sm", "md", "hd"] as const;
+
+function getKlipyStaticAssetContentType(
+  url: string,
+  mediaType: Exclude<KlipyNativeMediaType, "clips">,
+): GifPickerContentType {
+  const lowerUrl = url.toLowerCase();
+  if (lowerUrl.includes(".webp")) return "image/webp";
+  if (lowerUrl.includes(".png"))
+    return mediaType === "memes" ? "image/png" : "image/apng";
+  return "image/gif";
+}
+
+function klipyNativeAsset(
+  url: unknown,
+  meta: any,
+  contentType: GifPickerContentType,
+): GifPickerAsset | null {
+  if (typeof url !== "string" || !url) return null;
+  return {
+    url,
+    width: meta?.width || 320,
+    height: meta?.height || 320,
+    sizeBytes: meta?.size || 0,
+    contentType,
+  };
+}
+
+/**
+ * Every rendition of `format` a KLIPY item carries: the flat
+ * `file[format]` URL (with `file_meta[format]`) and each size tier's
+ * `file[tier][format]`.
+ */
+function klipyNativeRenditions(
+  result: any,
+  format: string,
+  contentType: (url: string) => GifPickerContentType,
+): GifPickerAsset[] {
+  const file = result?.file || {};
+  const meta = result?.file_meta || {};
+  const assets: (GifPickerAsset | null)[] = [];
+  if (typeof file[format] === "string") {
+    assets.push(
+      klipyNativeAsset(file[format], meta[format], contentType(file[format])),
+    );
+  }
+  for (const tier of KLIPY_NATIVE_TIERS) {
+    const asset = file[tier]?.[format];
+    if (asset?.url) {
+      assets.push(klipyNativeAsset(asset.url, asset, contentType(asset.url)));
+    }
+  }
+  return assets.filter((asset): asset is GifPickerAsset => asset !== null);
+}
+
+/**
+ * A result of KLIPY's own stickers, clips or memes API. `send` is the
+ * biggest rendition, as before; `preview` and `thumb` are the lightest
+ * picture fit for a tile (pickGifThumb), so the grid never pulls the
+ * full file (a sticker's `md` webp can outweigh its `hd` one).
+ */
+export function normalizeKlipyNativeResult(
+  result: any,
+  mediaType: KlipyNativeMediaType,
+): GifPickerItem | null {
+  if (!result || (!result.id && !result.slug)) return null;
+
+  const id = String(result.id || result.slug);
+  const title = String(
+    result.title || result.slug || KLIPY_NATIVE_FALLBACK_TITLES[mediaType],
+  );
+
+  const file = result.file || {};
+  let send: GifPickerAsset | null;
+  let fallbackPreview: GifPickerAsset | null;
+  let pictures: GifPickerAsset[];
+
+  if (mediaType === "clips") {
+    const fileMeta = result.file_meta || {};
+    const first = (format: string, contentType: GifPickerContentType) => {
+      const url =
+        file[format] || file.hd?.[format]?.url || file.md?.[format]?.url;
+      const meta =
+        fileMeta[format] || file.hd?.[format] || file.md?.[format] || {};
+      return klipyNativeAsset(url, meta, contentType);
+    };
+    const mp4 = first("mp4", "video/mp4");
+    const webp = first("webp", "image/webp");
+    const gif = first("gif", "image/gif");
+    send = mp4 || webp || gif;
+    fallbackPreview = webp || mp4 || gif;
+    pictures = [
+      ...klipyNativeRenditions(result, "webp", () => "image/webp"),
+      ...klipyNativeRenditions(result, "gif", () => "image/gif"),
+    ];
+  } else {
+    const hd = file.hd || {};
+    const md = file.md || file.sm || hd || {};
+    const pick = (asset: any) =>
+      klipyNativeAsset(
+        asset?.url,
+        asset,
+        getKlipyStaticAssetContentType(String(asset?.url ?? ""), mediaType),
+      );
+    send = pick(hd.webp || hd.png || hd.gif || md.webp || md.png || md.gif);
+    fallbackPreview = pick(
+      md.webp || md.png || md.gif || hd.webp || hd.png || hd.gif,
+    );
+    const contentType = (url: string) =>
+      getKlipyStaticAssetContentType(url, mediaType);
+    pictures = ["webp", "png", "gif"].flatMap((format) =>
+      klipyNativeRenditions(result, format, contentType),
+    );
+  }
+
+  const thumb = pickGifThumb(pictures);
+  const preview = thumb ?? fallbackPreview;
+  if (!send || !preview) return null;
+
+  return {
+    id,
+    title,
+    provider: "klipy",
+    preview,
+    thumb,
+    send,
+    sourceUrl: send.url,
+    aspectRatio: preview.width / preview.height,
+    duration:
+      mediaType === "clips"
+        ? typeof result.duration === "number"
+          ? result.duration
+          : typeof result.duration === "string" &&
+              !isNaN(parseFloat(result.duration))
+            ? parseFloat(result.duration)
+            : undefined
+        : undefined,
+    mediaType,
+  };
 }
