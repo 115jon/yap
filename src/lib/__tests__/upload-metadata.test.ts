@@ -854,8 +854,26 @@ describe("container brands", () => {
     }
   });
 
+  it("walks a vendor major brand over MP4 compatible brands as video", async () => {
+    for (const file of [
+      ftyp("XAVC", "XAVC", "mp42", "iso2"),
+      ftyp("abcd", "mp42"),
+      ftyp("abcd", "abcd", "isom", "avc1"),
+    ]) {
+      const { out, scan } = await strip(file);
+      expect(scan.format).toBe("video");
+      expect(scan.stripped).toEqual(["gps"]);
+      expect(contains(out, text(FAKE_ISO6709))).toBe(false);
+    }
+  });
+
   it("flags Canon CR3 and other brands as unchecked", async () => {
-    for (const file of [ftyp("crx ", "crx ", "isom"), ftyp("abcd", "mp42")]) {
+    for (const file of [
+      ftyp("crx ", "crx ", "isom"),
+      ftyp("abcd", "abcd"),
+      ftyp("abcd", "mp42", "mif1"),
+      ftyp("abcd", "isom", "heif"),
+    ]) {
       const { out, scan } = await strip(file);
       expect(scan.format).toBe("isobmff");
       expect(scan.unchecked).toBe("unsupported-format");

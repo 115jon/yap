@@ -67,6 +67,21 @@ const VIDEO_BRANDS = new Set([
   "M4A ",
 ]);
 
+/** Compatible brands that make an unknown major brand an MP4. */
+const MP4_COMPATIBLE_BRANDS = new Set([
+  "isom",
+  "iso2",
+  "iso3",
+  "iso4",
+  "iso5",
+  "iso6",
+  "mp41",
+  "mp42",
+  "avc1",
+]);
+/** Compatible brands of a still image or raw photo. */
+const STILL_BRANDS = new Set([...HEIF_BRANDS, ...AVIF_BRANDS, "heif", "crx "]);
+
 function isVideoBrand(brand: string): boolean {
   return (
     VIDEO_BRANDS.has(brand) ||
@@ -146,12 +161,19 @@ export function isoBrand(head: Uint8Array): IsoBrand | null {
   if (AVIF_BRANDS.has(major)) return "avif";
   if (HEIF_BRANDS.has(major)) return "heif";
   // A few writers put a generic major brand first; look at the rest.
+  const compatible: string[] = [];
   for (let i = 16; i + 4 <= Math.min(size, head.byteLength); i += 4) {
     const brand = ascii(head, i, 4);
     if (AVIF_BRANDS.has(brand)) return "avif";
     if (brand === "heic" || brand === "heix") return "heif";
+    compatible.push(brand);
   }
-  return isVideoBrand(major) ? "video" : "isobmff";
+  if (isVideoBrand(major)) return "video";
+  // A camera's own major brand (Sony "XAVC") over MP4 compatible brands.
+  return compatible.some((brand) => MP4_COMPATIBLE_BRANDS.has(brand)) &&
+    !compatible.some((brand) => STILL_BRANDS.has(brand))
+    ? "video"
+    : "isobmff";
 }
 
 interface BoxHeader {
