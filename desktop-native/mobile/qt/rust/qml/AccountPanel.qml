@@ -9,10 +9,12 @@ import Yap.Ui
 // scrim. Your card on top, your presence as a segmented rail, then the
 // account rows (Yap.Ui's AccountMenuRow, the desktop's account menu rows):
 // your custom status (edited in place), your profile, the theme (a tap
-// swaps its light and dark), and Settings, the one notched primary key.
-// The plate's own rows stay at its foot, where the plate is, so nothing
-// jumps. Back, its predictive gesture, a tap on the scrim or on the rows
-// at its foot close it.
+// swaps its light and dark; Match system opens Settings), and Settings,
+// the one notched primary key. The plate's own rows stay at its foot,
+// where the plate is, so nothing jumps. On a short screen (a phone on its
+// side) the card stops under the status bar and the rows between your card
+// and Settings scroll. Back, its predictive gesture, a tap on the scrim or
+// on the rows at its foot close it.
 Item {
     id: root
 
@@ -39,6 +41,10 @@ Item {
         "spiderman-dark": qsTr("Spider-Man Dark"),
         "spiderman-light": qsTr("Spider-Man Light")
     })
+    // The theme picked (Settings.theme: an id or `system`), not the one
+    // showing: Match system is not swapped away by a tap.
+    readonly property bool systemTheme: Settings.theme === "system"
+    readonly property string themeName: systemTheme ? qsTr("Match system") : root.themes[Theme.themeId] ?? ""
     // The same colourway on the other ground.
     readonly property string otherTheme: Theme.themeId.endsWith("-dark") ? Theme.themeId.replace(/-dark$/, "-light")
         : Theme.themeId.endsWith("-light") ? Theme.themeId.replace(/-light$/, "-dark")
@@ -103,7 +109,9 @@ Item {
         // The keyboard (a custom status being typed) lifts it clear.
         readonly property real foot: root.from.y + root.from.height
         readonly property real lift: Math.max(0, Native.imeHeight + 8 - (root.height - foot))
-        // Never above the status bar (a short screen at a large text size).
+        // Its tallest: from its foot up to just under the status bar (a
+        // phone on its side, a large text size); the rows scroll within.
+        readonly property real room: foot - lift - (root.topInset + 8)
         y: Math.max(root.topInset + 8, foot - height - lift)
         transformOrigin: Item.Bottom
         scale: (Theme.scaleIn + (1 - Theme.scaleIn) * root.grow) * (1 - (Theme.reducedMotion ? 0 : 0.05) * root.backProgress)
@@ -121,6 +129,7 @@ Item {
 
             // Your card: the avatar, your name and handle, the close key.
             Item {
+                id: head
                 width: parent.width
                 height: Math.max(48, names.implicitHeight) + 24
                 PresenceAvatar {
@@ -171,119 +180,163 @@ Item {
                 }
             }
 
-            Item {
+            // Between your card and Settings: scrolls when the card is cut
+            // to the room it has.
+            Flickable {
+                id: middle
                 width: parent.width
-                height: rail.height + 12
-                PresenceRail {
-                    id: rail
-                    x: 12
-                    y: 4
-                    width: parent.width - 24
-                    status: root.status
-                    onChose: value => {
-                        if (value === root.status)
-                            return
-                        Native.haptic(Native.Tick)
-                        Session.setStatus(value, Session.meCustomStatus)
-                    }
-                }
-            }
-
-            // Your custom status: the row, or the field while it is typed.
-            Item {
-                id: statusField
-                property bool editing: false
-                width: parent.width
-                height: editing ? field.height + 8 : customRow.height
-                function save() {
-                    if (!editing)
+                height: Math.max(0, Math.min(rows.height, card.room - head.height - tail.height))
+                contentHeight: rows.height
+                clip: true
+                interactive: contentHeight > height
+                boundsBehavior: Flickable.StopAtBounds
+                maximumFlickVelocity: Native.maxFlingVelocity
+                flickDeceleration: Native.flingDeceleration
+                // The custom status field stays in view as the keyboard
+                // cuts the card shorter.
+                function reveal() {
+                    if (!statusField.editing)
                         return
-                    editing = false
-                    const value = field.text.trim()
-                    if (value !== Session.meCustomStatus)
-                        Session.setStatus(root.status, value)
+                    const top = statusField.y
+                    const bottom = top + statusField.height
+                    if (top < contentY)
+                        contentY = top
+                    else if (bottom > contentY + height)
+                        contentY = Math.min(bottom - height, Math.max(0, contentHeight - height))
                 }
-                AccountMenuRow {
-                    id: customRow
-                    x: 4
-                    width: parent.width - 8
-                    visible: !statusField.editing
-                    glyph: "emoji"
-                    text: Session.meCustomStatus.length > 0 ? Session.meCustomStatus : qsTr("Set a custom status")
-                    quiet: Session.meCustomStatus.length === 0
-                    onTriggered: {
-                        field.text = Session.meCustomStatus
-                        statusField.editing = true
-                        field.forceActiveFocus()
-                        Qt.inputMethod.show()
+                onHeightChanged: reveal()
+
+                Column {
+                    id: rows
+                    width: middle.width
+
+                    Item {
+                        width: parent.width
+                        height: rail.height + 12
+                        PresenceRail {
+                            id: rail
+                            x: 12
+                            y: 4
+                            width: parent.width - 24
+                            status: root.status
+                            onChose: value => {
+                                if (value === root.status)
+                                    return
+                                Native.haptic(Native.Tick)
+                                Session.setStatus(value, Session.meCustomStatus)
+                            }
+                        }
                     }
-                }
-                MobileField {
-                    id: field
-                    x: 12
-                    y: 4
-                    width: parent.width - 24
-                    visible: statusField.editing
-                    maximumLength: 128
-                    placeholderText: qsTr("Set a custom status")
-                    EnterKey.type: Qt.EnterKeyDone
-                    Accessible.name: qsTr("Custom status")
-                    onAccepted: {
-                        statusField.save()
-                        Qt.inputMethod.hide()
+
+                    // Your custom status: the row, or the field while it is typed.
+                    Item {
+                        id: statusField
+                        property bool editing: false
+                        width: parent.width
+                        height: editing ? field.height + 8 : customRow.height
+                        onEditingChanged: if (editing) Qt.callLater(middle.reveal)
+                        function save() {
+                            if (!editing)
+                                return
+                            editing = false
+                            const value = field.text.trim()
+                            if (value !== Session.meCustomStatus)
+                                Session.setStatus(root.status, value)
+                        }
+                        AccountMenuRow {
+                            id: customRow
+                            x: 4
+                            width: parent.width - 8
+                            visible: !statusField.editing
+                            glyph: "emoji"
+                            text: Session.meCustomStatus.length > 0 ? Session.meCustomStatus : qsTr("Set a custom status")
+                            quiet: Session.meCustomStatus.length === 0
+                            onTriggered: {
+                                field.text = Session.meCustomStatus
+                                statusField.editing = true
+                                field.forceActiveFocus()
+                                Qt.inputMethod.show()
+                            }
+                        }
+                        MobileField {
+                            id: field
+                            x: 12
+                            y: 4
+                            width: parent.width - 24
+                            visible: statusField.editing
+                            maximumLength: 128
+                            placeholderText: qsTr("Set a custom status")
+                            EnterKey.type: Qt.EnterKeyDone
+                            Accessible.name: qsTr("Custom status")
+                            onAccepted: {
+                                statusField.save()
+                                Qt.inputMethod.hide()
+                            }
+                            onActiveFocusChanged: if (!activeFocus) statusField.save()
+                        }
                     }
-                    onActiveFocusChanged: if (!activeFocus) statusField.save()
-                }
-            }
-            AccountMenuRow {
-                x: 4
-                width: parent.width - 8
-                glyph: "profile"
-                text: qsTr("View profile")
-                onTriggered: root.profileRequested(Session.meId)
-            }
-            AccountMenuRow {
-                x: 4
-                width: parent.width - 8
-                glyph: "appearance"
-                text: qsTr("Theme")
-                hint: root.themes[Theme.themeId] ?? ""
-                Accessible.name: qsTr("Theme, %1. Switch to %2").arg(root.themes[Theme.themeId] ?? "")
-                    .arg(root.themes[root.otherTheme] ?? "")
-                onTriggered: {
-                    Native.haptic(Native.Tick)
-                    Settings.chooseTheme(root.otherTheme)
+                    AccountMenuRow {
+                        x: 4
+                        width: parent.width - 8
+                        glyph: "profile"
+                        text: qsTr("View profile")
+                        onTriggered: root.profileRequested(Session.meId)
+                    }
+                    AccountMenuRow {
+                        x: 4
+                        width: parent.width - 8
+                        glyph: "appearance"
+                        text: qsTr("Theme")
+                        hint: root.themeName
+                        Accessible.name: root.systemTheme ? qsTr("Theme, %1. Open settings").arg(root.themeName)
+                            : qsTr("Theme, %1. Switch to %2").arg(root.themeName).arg(root.themes[root.otherTheme] ?? "")
+                        // Match system is chosen among the themes, in Settings.
+                        onTriggered: {
+                            if (root.systemTheme) {
+                                root.settingsRequested()
+                                return
+                            }
+                            Native.haptic(Native.Tick)
+                            Settings.chooseTheme(root.otherTheme)
+                        }
+                    }
                 }
             }
 
-            Item {
+            // Settings and the plate's rows: always in reach.
+            Column {
+                id: tail
                 width: parent.width
-                height: settingsKey.height + 20
-                KitButton {
-                    id: settingsKey
-                    x: 12
-                    y: 8
-                    width: parent.width - 24
-                    variant: "primary"
-                    size: "lg"
-                    text: qsTr("Settings")
-                    ground: Theme.ply3
-                    onClicked: root.settingsRequested()
-                }
-            }
 
-            // The plate's rows, where the plate is.
-            Rectangle {
-                width: parent.width
-                height: 1
-                color: Theme.line
-            }
-            AccountPlate {
-                width: parent.width
-                inPanel: true
-                clockShown: root.shown
-                onPanelRequested: root.close()
-                onCallRequested: root.callRequested()
+                Item {
+                    width: parent.width
+                    height: settingsKey.height + 20
+                    KitButton {
+                        id: settingsKey
+                        x: 12
+                        y: 8
+                        width: parent.width - 24
+                        variant: "primary"
+                        size: "lg"
+                        text: qsTr("Settings")
+                        ground: Theme.ply3
+                        onClicked: root.settingsRequested()
+                    }
+                }
+
+                // The plate's rows, where the plate is.
+                Rectangle {
+                    width: parent.width
+                    height: 1
+                    color: Theme.line
+                }
+                AccountPlate {
+                    width: parent.width
+                    inPanel: true
+                    clockShown: root.shown
+                    onPanelRequested: root.close()
+                    onCallRequested: root.callRequested()
+                }
             }
         }
     }
