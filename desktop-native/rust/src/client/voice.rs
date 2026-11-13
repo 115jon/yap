@@ -33,7 +33,7 @@ impl Host for Desktop {
     }
 
     fn video(&self) -> watch::Receiver<VideoIntent> {
-        crate::video::subscribe()
+        yap_voice::demand::subscribe()
     }
 
     fn mic_level(&self, level: Option<f64>) {
