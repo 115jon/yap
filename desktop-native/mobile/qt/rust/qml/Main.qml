@@ -179,7 +179,8 @@ Window {
         stack.sheet = false
         stack.push(settingsPage)
     }
-    // Edit profile, over Settings or your own profile.
+    // Edit profile, over Settings, your own profile or from the account
+    // panel.
     function openProfileEditor() {
         if (stack.busy || stack.currentItem?.isProfileEditor === true)
             return
@@ -775,6 +776,10 @@ Window {
         onProfileRequested: userId => {
             accountPanel.close()
             window.openProfile(userId)
+        }
+        onProfileEditRequested: {
+            accountPanel.close()
+            window.openProfileEditor()
         }
         onCallRequested: {
             accountPanel.close()

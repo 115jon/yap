@@ -8,7 +8,8 @@ import Yap.Ui
 // ease-out; out in 100 ms; under reduced motion it only fades), over a
 // scrim. Your card on top, your presence as a segmented rail, then the
 // account rows (Yap.Ui's AccountMenuRow, the desktop's account menu rows):
-// your custom status (edited in place), your profile, the theme (a tap
+// your custom status (edited in place), your profile and Edit profile
+// (the desktop's account menu has it too), the theme (a tap
 // swaps its light and dark; Match system opens Settings), and Settings,
 // the one notched primary key. The plate's own rows stay at its foot,
 // where the plate is, so nothing jumps. On a short screen (a phone on its
@@ -20,6 +21,7 @@ Item {
 
     signal settingsRequested()
     signal profileRequested(string userId)
+    signal profileEditRequested()
     signal callRequested()
 
     property bool shown: false
@@ -281,6 +283,13 @@ Item {
                         glyph: "profile"
                         text: qsTr("View profile")
                         onTriggered: root.profileRequested(Session.meId)
+                    }
+                    AccountMenuRow {
+                        x: 4
+                        width: parent.width - 8
+                        glyph: "edit"
+                        text: qsTr("Edit profile")
+                        onTriggered: root.profileEditRequested()
                     }
                     AccountMenuRow {
                         x: 4
