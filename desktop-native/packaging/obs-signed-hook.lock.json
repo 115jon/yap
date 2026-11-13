@@ -1,5 +1,5 @@
 {
-  "$comment": "Pinned, unmodified OBS Studio game-capture files the desktop app injects. Fetched and checked by desktop/scripts/fetch-obs-signed-hook.ps1, embedded in the app (src/game_capture/signed_hook.rs) and re-verified before every injection. Never modify or re-sign these files. See docs/desktop/signed-capture-hook.md.",
+  "$comment": "Pinned, unmodified OBS Studio game-capture files the native app injects. Fetched and checked by desktop-native/tools/fetch-obs-signed-hook.ps1, embedded in yap-capture (src/hook/signed_hook.rs) and re-verified before every injection. Never modify or re-sign these files. See desktop-native/docs/signed-capture-hook.md.",
   "version": 1,
   "obs_version": "33.0.1",
   "obs_tag_commit": "65c320b46e1af5c7a555161aea6182cdf7a8c524",
