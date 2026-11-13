@@ -26,8 +26,8 @@ describe("assetlinks", () => {
     expect(await response.json()).toEqual(ASSET_LINKS);
   });
 
-  it("delegates handle_all_urls for the three packages", () => {
-    expect(ASSET_LINKS).toHaveLength(3);
+  it("delegates handle_all_urls for the four packages", () => {
+    expect(ASSET_LINKS).toHaveLength(4);
     for (const entry of ASSET_LINKS) {
       expect(entry.relation).toEqual([
         "delegate_permission/common.handle_all_urls",
@@ -46,6 +46,12 @@ describe("assetlinks", () => {
       expect(keys).toHaveLength(3);
       expect(keys[0]).toBe(RELEASE);
     }
+  });
+
+  it("trusts only its own release key for the Qt app", () => {
+    expect(fingerprintsOf("dev.yap.app")).toEqual([
+      "75:E0:D8:E0:22:4A:9F:32:D8:CC:40:C7:B9:5A:E7:82:43:B3:97:21:5A:99:C1:FE:D6:01:50:FC:6E:FF:B8:9C",
+    ]);
   });
 
   it("answers GET and HEAD on its path only", () => {
