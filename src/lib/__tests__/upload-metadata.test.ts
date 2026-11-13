@@ -372,7 +372,7 @@ describe("GIF", () => {
     const file = gifWith({ comment: "shot at home", xmp: xmpPacket() });
     const { out, scan } = await strip(file);
     expect(scan.format).toBe("gif");
-    expect(scan.stripped).toEqual(["xmp", "comment"]);
+    expect(scan.stripped).toEqual(["gps", "timestamp", "xmp", "comment"]);
     expect(out.length).toBe(file.length);
     expect(contains(out, text("shot at home"))).toBe(false);
     expect(contains(out, text("GPSLatitude"))).toBe(false);
@@ -381,6 +381,71 @@ describe("GIF", () => {
     expect(contains(out, Uint8Array.from([0x2c, 0, 0, 0, 0, 4, 0, 4, 0]))).toBe(
       true,
     );
+  });
+});
+
+describe("GIF XMP in Adobe's layout", () => {
+  /** BASE_GIF with a raw XMP packet and Adobe's magic trailer. */
+  function gifWithAdobeXmp(packet: string): Uint8Array {
+    const base = gifWith({});
+    const at = base.indexOf(0x21, 13);
+    const trailer = [1];
+    for (let b = 0xff; b >= 0; b -= 1) trailer.push(b);
+    trailer.push(0);
+    return concat(
+      base.subarray(0, at),
+      [0x21, 0xff, 11],
+      text("XMP DataXMP"),
+      text(packet),
+      trailer,
+      base.subarray(at),
+    );
+  }
+
+  /** Walks `file` as a GIF decoder does; the introducers it meets. */
+  function decoderWalk(file: Uint8Array): number[] {
+    const seen: number[] = [];
+    const flags = file[10];
+    let pos = 13 + (flags & 0x80 ? 3 * (1 << ((flags & 7) + 1)) : 0);
+    const blocks = () => {
+      while (file[pos] !== 0) pos += 1 + file[pos];
+      pos += 1;
+    };
+    while (pos < file.length) {
+      const introducer = file[pos];
+      seen.push(introducer);
+      if (introducer === 0x3b) break;
+      if (introducer === 0x21) {
+        pos += 2;
+        blocks();
+      } else if (introducer === 0x2c) {
+        const local = file[pos + 9];
+        pos += 10 + (local & 0x80 ? 3 * (1 << ((local & 7) + 1)) : 0) + 1;
+        blocks();
+      } else {
+        throw new Error(`decoder hit ${introducer} at ${pos}`);
+      }
+    }
+    return seen;
+  }
+
+  it("blanks the raw packet and keeps the file decodable", async () => {
+    for (const padding of [0, 1, 200, 255, 256, 600]) {
+      const packet = xmpPacket() + " ".repeat(padding);
+      const file = gifWithAdobeXmp(packet);
+      const { out, scan } = await strip(file);
+      expect(scan.format).toBe("gif");
+      expect(scan.unchecked).toBeNull();
+      expect(scan.stripped).toContain("gps");
+      expect(scan.stripped).toContain("xmp");
+      expect(out.length).toBe(file.length);
+      expect(contains(out, text("GPSLatitude"))).toBe(false);
+      expect(contains(out, text("XMP DataXMP"))).toBe(false);
+      expect(decoderWalk(out)).toEqual(decoderWalk(file));
+      const again = await scanUploadMetadata(bufferSource(out));
+      expect(again.stripped).toEqual([]);
+      expect(again.unchecked).toBeNull();
+    }
   });
 });
 
