@@ -46,6 +46,7 @@ import { useExternalLinkConfirmation } from "@/hooks/useExternalLinkConfirmation
 import {
   copyMediaLink,
   getPublicMediaUrl,
+  getShareableUrl,
   saveMedia,
 } from "@/lib/media-actions";
 
@@ -888,8 +889,11 @@ const MessageItem = memo(
       const hoveredMedia = target?.closest?.(
         "[data-media-element='true']",
       ) as HTMLElement | null;
-      const hoveredUrl =
+      const hoveredHref =
         hoveredAnchor?.href || hoveredEmbed?.dataset.embedUrl || null;
+      // A download link's href is signed for this session: copy and open
+      // the canonical address instead.
+      const hoveredUrl = hoveredHref ? getShareableUrl(hoveredHref) : null;
       const mediaUrl = hoveredMedia?.dataset.mediaUrl || null;
       const publicMediaUrl = mediaUrl ? getPublicMediaUrl(mediaUrl) : null;
       const mediaDownloadUrl = hoveredMedia?.dataset.mediaDownloadUrl || null;
