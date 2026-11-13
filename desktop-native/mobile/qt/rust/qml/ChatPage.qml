@@ -379,6 +379,7 @@ Item {
         onReplyRequested: (messageId, author, text) => root.startReply(messageId, author, text)
         onEditRequested: messageId => root.startEdit(messageId)
         onProfileRequested: userId => root.profileRequested(userId)
+        onThreadRequested: messageId => root.threadRequested(messageId)
     }
 
     // Over everything on the page, the header included.
