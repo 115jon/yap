@@ -45,7 +45,7 @@ param(
     [string]$SigningAccount = $(if ($env:ARTIFACT_SIGNING_ACCOUNT) { $env:ARTIFACT_SIGNING_ACCOUNT } else { "jon115signing" }),
     [string]$SigningProfile = $(if ($env:ARTIFACT_SIGNING_PROFILE) { $env:ARTIFACT_SIGNING_PROFILE } else { "publictrust" }),
     # The game capture hook's OBS-signed files (docs/INSTALLER.md): fetched
-    # and verified by the desktop app's script, into a cache folder that is
+    # and verified by fetch-obs-signed-hook.ps1, into a cache folder that is
     # reused across runs. -ObsZip uses an OBS release zip already on disk.
     [string]$ObsCacheDir = $(if ($env:YAP_OBS_CACHE_DIR) { $env:YAP_OBS_CACHE_DIR } else { Join-Path $env:TEMP "ralph-obs-signed-hook" }),
     [string]$ObsZip,
@@ -127,22 +127,22 @@ New-Item -ItemType Directory $stage | Out-Null
 Copy-Item $exe $stage
 
 # The OBS-signed capture hook, byte for byte as OBS released it, next to the
-# exe (the app looks in obs-capture\obs-signed). The desktop app's fetch
-# script downloads the pinned OBS zip if needed and checks every file against
-# desktop/packaging/obs-signed-hook.lock.json: SHA-256, a valid Authenticode
+# exe (the app looks in obs-capture\obs-signed). fetch-obs-signed-hook.ps1
+# downloads the pinned OBS zip if needed and checks every file against
+# packaging/obs-signed-hook.lock.json: SHA-256, a valid Authenticode
 # signature, the signer and its thumbprint. Any mismatch stops the build.
 # LICENSE-GPLv2.txt and SOURCE-OFFER.md (packaging/obs-capture/) sit beside
 # obs-signed\ in obs-capture\; the offer points at the sources the release
 # carries (-ObsSourcesDir).
 if (-not $NoCaptureHook) {
     $hookDir = Join-Path $stage "obs-capture\obs-signed"
-    $fetch = Join-Path $root "..\desktop\scripts\fetch-obs-signed-hook.ps1"
+    $fetch = Join-Path $PSScriptRoot "fetch-obs-signed-hook.ps1"
     $fetchArgs = @{ Destination = $hookDir; CacheDir = $ObsCacheDir }
     if ($ObsZip) { $fetchArgs.ZipPath = $ObsZip }
     if ($ObsSourcesDir) { $fetchArgs.SourcesDir = $ObsSourcesDir }
     & $fetch @fetchArgs
     if (-not $?) { throw "fetch-obs-signed-hook.ps1 failed" }
-    $lock = Get-Content -Raw (Join-Path $root "..\desktop\packaging\obs-signed-hook.lock.json") | ConvertFrom-Json
+    $lock = Get-Content -Raw (Join-Path $root "packaging\obs-signed-hook.lock.json") | ConvertFrom-Json
     foreach ($file in $lock.files) {
         $staged = Join-Path $hookDir $file.name
         $sha = (Get-FileHash -Algorithm SHA256 $staged).Hash.ToLowerInvariant()

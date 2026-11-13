@@ -8,14 +8,13 @@
     "dev:prod-auth": "cross-env CI=true RALPH_AUTH=prod vite dev --port 5199",
     "build": "vite build",
     "icons:generate": "node scripts/generate-phosphor-icons.mjs",
-    "icons:app": "node scripts/generate-app-icons.mjs",
     "preview": "vite preview",
     "perf": "pnpm run build && lhci autorun",
     "perf:budgets": "pnpm run build && node scripts/check-bundle-budgets.mjs",
     "games:catalog": "node scripts/build-game-catalog.mjs",
-    "doctor": "react-doctor --project ralph-meet,desktop,mobile --blocking none -y",
-    "doctor:verbose": "react-doctor --project ralph-meet,desktop,mobile --blocking none --verbose -y",
-    "doctor:changed": "react-doctor --project ralph-meet,desktop,mobile --blocking none --scope changed -y",
+    "doctor": "react-doctor --project ralph-meet --blocking none -y",
+    "doctor:verbose": "react-doctor --project ralph-meet --blocking none --verbose -y",
+    "doctor:changed": "react-doctor --project ralph-meet --blocking none --scope changed -y",
     "migrate:main": "wrangler d1 migrations apply ralph-chat-db --remote",
     "deploy:main": "pnpm run migrate:main && vite build && wrangler deploy --env=\"\"",
     "deploy": "pnpm run deploy:main",
@@ -36,8 +35,7 @@
     "idle-probe": "node scripts/idle-probe.mjs",
     "bench:voice": "node scripts/voice-latency/bench.mjs",
     "bench:voice:verify": "node scripts/voice-latency/verify-standby.mjs",
-    "prepare": "node scripts/copy-mediapipe.mjs && (lefthook install || exit 0)",
-    "bump": "node scripts/bump-version.mjs"
+    "prepare": "node scripts/copy-mediapipe.mjs && (lefthook install || exit 0)"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

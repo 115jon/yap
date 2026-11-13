@@ -23,8 +23,8 @@ release** on the project's GitHub releases page
 3. `obs-deps-2026-10-23.tar.gz`: the obs-deps build scripts for the prebuilt
    dependencies OBS 33.0.1 was built with.
 
-Their SHA-256 values are recorded in `desktop/packaging/obs-signed-hook.lock.json`
-in the Ralph Meet repository. The same archives are also published by their
+Their SHA-256 values are recorded in
+`desktop-native/packaging/obs-signed-hook.lock.json` in the Yap repository. The same archives are also published by their
 authors: <https://github.com/obsproject/obs-studio/releases/tag/33.0.1>,
 <https://github.com/microsoft/Detours>, <https://github.com/obsproject/obs-deps>.
 
