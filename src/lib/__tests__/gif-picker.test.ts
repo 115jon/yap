@@ -592,6 +592,26 @@ describe("picker tile renditions", () => {
     }
   });
 
+  it("prefers Tenor's lighter tinywebp over tinygif", () => {
+    const item = normalizeTenorGifResult({
+      id: "w",
+      media_formats: {
+        gif: big,
+        tinygif: tiny,
+        tinymp4,
+        tinywebp: {
+          url: "https://m.test/tiny.webp",
+          dims: [200, 192],
+          size: 120_000,
+        },
+      },
+    })!;
+    expect(item.thumb).toMatchObject({
+      url: "https://m.test/tiny.webp",
+      contentType: "image/webp",
+    });
+  });
+
   it("falls back to the biggest small picture when none is tile sized", () => {
     const item = normalizeKlipyGifResult({
       id: "2",

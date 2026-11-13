@@ -342,7 +342,7 @@ function normalizeTenorAsset(
 }
 
 /** A tile is about this wide on a dense phone screen; smaller looks soft. */
-export const GIF_THUMB_MIN_EDGE = 200;
+export const GIF_THUMB_MIN_EDGE = 180;
 
 /**
  * The tile picture among `candidates` (images only): the fewest bytes among
@@ -402,6 +402,12 @@ export function normalizeTenorGifResult(result: any): GifPickerItem | null {
     ) ?? sendCandidates[0];
   const preview = previewCandidates[0];
   const thumb = pickGifThumb([
+    normalizeTenorAsset(
+      result.media_formats.tinywebp_transparent,
+      "image/webp",
+    ),
+    normalizeTenorAsset(result.media_formats.webp_transparent, "image/webp"),
+    normalizeTenorAsset(result.media_formats.tinygif_transparent, "image/gif"),
     normalizeTenorAsset(result.media_formats.tinygif, "image/gif"),
     normalizeTenorAsset(result.media_formats.nanogif, "image/gif"),
     normalizeTenorAsset(result.media_formats.tinywebp, "image/webp"),
