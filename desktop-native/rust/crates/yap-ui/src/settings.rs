@@ -131,6 +131,18 @@ pub mod qobject {
         #[cxx_name = "nameplateType"]
         fn nameplate_type(self: &Settings, path: &QString) -> QString;
 
+        /// The profile's text limits in characters as JSON: `{displayName,
+        /// pronouns, bio, customStatus}`.
+        #[qinvokable]
+        #[cxx_name = "profileLimits"]
+        fn profile_limits(self: &Settings) -> QString;
+
+        /// Why `name` cannot be the display name (the core's check, the
+        /// copy its save would show), or empty when it can.
+        #[qinvokable]
+        #[cxx_name = "checkDisplayName"]
+        fn check_display_name(self: &Settings, name: &QString) -> QString;
+
         #[qinvokable]
         #[cxx_name = "loadAccount"]
         fn load_account(self: &Settings);
@@ -556,6 +568,16 @@ fn picked(path: &str) -> Option<(String, String)> {
     Some((path.to_owned(), content_type.to_owned()))
 }
 
+fn profile_limits_json() -> String {
+    json!({
+        "displayName": settings::DISPLAY_NAME_MAX,
+        "pronouns": settings::PRONOUNS_MAX,
+        "bio": settings::BIO_MAX,
+        "customStatus": settings::CUSTOM_STATUS_MAX,
+    })
+    .to_string()
+}
+
 fn color(text: &str) -> Option<String> {
     settings::normalize_hex_color(text)
 }
@@ -601,6 +623,17 @@ impl qobject::Settings {
 
     pub fn nameplate_type(&self, path: &QString) -> QString {
         settings::nameplate_content_type(&path.to_string())
+            .map(q)
+            .unwrap_or_default()
+    }
+
+    pub fn profile_limits(&self) -> QString {
+        q(&profile_limits_json())
+    }
+
+    pub fn check_display_name(&self, name: &QString) -> QString {
+        settings::validate_display_name(&name.to_string())
+            .err()
             .map(q)
             .unwrap_or_default()
     }
@@ -699,5 +732,14 @@ mod tests {
     #[test]
     fn other_files_are_not_images() {
         assert_eq!(image_content_type("notes.txt"), None);
+    }
+
+    #[test]
+    fn profile_limits_are_the_cores() {
+        let limits: serde_json::Value = serde_json::from_str(&profile_limits_json()).unwrap();
+        assert_eq!(limits["displayName"], 80);
+        assert_eq!(limits["pronouns"], 40);
+        assert_eq!(limits["bio"], 190);
+        assert_eq!(limits["customStatus"], 128);
     }
 }
