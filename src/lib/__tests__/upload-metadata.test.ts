@@ -717,3 +717,57 @@ describe("fail-closed rule", () => {
     expect(uncleanImageError(scanOf("other", null))).toBeNull();
   });
 });
+
+describe("container brands", () => {
+  const ftyp = (major: string, ...compatible: string[]) =>
+    concat(
+      box("ftyp", text(major), [0, 0, 0, 0], ...compatible.map(text)),
+      box(
+        "moov",
+        box("udta", box([0xa9, 0x78, 0x79, 0x7a], text(FAKE_ISO6709))),
+      ),
+    );
+
+  it("walks known video brands as video", async () => {
+    for (const brand of [
+      "isom",
+      "iso6",
+      "mp41",
+      "mp42",
+      "avc1",
+      "qt  ",
+      "M4V ",
+      "M4A ",
+      "3gp5",
+      "3g2a",
+    ]) {
+      const { out, scan } = await strip(ftyp(brand, "isom"));
+      expect(scan.format).toBe("video");
+      expect(scan.stripped).toEqual(["gps"]);
+      expect(contains(out, text(FAKE_ISO6709))).toBe(false);
+    }
+  });
+
+  it("flags Canon CR3 and other brands as unchecked", async () => {
+    for (const file of [ftyp("crx ", "crx ", "isom"), ftyp("abcd", "mp42")]) {
+      const { out, scan } = await strip(file);
+      expect(scan.format).toBe("isobmff");
+      expect(scan.unchecked).toBe("unsupported-format");
+      expect(out).toEqual(file);
+    }
+  });
+
+  it("flags a JPEG XL container as unchecked", async () => {
+    const file = concat(
+      [0, 0, 0, 12],
+      text("JXL \r\n"),
+      [0x87, 0x0a],
+      box("ftyp", text("jxl "), [0, 0, 0, 0], text("jxl ")),
+      box("Exif", [0, 0, 0, 0], tiff()),
+    );
+    const { scan } = await strip(file);
+    expect(scan.format).toBe("jxl");
+    expect(scan.unchecked).toBe("unsupported-format");
+    expect(scan.patches).toEqual([]);
+  });
+});

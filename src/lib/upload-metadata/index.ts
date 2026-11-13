@@ -4,8 +4,9 @@
 // file (EXIF with its GPS, camera and time tags, XMP, IPTC, comments, video
 // location atoms) and returns same-length patches that blank it, plus the
 // kinds it found, never the values. JPEG, PNG, WebP, GIF and MP4/MOV are
-// cleaned; HEIF/HEIC, AVIF and TIFF are reported as unchecked and left as
-// they are; anything else passes through.
+// cleaned; HEIF/HEIC, AVIF, TIFF, JPEG XL and other ISO BMFF brands (Canon
+// CR3) are reported as unchecked and left as they are; anything else
+// passes through.
 //
 // Pure TypeScript and bounded: an in-memory file is patched where it lies,
 // a big one in R2 is read by range within a byte budget and rewritten
@@ -18,6 +19,7 @@ import {
   type ReaderOptions,
   ScanBudgetExceeded,
   startsWith,
+  u32be,
 } from "./bytes";
 import { METADATA_KIND_ORDER, type MetadataKind } from "./exif";
 import { isGif, scanGif } from "./gif";
@@ -47,6 +49,9 @@ export type MetadataFormat =
   | "heif"
   | "avif"
   | "tiff"
+  | "jxl"
+  /** ISO BMFF with a brand that is neither a known video nor HEIF/AVIF. */
+  | "isobmff"
   | "other";
 
 /** Why a file that may carry metadata was not (fully) cleaned. */
@@ -62,6 +67,17 @@ export interface MetadataScan {
 }
 
 const HEAD_BYTES = 64;
+/** Bytes 4..11 of the JPEG XL container signature box. */
+const JXL_SIGNATURE = "JXL \r\n\x87\n";
+
+/** Formats that may carry metadata this scanner can't remove. */
+const UNSUPPORTED_FORMATS: ReadonlySet<MetadataFormat> = new Set([
+  "heif",
+  "avif",
+  "tiff",
+  "jxl",
+  "isobmff",
+]);
 
 type Scanner = (reader: Reader, state: ScanState) => Promise<void>;
 
@@ -81,6 +97,10 @@ export function detectFormat(head: Uint8Array): MetadataFormat {
   if (startsWith(head, 0, "II*\0") || startsWith(head, 0, "MM\0*")) {
     return "tiff";
   }
+  // The JPEG XL container (its bare codestream can't hold EXIF or XMP).
+  if (u32be(head, 0) === 12 && startsWith(head, 4, JXL_SIGNATURE)) {
+    return "jxl";
+  }
   return isoBrand(head) ?? "other";
 }
 
@@ -95,7 +115,7 @@ export async function scanUploadMetadata(
 
   const scanner = SCANNERS[format];
 
-  if (format === "heif" || format === "avif" || format === "tiff") {
+  if (UNSUPPORTED_FORMATS.has(format)) {
     unchecked = "unsupported-format";
   } else if (scanner) {
     try {

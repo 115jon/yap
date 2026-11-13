@@ -11,7 +11,9 @@
 // MAX_MOOV bytes; mdat is only stepped over.
 //
 // HEIF/HEIC and AVIF stills share the container but keep their EXIF in an
-// item; they are reported as unchecked, not cleaned.
+// item; they are reported as unchecked, not cleaned. So is any other brand
+// that isn't a known video one (Canon CR3 raw photos, for one): only MP4,
+// QuickTime, M4V/M4A and 3GPP files are walked as video.
 
 import {
   ascii,
@@ -25,7 +27,7 @@ import type { MetadataKind } from "./exif";
 import { addKinds, type ScanState, write, zero } from "./scan-state";
 import { summarizeXmp } from "./xmp";
 
-export type IsoBrand = "video" | "heif" | "avif";
+export type IsoBrand = "video" | "heif" | "avif" | "isobmff";
 
 const HEIF_BRANDS = new Set([
   "heic",
@@ -41,6 +43,28 @@ const HEIF_BRANDS = new Set([
   "msf1",
 ]);
 const AVIF_BRANDS = new Set(["avif", "avis"]);
+const VIDEO_BRANDS = new Set([
+  "isom",
+  "iso2",
+  "iso3",
+  "iso4",
+  "iso5",
+  "iso6",
+  "mp41",
+  "mp42",
+  "avc1",
+  "qt  ",
+  "M4A ",
+]);
+
+function isVideoBrand(brand: string): boolean {
+  return (
+    VIDEO_BRANDS.has(brand) ||
+    brand.startsWith("M4V") ||
+    brand.startsWith("3gp") ||
+    brand.startsWith("3g2")
+  );
+}
 /** First boxes of a QuickTime file written without `ftyp`. */
 const BARE_QUICKTIME = new Set(["moov", "mdat", "wide", "free", "skip"]);
 const XMP_UUID = [
@@ -72,7 +96,10 @@ function keyKind(name: string): MetadataKind | null {
   return null;
 }
 
-/** The container a file's `ftyp` (or first box) names, or null. */
+/**
+ * The container a file's `ftyp` (or first box) names, or null when it
+ * isn't ISO BMFF. "isobmff" is a brand this scanner doesn't know.
+ */
 export function isoBrand(head: Uint8Array): IsoBrand | null {
   if (head.byteLength < 12) return null;
   const type = ascii(head, 4, 4);
@@ -87,7 +114,7 @@ export function isoBrand(head: Uint8Array): IsoBrand | null {
     if (AVIF_BRANDS.has(brand)) return "avif";
     if (brand === "heic" || brand === "heix") return "heif";
   }
-  return "video";
+  return isVideoBrand(major) ? "video" : "isobmff";
 }
 
 interface BoxHeader {
