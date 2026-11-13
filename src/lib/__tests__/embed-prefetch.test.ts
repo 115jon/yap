@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/api-client", () => ({ apiPost: vi.fn() }));
 
+import { looksPrivateLink } from "../embed-urls";
 import {
   findPrefetchableUrls,
   prefetchEmbeds,
@@ -31,6 +32,54 @@ describe("findPrefetchableUrls", () => {
   it("ignores links in code and trims trailing punctuation", () => {
     expect(
       findPrefetchableUrls("`https://a.example/x` (https://b.example/y). ok"),
+    ).toEqual(["https://b.example/y"]);
+  });
+});
+
+describe("links not to prefetch", () => {
+  it("skips links that carry a credential or open a sign-in step", () => {
+    const privateLinks = [
+      "https://app.example/login?token=abc123",
+      "https://app.example/x?code=4821",
+      "https://app.example/x?access_token=abc",
+      "https://bucket.example/file.png?X-Amz-Signature=deadbeef",
+      "https://app.example/x?api_key=1",
+      "https://app.example/x?otp=1234",
+      "https://app.example/x#access_token=abc&type=magiclink",
+      "https://app.example/x?id=" + "a".repeat(48),
+      "https://app.example/auth/magic-link/abc",
+      "https://app.example/reset-password/abc",
+      "https://app.example/oauth/callback",
+      "https://user:pw@app.example/",
+    ];
+    for (const url of privateLinks) {
+      expect(looksPrivateLink(url), url).toBe(true);
+      expect(findPrefetchableUrls(url, { pasted: true }), url).toEqual([]);
+    }
+  });
+
+  it("still prefetches ordinary links", () => {
+    const ordinary = [
+      "https://youtu.be/dQw4w9WgXcQ?si=Zx3p0aQ1bC2dE4fG",
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42",
+      "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC?si=1a2b3c4d5e6f7g8h",
+      "https://x.com/someone/status/1234567890123456789",
+      "https://en.wikipedia.org/wiki/Author",
+      "https://example.com/keyboards?keyword=split",
+    ];
+    for (const url of ordinary) {
+      expect(looksPrivateLink(url), url).toBe(false);
+    }
+    expect(findPrefetchableUrls(ordinary[0], { pasted: true })).toEqual([
+      ordinary[0],
+    ]);
+  });
+
+  it("leaves a link in angle brackets alone", () => {
+    expect(
+      findPrefetchableUrls("<https://a.example/x> and https://b.example/y ", {
+        pasted: true,
+      }),
     ).toEqual(["https://b.example/y"]);
   });
 });

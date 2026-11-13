@@ -36,6 +36,11 @@ export interface EmbedUrlMatch {
   end: number;
 }
 
+/** A URL written as `<https://...>`: linked, but asked for no embed. */
+function isSuppressed(text: string, start: number, end: number): boolean {
+  return text[start - 1] === "<" && text[end] === ">";
+}
+
 /** {@link extractEmbedUrls} with where each URL ends in `content`. */
 export function matchEmbedUrls(
   content: string,
@@ -50,6 +55,8 @@ export function matchEmbedUrls(
   const seen = new Set<string>();
   for (const match of withoutCode.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
     const candidate = trimUnbalancedClosers(match[0]);
+    const start = match.index ?? 0;
+    if (isSuppressed(withoutCode, start, start + candidate.length)) continue;
     let normalized: string;
     try {
       const parsed = new URL(candidate);
@@ -61,10 +68,7 @@ export function matchEmbedUrls(
     // Keep what the user typed, dedupe on the parsed form.
     if (seen.has(normalized)) continue;
     seen.add(normalized);
-    matches.push({
-      url: candidate,
-      end: (match.index ?? 0) + candidate.length,
-    });
+    matches.push({ url: candidate, end: start + candidate.length });
     if (matches.length >= limit) break;
   }
   return matches;
@@ -75,11 +79,57 @@ export function matchEmbedUrls(
  * linkifies (MarkdownRenderer): trailing punctuation and an unbalanced closing
  * bracket are not part of the URL (`(see https://a.b/c).` -> `https://a.b/c`),
  * and URLs inside inline code or code blocks are not linkified so they get no
- * embed either.
+ * embed either. A URL in angle brackets (`<https://a.b/c>`) asks for no embed.
  */
 export function extractEmbedUrls(
   content: string,
   limit = MAX_EMBEDS_PER_MESSAGE,
 ): string[] {
   return matchEmbedUrls(content, limit).map((match) => match.url);
+}
+
+// ── Links not to fetch before they are sent ─────────────────────────────────
+
+/**
+ * Query (or fragment) keys that carry a credential: tokens, one-time codes,
+ * signatures, keys, passwords. Matched as a whole key or a word inside one
+ * (`access_token`, `X-Amz-Signature`, `api_key`).
+ */
+const SECRET_PARAM =
+  /(?:^|[^a-z])(?:token|code|key|sig|signature|auth|magic|otp|password|passwd|pwd|pass|secret|credential|session|sid|ticket|nonce|hmac)s?(?:$|[^a-z])|token|signature|password|secret|apikey|authkey/i;
+
+/** Path segments of sign-in, magic-link, verification and reset pages. */
+const AUTH_PATH =
+  /(?:^|\/)(?:magic[-_]?links?|magic|auth|oauth2?|sso|saml|login|log-?in|sign-?in|signin|callback|verify|verification|confirm|activate|reset[-_]?password|password[-_]?reset|reset|one[-_]?time)(?:$|[/._-])/i;
+
+/** An opaque value this long is treated as a credential whatever its key. */
+const OPAQUE_VALUE = /^[A-Za-z0-9_\-.~%+/=]{40,}$/;
+
+function hasSecretParams(params: URLSearchParams): boolean {
+  for (const [key, value] of params) {
+    if (SECRET_PARAM.test(key) || OPAQUE_VALUE.test(value)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a link looks like it carries a credential or opens a sign-in step:
+ * a magic link, a password reset, an OAuth callback, a signed URL. Pasting
+ * one must not spend it, so the composer's prefetch skips these; sending the
+ * message still embeds it as usual.
+ */
+export function looksPrivateLink(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.username || parsed.password) return true;
+  if (AUTH_PATH.test(parsed.pathname)) return true;
+  if (hasSecretParams(parsed.searchParams)) return true;
+  const fragment = parsed.hash.slice(1);
+  return (
+    fragment.includes("=") && hasSecretParams(new URLSearchParams(fragment))
+  );
 }
