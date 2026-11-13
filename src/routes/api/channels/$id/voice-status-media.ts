@@ -12,6 +12,10 @@ import {
 import { logger } from "@/lib/logger";
 import { PERMISSIONS } from "@/lib/permissions";
 import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
+import {
+  metadataResponseFields,
+  stripMetadataInPlace,
+} from "@/lib/upload-metadata/strip-upload";
 import { requireChannelAccess } from "@/lib/require-channel-access";
 import { requireChannelPermission } from "@/lib/require-permission";
 import { tooLargeMessage } from "@/lib/upload-limits";
@@ -184,6 +188,11 @@ export const POST = async ({ request, params }: any) => {
       filename,
     );
     const buffer = await file.arrayBuffer();
+    const metadata = await stripMetadataInPlace(buffer, {
+      route: "voice-status-media",
+      userId: access.userId,
+      channelId,
+    });
     const bucket = getBucket();
 
     await bucket.put(fileKey, buffer, {
@@ -204,7 +213,11 @@ export const POST = async ({ request, params }: any) => {
         sizeBytes: file.size,
       });
 
-      return apiSuccess({ item }, 201, request);
+      return apiSuccess(
+        { item, ...metadataResponseFields(metadata) },
+        201,
+        request,
+      );
     } catch (error) {
       try {
         await bucket.delete(fileKey);

@@ -19,6 +19,10 @@ import { FREE_ENTITLEMENT } from "@/lib/entitlements";
 import { getEntitlement } from "@/services/entitlement.service";
 import { getSoundboardUploadUrl } from "@/lib/voice/soundboard-media";
 import { featurePaused } from "@/services/site-flags.service";
+import {
+  metadataResponseFields,
+  stripMetadataFromFile,
+} from "@/lib/upload-metadata/strip-upload";
 
 const SOUNDBOARD_AUDIO_TYPES_BY_EXTENSION: Record<string, string> = {
   aac: "audio/aac",
@@ -155,9 +159,16 @@ export const POST = async ({ request, params }: any) => {
 
   const key = `attachments/${channelId}/${attachmentId}/${file.name}`;
 
-  // Upload to R2
-  // The File itself, not a second in-memory copy of it.
-  await bucket.put(key, file, {
+  // Location, camera and other metadata come out before R2 sees the file.
+  // A file with nothing to strip goes up as the File itself, not a second
+  // in-memory copy of it.
+  const { body, scan: metadata } = await stripMetadataFromFile(file, {
+    route: isSoundboardUpload ? "soundboard" : "attachment",
+    userId,
+    channelId,
+    attachmentId,
+  });
+  await bucket.put(key, body, {
     httpMetadata: { contentType },
   });
 
@@ -229,6 +240,7 @@ export const POST = async ({ request, params }: any) => {
       file_name: file.name,
       file_size: file.size,
       content_type: contentType,
+      ...metadataResponseFields(metadata),
     },
     201,
   );

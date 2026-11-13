@@ -10,6 +10,10 @@ import {
 } from "@/lib/api-helpers";
 import { cacheDel, CacheKey } from "@/lib/cache";
 import { validateImageBuffer } from "@/lib/image-validation";
+import {
+  metadataResponseFields,
+  stripMetadataInPlace,
+} from "@/lib/upload-metadata/strip-upload";
 import { tooLargeMessage } from "@/lib/upload-limits";
 import { uploadLimitForUser } from "@/services/entitlement.service";
 import { logger } from "@/lib/logger";
@@ -78,6 +82,10 @@ const POST = async ({ request, params: _params }: any) => {
     });
     return apiError(validation.error, 415);
   }
+  const metadata = await stripMetadataInPlace(buffer, {
+    route: "avatar",
+    userId,
+  });
 
   const previousUser = await getDB()
     .prepare("SELECT avatar_url FROM users WHERE id = ?")
@@ -200,7 +208,11 @@ const POST = async ({ request, params: _params }: any) => {
   logger.info("Avatar uploaded", { userId, key });
 
   return apiSuccess(
-    { url: result.avatarUrl, avatar_display: result.avatarDisplay },
+    {
+      url: result.avatarUrl,
+      avatar_display: result.avatarDisplay,
+      ...metadataResponseFields(metadata),
+    },
     201,
   );
 };

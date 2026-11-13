@@ -25,6 +25,10 @@ import {
   validateProfileNameplateBuffer,
 } from "@/lib/profile-asset-validation";
 import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
+import {
+  metadataResponseFields,
+  stripMetadataInPlace,
+} from "@/lib/upload-metadata/strip-upload";
 import { tooLargeMessage } from "@/lib/upload-limits";
 import { uploadLimitForUser } from "@/services/entitlement.service";
 import { clearProfileAsset, updateProfileAsset } from "@/services/user.service";
@@ -124,6 +128,10 @@ const POST = async ({ request }: any) => {
     });
     return apiError(validation.error, 415);
   }
+  const metadata = await stripMetadataInPlace(buffer, {
+    route: kindValue,
+    userId,
+  });
 
   const key = getProfileAssetStorageKey(kindValue, userId, validation.ext);
   const url = getProfileAssetUrl(kindValue, userId, validation.ext);
@@ -196,6 +204,7 @@ const POST = async ({ request }: any) => {
           : result.user.nameplate_url,
       content_type: validation.mimeType,
       updated_at: result.updatedAt,
+      ...metadataResponseFields(metadata),
     },
     201,
   );

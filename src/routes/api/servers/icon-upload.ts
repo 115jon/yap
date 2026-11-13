@@ -10,6 +10,10 @@ import {
 import { MAX_IMAGE_SIZE, validateImageBuffer } from "@/lib/image-validation";
 import { logger } from "@/lib/logger";
 import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
+import {
+  metadataResponseFields,
+  stripMetadataInPlace,
+} from "@/lib/upload-metadata/strip-upload";
 
 // POST /api/servers/icon-upload — upload a server icon to R2
 const POST = async ({ request, params: _params }: any) => {
@@ -50,6 +54,11 @@ const POST = async ({ request, params: _params }: any) => {
     return apiError(validation.error, 415);
   }
 
+  const metadata = await stripMetadataInPlace(buffer, {
+    route: "server-icon",
+    userId,
+  });
+
   const iconId = genId();
   const key = `server-icons/${iconId}.${validation.ext}`;
 
@@ -62,6 +71,7 @@ const POST = async ({ request, params: _params }: any) => {
     {
       url: `/api/server-icons/${iconId}.${validation.ext}`,
       key,
+      ...metadataResponseFields(metadata),
     },
     201,
   );

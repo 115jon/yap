@@ -1,0 +1,517 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  applyPatches,
+  blobSource,
+  bufferSource,
+  type ByteSource,
+  type MetadataScan,
+  patchingStream,
+  scanUploadMetadata,
+} from "@/lib/upload-metadata";
+import { summarizeTiff } from "@/lib/upload-metadata/exif";
+
+import {
+  BASE_JPEG,
+  box,
+  concat,
+  contains,
+  exifSegment,
+  FAKE_ISO6709,
+  FAKE_MAKE,
+  FAKE_SERIAL,
+  GAIN_MAP_XMP,
+  gifWith,
+  jpegSegment,
+  jpegWith,
+  latitudeBytes,
+  mp4WithLocation,
+  pngChunk,
+  pngCrc,
+  pngWith,
+  text,
+  tiff,
+  webpWith,
+  xmpPacket,
+} from "./fixtures/metadata-files";
+
+async function strip(
+  file: Uint8Array,
+): Promise<{ out: Uint8Array; scan: MetadataScan }> {
+  const out = file.slice();
+  const scan = await scanUploadMetadata(bufferSource(out));
+  applyPatches(out, scan.patches);
+  return { out, scan };
+}
+
+/** The JPEG segments up to SOS, as [marker, payload]. */
+function jpegSegments(file: Uint8Array): [number, Uint8Array][] {
+  const out: [number, Uint8Array][] = [];
+  let pos = 2;
+  while (pos + 4 <= file.length && file[pos + 1] !== 0xda) {
+    const length = (file[pos + 2] << 8) | file[pos + 3];
+    out.push([file[pos + 1], file.subarray(pos + 4, pos + 2 + length)]);
+    pos += 2 + length;
+  }
+  return out;
+}
+
+function pngChunks(
+  file: Uint8Array,
+): { type: string; data: Uint8Array; crcOk: boolean }[] {
+  const out = [];
+  let pos = 8;
+  const view = new DataView(file.buffer, file.byteOffset, file.byteLength);
+  while (pos + 12 <= file.length) {
+    const length = view.getUint32(pos);
+    const type = String.fromCharCode(...file.subarray(pos + 4, pos + 8));
+    const data = file.subarray(pos + 8, pos + 8 + length);
+    const crc = view.getUint32(pos + 8 + length);
+    out.push({
+      type,
+      data,
+      crcOk: crc === pngCrc(file.subarray(pos + 4, pos + 8 + length)),
+    });
+    pos += 12 + length;
+  }
+  return out;
+}
+
+function riffChunks(file: Uint8Array): { fourcc: string; data: Uint8Array }[] {
+  const out = [];
+  let pos = 12;
+  const view = new DataView(file.buffer, file.byteOffset, file.byteLength);
+  while (pos + 8 <= file.length) {
+    const length = view.getUint32(pos + 4, true);
+    out.push({
+      fourcc: String.fromCharCode(...file.subarray(pos, pos + 4)),
+      data: file.subarray(pos + 8, pos + 8 + length),
+    });
+    pos += 8 + length + (length & 1);
+  }
+  return out;
+}
+
+function noSecrets(out: Uint8Array) {
+  expect(contains(out, latitudeBytes())).toBe(false);
+  expect(contains(out, text(FAKE_MAKE))).toBe(false);
+  expect(contains(out, text(FAKE_SERIAL))).toBe(false);
+  expect(contains(out, text("GPSLatitude"))).toBe(false);
+}
+
+describe("JPEG", () => {
+  it("removes GPS EXIF, XMP, IPTC and comments, keeps ICC and JFIF", async () => {
+    const icc = jpegSegment(
+      0xe2,
+      concat(text("ICC_PROFILE\0"), [1, 1], new Uint8Array(40).fill(7)),
+    );
+    const gainMap = jpegSegment(
+      0xe2,
+      concat(text("urn:iso:std:iso:ts:21496:-1\0"), [0, 0, 0, 0]),
+    );
+    const file = jpegWith(
+      exifSegment(),
+      jpegSegment(0xe1, text(`http://ns.adobe.com/xap/1.0/\0${xmpPacket()}`)),
+      icc,
+      gainMap,
+      jpegSegment(0xed, text("Photoshop 3.0\u00008BIM caption")),
+      jpegSegment(0xfe, text("shot at home")),
+    );
+    const { out, scan } = await strip(file);
+
+    expect(scan.format).toBe("jpeg");
+    expect(scan.unchecked).toBeNull();
+    expect(scan.stripped).toEqual([
+      "gps",
+      "camera",
+      "timestamp",
+      "exif",
+      "xmp",
+      "iptc",
+      "comment",
+    ]);
+    expect(out.length).toBe(file.length);
+    noSecrets(out);
+    expect(contains(out, text("shot at home"))).toBe(false);
+    expect(contains(out, text("caption"))).toBe(false);
+    // JFIF, the ICC profile, the gain-map parameters and the image data are
+    // byte for byte the same.
+    expect(contains(out, icc)).toBe(true);
+    expect(contains(out, gainMap)).toBe(true);
+    expect(contains(out, BASE_JPEG.subarray(2, 20))).toBe(true);
+    expect(contains(out, BASE_JPEG.subarray(-64))).toBe(true);
+    // Every stripped segment kept its marker and length; no identifier left.
+    const markers = jpegSegments(out).map(([marker]) => marker);
+    expect(markers).toEqual(jpegSegments(file).map(([marker]) => marker));
+    for (const [marker, payload] of jpegSegments(out)) {
+      if (marker === 0xe1 || marker === 0xed || marker === 0xfe) {
+        expect(payload.every((b) => b === 0)).toBe(true);
+      }
+    }
+  });
+
+  it("keeps a minimal EXIF holding only the Orientation", async () => {
+    const { out, scan } = await strip(
+      jpegWith(exifSegment({ orientation: 6 })),
+    );
+    expect(scan.stripped).toContain("gps");
+    noSecrets(out);
+    const [, payload] = jpegSegments(out).find(([m]) => m === 0xe1)!;
+    expect(String.fromCharCode(...payload.subarray(0, 6))).toBe("Exif\0\0");
+    const summary = summarizeTiff(payload.subarray(6));
+    expect(summary?.orientation).toBe(6);
+    expect([...summary!.kinds]).toEqual(["exif"]);
+  });
+
+  it("drops an EXIF whose Orientation is the default", async () => {
+    const { out } = await strip(jpegWith(exifSegment({ orientation: 1 })));
+    const [, payload] = jpegSegments(out).find(([m]) => m === 0xe1)!;
+    expect(payload.every((b) => b === 0)).toBe(true);
+  });
+
+  it("keeps a render-only (Ultra HDR gain map) XMP packet", async () => {
+    const xmp = jpegSegment(
+      0xe1,
+      text(`http://ns.adobe.com/xap/1.0/\0${GAIN_MAP_XMP}`),
+    );
+    const { out, scan } = await strip(jpegWith(xmp));
+    expect(scan.stripped).toEqual([]);
+    expect(scan.patches).toEqual([]);
+    expect(contains(out, xmp)).toBe(true);
+  });
+
+  it("cleans the images an MPF index points at", async () => {
+    const secondary = jpegWith(exifSegment({ orientation: 3 }));
+    // MPF: header, one IFD with MPEntry (two 16-byte entries).
+    const mpfTiff = (secondaryOffset: number) =>
+      Uint8Array.from([
+        0x4d,
+        0x4d,
+        0,
+        42,
+        0,
+        0,
+        0,
+        8,
+        0,
+        1,
+        0xb0,
+        0x02,
+        0,
+        7,
+        0,
+        0,
+        0,
+        32,
+        0,
+        0,
+        0,
+        26,
+        0,
+        0,
+        0,
+        0,
+        // entry 1: the primary (offset 0); entry 2: the secondary
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        (secondaryOffset >>> 24) & 0xff,
+        (secondaryOffset >>> 16) & 0xff,
+        (secondaryOffset >>> 8) & 0xff,
+        secondaryOffset & 0xff,
+        0,
+        0,
+        0,
+        0,
+      ]);
+    const draft = jpegWith(
+      jpegSegment(0xe2, concat(text("MPF\0"), mpfTiff(0))),
+    );
+    // The MPF TIFF header starts 2 (SOI) + 4 (marker, length) + 4 ("MPF\0") in.
+    const offset = draft.length - 10;
+    const primary = jpegWith(
+      jpegSegment(0xe2, concat(text("MPF\0"), mpfTiff(offset))),
+    );
+    const file = concat(primary, secondary);
+
+    const { out, scan } = await strip(file);
+    expect(scan.stripped).toContain("gps");
+    noSecrets(out);
+    const tail = out.subarray(primary.length);
+    const [, payload] = jpegSegments(tail).find(([m]) => m === 0xe1)!;
+    expect(summarizeTiff(payload.subarray(6))?.orientation).toBe(3);
+  });
+});
+
+describe("PNG", () => {
+  it("removes eXIf, text chunks, XMP and tIME with valid CRCs", async () => {
+    const file = pngWith(
+      pngChunk("iCCP", concat(text("icc\0\0"), [0x78, 0x9c, 1, 2, 3])),
+      pngChunk("eXIf", tiff()),
+      pngChunk("tEXt", text("Comment\0shot at home")),
+      pngChunk("iTXt", text(`XML:com.adobe.xmp\0\0\0\0\0${xmpPacket()}`)),
+      pngChunk("tIME", Uint8Array.from([7, 228, 1, 2, 3, 4, 5])),
+    );
+    const { out, scan } = await strip(file);
+    expect(scan.format).toBe("png");
+    expect(scan.stripped).toEqual([
+      "gps",
+      "camera",
+      "timestamp",
+      "exif",
+      "xmp",
+      "comment",
+    ]);
+    expect(out.length).toBe(file.length);
+    noSecrets(out);
+    expect(contains(out, text("shot at home"))).toBe(false);
+    const chunks = pngChunks(out);
+    expect(chunks.map((c) => c.type)).toEqual([
+      "IHDR",
+      "iCCP",
+      "yaPd",
+      "yaPd",
+      "yaPd",
+      "yaPd",
+      "IDAT",
+      "IEND",
+    ]);
+    expect(chunks.every((c) => c.crcOk)).toBe(true);
+  });
+
+  it("keeps eXIf with only the Orientation", async () => {
+    const { out } = await strip(
+      pngWith(pngChunk("eXIf", tiff({ orientation: 8 }))),
+    );
+    noSecrets(out);
+    const exif = pngChunks(out).find((c) => c.type === "eXIf")!;
+    expect(exif.crcOk).toBe(true);
+    expect(summarizeTiff(exif.data)?.orientation).toBe(8);
+  });
+
+  it("leaves a PNG without metadata untouched", async () => {
+    const { scan } = await strip(pngWith());
+    expect(scan.patches).toEqual([]);
+    expect(scan.stripped).toEqual([]);
+  });
+});
+
+describe("WebP", () => {
+  it("renames EXIF and XMP chunks and clears their VP8X flags", async () => {
+    const file = webpWith({ exif: tiff(), xmp: xmpPacket() });
+    const { out, scan } = await strip(file);
+    expect(scan.format).toBe("webp");
+    expect(scan.stripped).toEqual([
+      "gps",
+      "camera",
+      "timestamp",
+      "exif",
+      "xmp",
+    ]);
+    noSecrets(out);
+    const chunks = riffChunks(out);
+    expect(chunks.map((c) => c.fourcc)).toEqual([
+      "VP8X",
+      "VP8L",
+      "JUNK",
+      "JUNK",
+    ]);
+    expect(chunks[0].data[0] & 0x0c).toBe(0);
+    // The bitstream is unchanged.
+    expect(chunks[1].data).toEqual(riffChunks(file)[1].data);
+  });
+
+  it("keeps an Orientation-only EXIF (also behind an Exif\\0\\0 prefix)", async () => {
+    const exif = concat(text("Exif\0\0"), tiff({ orientation: 5 }));
+    const { out } = await strip(webpWith({ exif }));
+    noSecrets(out);
+    const chunks = riffChunks(out);
+    const kept = chunks.find((c) => c.fourcc === "EXIF")!;
+    expect(summarizeTiff(kept.data.subarray(6))?.orientation).toBe(5);
+    expect(chunks[0].data[0] & 0x08).toBe(0x08);
+  });
+});
+
+describe("GIF", () => {
+  it("zeroes comment and XMP blocks without changing their structure", async () => {
+    const file = gifWith({ comment: "shot at home", xmp: xmpPacket() });
+    const { out, scan } = await strip(file);
+    expect(scan.format).toBe("gif");
+    expect(scan.stripped).toEqual(["xmp", "comment"]);
+    expect(out.length).toBe(file.length);
+    expect(contains(out, text("shot at home"))).toBe(false);
+    expect(contains(out, text("GPSLatitude"))).toBe(false);
+    // Still a GIF that ends in its trailer, with the frame intact.
+    expect(out[out.length - 1]).toBe(0x3b);
+    expect(contains(out, Uint8Array.from([0x2c, 0, 0, 0, 0, 4, 0, 4, 0]))).toBe(
+      true,
+    );
+  });
+});
+
+describe("MP4 / MOV", () => {
+  it("zeroes the ©xyz atom and location/make keys in place", async () => {
+    const file = mp4WithLocation();
+    const { out, scan } = await strip(file);
+    expect(scan.format).toBe("video");
+    expect(scan.stripped).toEqual(["gps", "camera"]);
+    expect(out.length).toBe(file.length);
+    expect(contains(out, text(FAKE_ISO6709))).toBe(false);
+    expect(contains(out, text(FAKE_MAKE))).toBe(false);
+    // ©xyz is now a free box of the same size; key names stay, values went.
+    expect(contains(out, Uint8Array.from([0xa9, 0x78, 0x79, 0x7a]))).toBe(
+      false,
+    );
+    expect(contains(out, text("free"))).toBe(true);
+    expect(contains(out, text("com.apple.quicktime.location.ISO6709"))).toBe(
+      true,
+    );
+    expect(contains(out, text("17.1"))).toBe(true);
+    expect(contains(out, new Uint8Array(64).fill(0x5a))).toBe(true);
+  });
+
+  it("finds moov after a 64-bit mdat", async () => {
+    const big = concat(
+      [0, 0, 0, 1],
+      text("mdat"),
+      [0, 0, 0, 0, 0, 0, 0, 24],
+      new Uint8Array(8),
+    );
+    const file = concat(
+      box("ftyp", text("isom"), [0, 0, 0, 0], text("isom")),
+      big,
+      box(
+        "moov",
+        box("udta", box([0xa9, 0x78, 0x79, 0x7a], text(FAKE_ISO6709))),
+      ),
+    );
+    const { out, scan } = await strip(file);
+    expect(scan.stripped).toEqual(["gps"]);
+    expect(contains(out, text(FAKE_ISO6709))).toBe(false);
+  });
+});
+
+describe("pass-through", () => {
+  it("flags HEIC and AVIF as unchecked and leaves them alone", async () => {
+    for (const [brand, format] of [
+      ["heic", "heif"],
+      ["avif", "avif"],
+    ] as const) {
+      const file = concat(
+        box("ftyp", text(brand), [0, 0, 0, 0], text("mif1")),
+        box("meta", new Uint8Array(32)),
+      );
+      const { out, scan } = await strip(file);
+      expect(scan.format).toBe(format);
+      expect(scan.unchecked).toBe("unsupported-format");
+      expect(scan.patches).toEqual([]);
+      expect(out).toEqual(file);
+    }
+  });
+
+  it("does not touch files it doesn't know", async () => {
+    const zip = concat(text("PK\x03\x04"), new Uint8Array(100).fill(9));
+    const { scan } = await strip(zip);
+    expect(scan).toEqual({
+      format: "other",
+      stripped: [],
+      unchecked: null,
+      patches: [],
+    });
+  });
+
+  it("reads only the head of a huge non-image", async () => {
+    let read = 0;
+    const source: ByteSource = {
+      size: 500 * 1024 * 1024,
+      read: async (_offset, length) => {
+        read += length;
+        return new Uint8Array(length);
+      },
+    };
+    const scan = await scanUploadMetadata(source);
+    expect(scan.format).toBe("other");
+    expect(read).toBeLessThanOrEqual(64);
+  });
+
+  it("stops at the byte budget and reports the file as too large", async () => {
+    // A PNG whose metadata sits behind 40 image chunks of 70 KB: each
+    // chunk header costs a fresh 64 KB window.
+    const file = pngWith(
+      ...Array.from({ length: 40 }, () =>
+        pngChunk("IDAT", new Uint8Array(70_000)),
+      ),
+      pngChunk("tEXt", text("Comment\0late")),
+    );
+    const scan = await scanUploadMetadata(bufferSource(file), {
+      windowSize: 64 * 1024,
+      budget: 1024 * 1024,
+    });
+    expect(scan.unchecked).toBe("too-large");
+  });
+
+  it("still strips what it saw before a truncated segment", async () => {
+    // EXIF, then a segment whose length runs past the end of the file.
+    const file = concat(
+      BASE_JPEG.subarray(0, 2),
+      exifSegment(),
+      [0xff, 0xfe, 0x40, 0x00],
+      text("cut off"),
+    );
+    const { out, scan } = await strip(file);
+    expect(scan.stripped).toContain("gps");
+    noSecrets(out);
+  });
+});
+
+describe("sources and streams", () => {
+  it("scans a Blob by slices and patches it through a stream", async () => {
+    const file = jpegWith(
+      exifSegment({ orientation: 6 }),
+      jpegSegment(0xfe, text("shot at home")),
+    );
+    const scan = await scanUploadMetadata(
+      blobSource(new Blob([file.slice()])),
+      {
+        windowSize: 16,
+      },
+    );
+    expect(scan.stripped).toContain("gps");
+
+    // Feed it through in awkward 7-byte chunks: same result as in place.
+    const expected = file.slice();
+    applyPatches(expected, scan.patches);
+    const chunks: Uint8Array[] = [];
+    for (let i = 0; i < file.length; i += 7) chunks.push(file.slice(i, i + 7));
+    const streamed = await new Response(
+      new ReadableStream({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(chunk);
+          controller.close();
+        },
+      }).pipeThrough(patchingStream(scan.patches)),
+    ).arrayBuffer();
+    expect(new Uint8Array(streamed)).toEqual(expected);
+  });
+});
