@@ -6,7 +6,9 @@ import java.util.Map;
 /**
  * A Yap data-only push (src/services/push.service.ts on the server,
  * `buildNativeMessagePush` and `sendReadPushes`), from FCM's data map.
- * `ralph` = "2" marks the format; anything else is not ours.
+ * `ralph` = "2" marks the format; anything else is not ours. The call
+ * kinds (`call_ring`, `call_ring_stop`, src/services/call.service.ts) are
+ * read as an IncomingCall.
  */
 final class YapPush {
     private YapPush() {}

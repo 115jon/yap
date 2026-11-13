@@ -185,6 +185,8 @@ public final class PushShim {
 
     /** Signed out: no notification or shortcut outlives the account. */
     public static void forgetNotifications() {
-        if (activity != null) MessageNotifier.forgetAll(activity.getApplicationContext());
+        if (activity == null) return;
+        MessageNotifier.forgetAll(activity.getApplicationContext());
+        IncomingCalls.forget(activity);
     }
 }

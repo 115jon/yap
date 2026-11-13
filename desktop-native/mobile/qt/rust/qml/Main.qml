@@ -8,8 +8,9 @@ import Yap.Ui
 // bars float over it; SafeArea keeps content clear of them), the desktop's
 // sign-in phases, and the navigation: Home's pager (drawer, chat, members)
 // with pages and sheets stacked over it (a profile, Settings, Friends, the
-// call), and the platform's back gesture stepping through them. The pages
-// are per platform; the rows inside them are the desktop's.
+// call), a DM call's incoming sheet over everything, and the platform's
+// back gesture stepping through them. The pages are per platform; the rows
+// inside them are the desktop's.
 Window {
     id: window
 
@@ -203,6 +204,8 @@ Window {
             openCall()
             return
         }
+        afterMicrophone = null
+        refusedMicrophone = null
         wantedVoice = channelId
         Native.requestMicrophone()
     }
@@ -213,21 +216,207 @@ Window {
         stack.sheet = false
         stack.push(callPage)
     }
+    // What a DM call does once the microphone is allowed (joinVoice's
+    // channel goes the same way).
+    property var afterMicrophone: null
+    // What a refusal does besides the microphone sheet (an answer declines).
+    property var refusedMicrophone: null
+    function withMicrophone(then, refused) {
+        wantedVoice = ""
+        afterMicrophone = then
+        refusedMicrophone = refused ?? null
+        Native.requestMicrophone()
+    }
     Connections {
         target: Native
         function onMicrophoneAnswered(granted) {
             const channelId = window.wantedVoice
+            const then = window.afterMicrophone
+            const refused = window.refusedMicrophone
             window.wantedVoice = ""
-            if (channelId.length === 0 || !window.ready)
+            window.afterMicrophone = null
+            window.refusedMicrophone = null
+            // A DM call's step waits for sign-in itself (an answer from the
+            // lock screen can come while the session still loads).
+            if (!then && (channelId.length === 0 || !window.ready))
                 return
             if (!granted) {
+                if (refused)
+                    refused()
                 microphoneSheet.open()
                 return
             }
             Native.haptic(Native.Confirm)
+            if (then) {
+                then()
+                return
+            }
             Voice.join(channelId)
             window.openCall()
         }
+    }
+
+    // DM calls. The open DM's call and the one ringing us, as Yap.Ui's
+    // model reads the core's (the desktop's call area reads the same).
+    DmCallModel { id: dmCall }
+
+    // The header's call key: join the call going on, else ask, then ring.
+    function startDmCall() {
+        const channelId = Nav.activeChannelId
+        if (channelId.length === 0)
+            return
+        if (dmCall.existing) {
+            withMicrophone(() => {
+                Calls.join(channelId, false)
+                window.openCall()
+            })
+            return
+        }
+        callConfirm.channelId = channelId
+        callConfirm.name = Nav.activeChannelName
+        callConfirm.leaves = Voice.channelId.length > 0 && !dmCall.inDmCall ? Voice.channelName : ""
+        callConfirm.open()
+    }
+    function dmCallAction(action) {
+        const channelId = Nav.activeChannelId
+        if (action === "start")
+            startDmCall()
+        else if (action === "join")
+            withMicrophone(() => {
+                Calls.join(channelId, false)
+                window.openCall()
+            })
+        else if (action === "answer")
+            answerRing()
+        else if (action === "decline")
+            declineRing()
+        else if (action === "open")
+            openCall()
+    }
+
+    // The ring the incoming sheet shows: the core's (CALL_RING over the
+    // gateway), else the shim's (a push the core never saw: the app started
+    // from it, or the gateway is closed in the background).
+    property string handledRing: ""
+    readonly property var ringing: {
+        if (dmCall.incoming && dmCall.callId.length > 0) {
+            return {
+                "callId": dmCall.callId,
+                "channelId": dmCall.callChannelId,
+                "callerId": dmCall.remote.id ?? "",
+                "callerName": dmCall.remote.name ?? "",
+                "callerAvatar": dmCall.remote.avatar ?? "",
+                "core": true
+            }
+        }
+        const shim = Native.incomingCall
+        if ((shim.callId ?? "").length > 0)
+            return Object.assign({ "core": false }, shim)
+        return {}
+    }
+    readonly property var shownRing: (ringing.callId ?? "").length > 0 && ringing.callId !== handledRing ? ringing : ({})
+
+    // The core's ring goes to the shim, which rings once per call id
+    // whichever came first (the ringtone in front, else the notification),
+    // and its end stops it there (a missed one leaves a notification).
+    property string coreRingId: ""
+    readonly property string coreRing: dmCall.incoming ? dmCall.callId : ""
+    onCoreRingChanged: {
+        if (coreRingId.length > 0 && coreRingId !== coreRing)
+            Native.stopIncoming(coreRingId, dmCall.status === "active" ? "accepted"
+                : dmCall.endReason.length > 0 ? dmCall.endReason : "ended")
+        coreRingId = coreRing
+        if (coreRing.length > 0)
+            Native.ringIncoming(ringing)
+    }
+
+    // Answer in the sheet (or the strip): once the microphone is allowed.
+    // The core's ring is answered over the gateway (it opens the DM and
+    // joins when the server says accepted); the shim's over REST, then the
+    // DM's call is joined here.
+    function answerRing() {
+        const ring = shownRing
+        if ((ring.callId ?? "").length === 0)
+            return
+        withMicrophone(() => {
+            // Stopped ringing while the system asked (cancelled, timed out):
+            // nothing to answer, and a join would sit alone in its room.
+            if ((window.ringing.callId ?? "") !== ring.callId)
+                return
+            window.handledRing = ring.callId
+            if (ring.core && dmCall.incoming && dmCall.callId === ring.callId) {
+                Native.answerIncoming(ring.callId, false)
+                dmCall.accept(false)
+                window.closeTop(true)
+                window.openCall()
+            } else {
+                Native.answerIncoming(ring.callId, true)
+                window.joinAnswered(ring)
+            }
+        }, () => {
+            // No microphone, no call: the ring is declined, and the
+            // microphone sheet shows (not under the incoming sheet).
+            if ((window.ringing.callId ?? "") === ring.callId)
+                window.declineRing()
+        })
+    }
+    function declineRing() {
+        const ring = shownRing
+        if ((ring.callId ?? "").length === 0)
+            return
+        handledRing = ring.callId
+        const core = ring.core && dmCall.incoming && dmCall.callId === ring.callId
+        Native.declineIncoming(ring.callId, !core)
+        if (core)
+            dmCall.decline()
+    }
+
+    // A call answered outside the app (its notification, the lock screen)
+    // or over REST: open its DM and join its call once the DM is the open
+    // one (the core knows it then; a cold start's list may still load).
+    property string answeredChannel: ""
+    property string answeredCaller: ""
+    function joinAnswered(call) {
+        answeredChannel = call.channelId ?? ""
+        answeredCaller = call.callerId ?? ""
+        if (ready)
+            openAnswered()
+    }
+    function openAnswered() {
+        if (answeredChannel.length === 0)
+            return
+        closeTop(true)
+        const channelId = answeredChannel
+        openUnseen(() => Nav.openChannel(channelId, ""))
+        if (answeredCaller.length > 0)
+            pager.showDmWhenOpen(answeredCaller)
+        Qt.callLater(joinWhenOpen)
+    }
+    function joinWhenOpen() {
+        if (!ready || answeredChannel.length === 0 || Nav.activeChannelId !== answeredChannel)
+            return
+        const channelId = answeredChannel
+        answeredChannel = ""
+        answeredCaller = ""
+        withMicrophone(() => {
+            Calls.join(channelId, false)
+            window.openCall()
+        })
+    }
+    Connections {
+        target: Nav
+        function onActiveChannelIdChanged() { window.joinWhenOpen() }
+    }
+    function takeAnswered() {
+        const call = Native.takeAnsweredCall()
+        if ((call.callId ?? "").length === 0)
+            return
+        handledRing = call.callId
+        joinAnswered(call)
+    }
+    Connections {
+        target: Native
+        function onCallAnswered() { window.takeAnswered() }
     }
     // What the call notification shows, and where its Mute starts from.
     // Sent once per update of the core's: its properties change one after
@@ -275,6 +464,8 @@ Window {
         if (ready) {
             openFromNotification()
             openFromLink()
+            takeAnswered()
+            openAnswered()
             return
         }
         stack.pop(null, StackView.Immediate)
@@ -326,6 +517,7 @@ Window {
                 onFriendsRequested: window.openFriends()
                 onVoiceRequested: channelId => window.joinVoice(channelId)
                 onCallRequested: window.openCall()
+                onDmCallRequested: action => window.dmCallAction(action)
                 onThreadRequested: messageId => window.openThread(messageId)
                 onServerMenuRequested: serverSheet.openServer()
                 onChannelMenuRequested: (channelId, name, voice) => serverSheet.openChannel(channelId, name, voice)
@@ -438,6 +630,36 @@ Window {
         body: qsTr("Voice channels use your microphone while you are in a call. Allow it for Yap in the system settings, then join again.")
         confirmText: qsTr("Open settings")
         onConfirmed: Native.openAppSettings()
+    }
+
+    // Ring them? (StartCallModal.tsx): a call rings at once, and leaves a
+    // voice channel's call we are in.
+    ConfirmSheet {
+        id: callConfirm
+        property string channelId: ""
+        property string name: ""
+        property string leaves: ""
+        anchors.fill: parent
+        anchors.bottomMargin: Native.clippedBottom
+        title: qsTr("Call %1?").arg(name)
+        body: leaves.length > 0 ? qsTr("This rings %1 right away, and you leave %2.").arg(name).arg(leaves)
+            : qsTr("This rings %1 right away.").arg(name)
+        confirmText: qsTr("Start call")
+        onConfirmed: {
+            const channelId = callConfirm.channelId
+            window.withMicrophone(() => {
+                Calls.start(channelId)
+                window.openCall()
+            })
+        }
+    }
+
+    // A DM call ringing us: over everything, the lock screen included.
+    IncomingCallSheet {
+        anchors.fill: parent
+        call: window.shownRing
+        onAnswerRequested: window.answerRing()
+        onDeclineRequested: window.declineRing()
     }
 
     // The system back gesture and its predictive preview, through Native's

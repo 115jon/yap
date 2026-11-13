@@ -14,6 +14,8 @@ import android.util.Log;
 
 import androidx.core.content.ContextCompat;
 
+import dev.yap.qtproto.push.IncomingCalls;
+
 /**
  * The voice side of `Native` (cpp/voice.cpp): libwebrtc's Java start-up,
  * and what Android asks of an app in a call. While the core has a call
@@ -120,6 +122,15 @@ public final class VoiceShim {
         });
     }
 
+    /**
+     * The microphone is allowed already (Native.requestMicrophone answers
+     * at once then, without Qt's permission request).
+     */
+    public static boolean microphoneAllowed(Context context) {
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
     private static boolean mayStartService() {
         if (ContextCompat.checkSelfPermission(app, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -137,6 +148,7 @@ public final class VoiceShim {
         audio.end();
         VoiceService.stop(app);
         if (ready) nativeRoutes("[]");
+        IncomingCalls.callEnded();
     }
 
     /**
@@ -207,6 +219,11 @@ public final class VoiceShim {
         active = false;
         audio.end();
         VoiceService.stopNow();
+    }
+
+    /** A call runs (main thread): the lock screen stays behind the app for it. */
+    public static boolean inCall() {
+        return active;
     }
 
     // What the service asks (main thread).

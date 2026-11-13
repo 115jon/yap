@@ -41,6 +41,13 @@
          pictures from API 29; API 28 (the minimum) needs this one. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+    <!-- DM calls ringing this phone (push/IncomingCalls): the ringing
+         notification's full-screen intent wakes the phone into the app
+         over the lock screen (granted at install below Android 14; from
+         14 the user allows it, else the ring is a heads-up), and the
+         in-app ring's vibration. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <!-- The shim asks which app is the home screen (was this start the
          launcher's? NativeShim.keepsTaskAtRoot). -->
@@ -161,6 +168,11 @@
         <!-- A notification's Reply and Mark as read. -->
         <receiver
             android:name="dev.yap.qtproto.push.NotificationActionReceiver"
+            android:exported="false" />
+        <!-- An incoming call notification's Decline, also with the app
+             killed. -->
+        <receiver
+            android:name="dev.yap.qtproto.push.CallActionReceiver"
             android:exported="false" />
         <!-- What FCM uses for a push it draws itself (none of Yap's do). -->
         <meta-data

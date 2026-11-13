@@ -31,6 +31,10 @@
 //                  (speaker, earpiece, headset, Bluetooth) and what the call
 //                  notification shows (cpp/voice.cpp,
 //                  android/src/dev/yap/qtproto/voice)
+//   calls          a DM call ringing this phone: the ring from a push or
+//                  the core, its ringtone or notification, Answer and
+//                  Decline outside the app (cpp/calls.cpp,
+//                  android/src/dev/yap/qtproto/push/IncomingCalls.java)
 
 #include <QtCore/QList>
 #include <QtCore/QObject>
@@ -75,6 +79,10 @@ class Native : public QObject
   // Bluetooth and a wired headset when there, the speaker, the earpiece.
   // Empty outside a call.
   Q_PROPERTY(QVariantList audioRoutes READ audioRoutes NOTIFY audioRoutesChanged)
+  // The DM call ringing this phone as the shim knows it, `{callId,
+  // channelId, callerId, callerName, callerAvatar}` (empty: none): also a
+  // ring the core never saw (the app started from its push).
+  Q_PROPERTY(QVariantMap incomingCall READ incomingCall NOTIFY incomingCallChanged)
 
 public:
   enum Haptic { Tick, LongPress, Confirm, Reject };
@@ -156,6 +164,20 @@ public:
   // call) that deafened the call no longer undoes it when it ends.
   Q_INVOKABLE void callTouched() const;
 
+  QVariantMap incomingCall() const { return m_incomingCall; }
+  // The core's ring (CALL_RING; the keys of incomingCall): rings once per
+  // call id with a push's, the ringtone in front, else the notification.
+  Q_INVOKABLE void ringIncoming(const QVariantMap& call) const;
+  // The core's ring stopped: `reason` its end (`accepted` when answered).
+  Q_INVOKABLE void stopIncoming(const QString& callId, const QString& reason) const;
+  // The app's sheet answered or declined: the ringtone and notification
+  // stop. `tellServer`: a ring the core did not see, answered over REST.
+  Q_INVOKABLE void answerIncoming(const QString& callId, bool tellServer) const;
+  Q_INVOKABLE void declineIncoming(const QString& callId, bool tellServer) const;
+  // The call answered outside the app (its notification, the lock
+  // screen), once; `callAnswered` says one is waiting.
+  Q_INVOKABLE QVariantMap takeAnsweredCall();
+
   // From the shim, on the GUI thread.
   void onBackProgress(qreal progress);
   void onBackCancelled();
@@ -169,6 +191,9 @@ public:
   void onOpenRequest(const QString& channelId, const QString& serverId, const QString& userId);
   void onLinkRequest(const QString& url);
   void onAudioRoutes(const QByteArray& json);
+  void onRing(const QByteArray& json);
+  void onRingEnded(const QString& callId);
+  void onAnswered();
 
 signals:
   void handlesBackChanged();
@@ -193,6 +218,8 @@ signals:
   void linkRequested();
   void audioRoutesChanged();
   void microphoneAnswered(bool granted);
+  void incomingCallChanged();
+  void callAnswered();
 
 protected:
   bool eventFilter(QObject* watched, QEvent* event) override;
@@ -215,6 +242,8 @@ private:
   void installVoice();
   // cpp/links.cpp.
   void installLinks();
+  // cpp/calls.cpp.
+  void installCalls();
 
   bool m_handlesBack = false;
   // Back reaches the app through the shim's OnBackInvokedCallback (API 33+).
@@ -240,6 +269,7 @@ private:
   QVariantMap m_openRequest;
   QVariantList m_audioRoutes;
   bool m_askingMicrophone = false;
+  QVariantMap m_incomingCall;
 };
 
 // The shared desktop QML's `Yap.Chrome` singletons, mobile side.

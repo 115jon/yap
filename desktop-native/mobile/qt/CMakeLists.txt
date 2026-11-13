@@ -65,6 +65,7 @@ qt_add_executable(yapqt
   cpp/links.cpp
   cpp/keystore.cpp
   cpp/voice.cpp
+  cpp/calls.cpp
   cpp/rustnetwork.cpp cpp/rustnetwork.h)
 target_include_directories(yapqt PRIVATE cpp)
 target_link_libraries(yapqt PRIVATE
