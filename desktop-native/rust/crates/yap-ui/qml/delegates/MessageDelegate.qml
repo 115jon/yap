@@ -984,7 +984,13 @@ Item {
             ClipboardText { id: clipboard }
             MessageActionModel {
                 id: keyActions
-                message: keyActions.snapshot(root)
+                // Only what the keys read, so a reaction or a new embed on
+                // the row leaves them (and an open tooltip) be.
+                message: ({
+                    id: root.messageId, authorId: root.authorId, author: root.author, body: root.body,
+                    mine: root.mine, pinned: root.pinned, replyCount: root.replyCount,
+                    settled: !root.pending && !root.failed, threadActions: root.threadActions
+                })
                 onReactRequested: anchor => root.reactionPickerRequested(root.messageId, anchor, false)
                 onReplyRequested: (id, author, text) => root.replyRequested(id, author, text)
                 onEditRequested: id => root.editRequested(id)
