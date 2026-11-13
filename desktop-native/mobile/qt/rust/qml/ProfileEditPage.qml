@@ -40,6 +40,10 @@ Rectangle {
     property string avatarTooBig: ""
     // The field being typed in, kept in view above the keyboard.
     property Item typing: null
+    // Picked copies (mediaPicked's files under the cache) this page made.
+    // Each is deleted, with its folder, once nothing holds it: not the
+    // draft (a save that lands lets go) and not the framer.
+    property var picked: []
 
     color: Theme.ply0
     transform: [
@@ -63,7 +67,12 @@ Rectangle {
     // (it lands without the page).
     readonly property bool guarding: draft.dirty && !draft.saving
     onGuardingChanged: guarding ? Native.pushBackLayer(root) : Native.popBackLayer(root)
-    Component.onDestruction: Native.popBackLayer(root)
+    Component.onDestruction: {
+        Native.popBackLayer(root)
+        // A save on its way still reads its files (the next start cleans
+        // them up); else every copy goes.
+        root.sweep(!draft.saving)
+    }
     function backProgressed(progress) {}
     function backCancelled() {}
     function backInvoked() {
@@ -92,28 +101,51 @@ Rectangle {
             if (kind.length === 0)
                 return
             root.picking = ""
-            if (paths.length === 0) {
-                if (failed > 0)
-                    draft.localError = qsTr("The picked image could not be read.")
-                return
-            }
-            const path = paths[0]
-            const tooBig = draft.check(kind, path)
-            if (kind === "avatar")
-                root.avatarTooBig = tooBig ?? ""
-            if (tooBig === null || tooBig.length > 0)
-                return
-            if (kind === "avatar") {
-                draft.localError = ""
-                framer.open(path, draft.fileUrl(path), null)
-            } else {
-                draft.takeBanner(path)
-            }
+            root.picked = root.picked.concat(Array.from(paths))
+            root.take(kind, paths, failed)
+            // A refused pick goes at once.
+            root.sweep(false)
         }
         function onImeHeightChanged() {
             if (root.typing)
                 Qt.callLater(root.reveal, root.typing)
         }
+    }
+    function take(kind, paths, failed) {
+        if (paths.length === 0) {
+            if (failed > 0)
+                draft.localError = qsTr("The picked image could not be read.")
+            return
+        }
+        const path = paths[0]
+        const tooBig = draft.check(kind, path)
+        if (kind === "avatar")
+            root.avatarTooBig = tooBig ?? ""
+        if (tooBig === null || tooBig.length > 0)
+            return
+        if (kind === "avatar") {
+            draft.localError = ""
+            framer.open(path, draft.fileUrl(path), null)
+        } else {
+            draft.takeBanner(path)
+        }
+    }
+    // Deletes the picked copies nothing holds any more (`all`: every one).
+    function sweep(all) {
+        const held = all ? [] : [draft.avatarPath, draft.bannerPath, framer && framer.up ? framer.filePath : ""]
+        const left = []
+        for (const path of root.picked) {
+            if (held.includes(path))
+                left.push(path)
+            else
+                Native.discardPicked(path)
+        }
+        root.picked = left
+    }
+    Connections {
+        target: draft
+        function onAvatarPathChanged() { root.sweep(false) }
+        function onBannerPathChanged() { root.sweep(false) }
     }
     function save() {
         // A word still being composed joins the text first.
@@ -467,6 +499,8 @@ Rectangle {
             draft.localError = ""
             draft.frameAvatar(filePath, crop)
         }
+        // Closed without Apply: its picked file goes.
+        onUpChanged: if (!up) root.sweep(false)
     }
 
     // A numbered section (Settings' rule card): a 2 px ink-1 rule, the

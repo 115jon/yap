@@ -358,6 +358,16 @@ void Native::pickImage(qreal limitBytes)
   pickWith("pickImageIntent", limitBytes);
 }
 
+void Native::discardPicked(const QString& path) const
+{
+#ifdef Q_OS_ANDROID
+  QJniObject::callStaticMethod<void>(kShim, "discardPicked", "(Ljava/lang/String;)V",
+                                     QJniObject::fromString(path).object<jstring>());
+#else
+  Q_UNUSED(path);
+#endif
+}
+
 int Native::takePhoto()
 {
 #ifdef Q_OS_ANDROID
