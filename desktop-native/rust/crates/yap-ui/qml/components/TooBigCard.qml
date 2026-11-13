@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // A too-big card (toobig-spec.md), inline where the file was picked, never

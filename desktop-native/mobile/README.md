@@ -33,7 +33,7 @@ that feel off, each with a known fix.
 - **Shared, one copy:** the `yap-ui` crate (`desktop-native/rust/crates/yap-ui`),
   which both apps link. It holds the `Yap.Ui` QML module (`Theme`,
   `ShellState`, `MessageDelegate`, `TreeRow`, `ServerIcon` and the
-  components they use: 36 files, 5,408 lines), the domain objects (`Session`, `Nav`,
+  components they use: 52 files, 8,264 lines), the domain objects (`Session`, `Nav`,
   `Chat`, `Voice`, `Profile` and the portable singletons such as `Admin`,
   `Emoji`, `Extras`, `Invites`, `Panels`), all 13 list models, the
   GUI-thread registry, the core's runtime and gateway, and the portable C++
@@ -127,7 +127,7 @@ One crate, one QML module, two consumers. No file is copied:
 | System font, dynamic text size    | **Partly.** Qt's default font is the system's; explicit `pixelSize`s ignore the system text size                                                   | Shim reads `Configuration.fontScale` (`Native.fontScale`); `Main.qml` binds `Theme.textScale` to it times Settings' text size factor (0.85 to 2.0). Every type role, its tracking and its line box scale with it, and the px sizes in the core's rich text; icons, avatars and hit areas do not                                                                                                                                                                | Verified at 1.3: names, messages, times, rows and sheets scale and nothing clips. Read when the app returns to the front, not live                   |
 | Dark mode, Material You           | **Native**: `Application.styleHints.colorScheme`, live                                                                                             | `Theme.themeId` follows it. The shim reads Material You's `system_accent1` (`Native.accent`)                                                                                                                                                                                                                                                                                                                                                                   | Light/dark verified. The accent is not used: Yap's themes are brand palettes (owner decision)                                                        |
 | Share sheet                       | **No** (Qt has `QDesktopServices` for URLs only)                                                                                                   | Shim: `ACTION_SEND` chooser, from the message sheet's Share                                                                                                                                                                                                                                                                                                                                                                                                    | Verified: the system sheet opens with the message's text                                                                                             |
-| Photo picker                      | **No.** Qt's `FileDialog` opens the documents UI                                                                                                   | Shim: the system photo picker (`ACTION_PICK_IMAGES`, no permission) on 13+, `GET_CONTENT` on images and videos before; each item copied into the cache for the core's path-based upload                                                                                                                                                                                                                                                                        | Verified on API 35: three pictures picked, uploaded with progress, one retried, sent                                                                 |
+| Photo picker                      | **No.** Qt's `FileDialog` opens the documents UI                                                                                                   | Shim: the system photo picker (`ACTION_PICK_IMAGES`, no permission) on 13+, `GET_CONTENT` on images and videos before; `OPEN_DOCUMENT` for any file; `IMAGE_CAPTURE` into the cache for a photo; each item copied into the cache for the core's path-based upload                                                                                                                                                                                              | Verified on API 35: three pictures picked, uploaded with progress, one retried, sent                                                                 |
 | Pinch, double-tap, swipe away     | **Native** building blocks: `PinchArea`, `TapHandler`, `DragHandler`, a snapping `ListView`                                                        | `ImageViewerPage`: zoom about the fingers or the tap, pan, page between pictures, swipe down to close with the scrim fading; Back closes it first                                                                                                                                                                                                                                                                                                              | Double-tap, paging, swipe down and Back verified; pinch needs two fingers, which `adb` cannot send                                                   |
 | Notifications                     | **No** FCM/APNs module                                                                                                                             | Shim: a FirebaseMessagingService drawing the server's data-only pushes (MessagingStyle, Reply, Mark as read), the core registering the token ("Push notifications" below)                                                                                                                                                                                                                                                                                      | Verified on API 35 (Google APIs): a DM pushed in the background and with the process killed, Reply, tap to open; APNs not started                    |
 | Text selection handles            | **Native**: Qt Quick's text fields draw Android-style handles and the cut/copy/paste bar                                                           | `persistentSelection` on the composer. In the list a press on a message's text belongs to the row (`selectByMouse: !Theme.touch`); the sheet's Select text puts the text on a page of its own                                                                                                                                                                                                                                                                  | Verified on that page: a long press selects a word and shows the handles and the Copy / Select all bar                                               |
@@ -564,12 +564,29 @@ on the desktop) differs.
   the start screen (recent searches, Favorites, Trending, categories) and
   the results in two uneven columns. A tap sends the tile (as the reply
   when there is one) and closes the sheet; a long press stars it.
-- **Attachments.** `+` opens the photo picker (`Native.pickMedia`). The tray
+- **Attachments.** `+` opens the attach sheet (`AttachSheet`): Photos &
+  videos (the photo picker, `Native.pickMedia`), Camera (the system camera
+  writes into the app's cache through `CaptureProvider`, so the app asks
+  for no camera permission; `Native.takePhoto`), Files (the documents UI on
+  any type, several at once, `Native.pickFiles`), then GIFs and Stickers
+  (`PickerSheet`). The web's and the desktop's `+` open their file dialog
+  straight away; the phone splits it into its own pickers. Paste (the
+  selection bar's Paste, which Qt sends as the Ctrl+V shortcut) with a
+  picture or files on the clipboard attaches them (`Native.pasteFiles`);
+  a text clipboard pastes as text. Qt's bar offers Paste only when the
+  clipboard holds text; the shim's text view puts it back for a picture. Pictures, GIFs and stickers a keyboard
+  inserts (Gboard, Samsung Keyboard: `commitContent`) attach too: Qt's
+  `QtEditText` offers the keyboard no content types, so the shim swaps in
+  a subclass (`org/qtproject/qt/android/YapEditText.java`, set up at the
+  first frame) that offers images and videos while the composer's field
+  has focus (`Native.setAcceptContent`) and copies what arrives. The tray
   shows each file's picture, progress and size; remove or cancel, mark
   sensitive, tap a failed tile to retry (its reason shows in the notice
-  line), tap a finished picture to view it. Files over the limit stay as the
-  core's too-big cards (they are not copied: a sparse file of their size
-  stands in). Sending works with text, pictures or both.
+  line), tap a finished picture to view it. Files over the limit stay as
+  the core's too-big cards, drawn by the desktop's `TooBigCard` (Yappy's
+  pose, the size and how far over the limit it is, Remove and Choose
+  another; they are not copied: a sparse file of their size stands in).
+  Sending works with text, pictures or both.
 - **The rest.** Send is enabled by typed text (preedit included) or a
   finished upload; typing pings go at most every 3 s (the core sends every
   one it is asked to); the field grows to five lines; each channel keeps its
@@ -584,7 +601,7 @@ on the desktop) differs.
   asks for storage access, and opens the app's settings once it is refused
   for good).
 
-Not done yet: a camera shot from the composer; video in the viewer;
+Not done yet: video in the viewer;
 sensitive pictures are not blurred in the viewer; on 13+ the photo picker
 names files by their media id (`1000000302.jpg`), not the original name; the status bar icons stay dark over the viewer in the light
 theme until the shim can switch them (`Native.lightBars`); picked copies stay

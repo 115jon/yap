@@ -252,6 +252,13 @@ pub struct VideoIntent {
     /// watched stays as it is, so nobody has to press Watch again. The
     /// desktop never sets it.
     pub suspended: bool,
+    /// A watched share is pulled only while a tile shows it (its alias is in
+    /// `demand`), as a camera is: a phone that leaves the call page, or
+    /// shows its tiles' limit, stops pulling and decoding it. It stays
+    /// watched, so it is pulled again once a tile shows it. Off (the
+    /// desktop's default): Watch pulls the share whether or not a tile
+    /// shows it right now.
+    pub watch_needs_tile: bool,
 }
 
 /// What the user asks of a running call.
@@ -2449,8 +2456,9 @@ fn is_share(alias: &str) -> bool {
 
 /// Whether to pull `offer`, and at which layer: audio always (share audio
 /// too: audibility is only its gain); a camera once a visible tile renders
-/// it, at the layer for that size; a share once watched or on stage. No
-/// video while the host is suspended.
+/// it, at the layer for that size; a share once watched or on stage (with
+/// `watch_needs_tile`, once a tile shows it). No video while the host is
+/// suspended.
 fn wanted(
     offer: &Offer,
     video: &VideoIntent,
@@ -2470,8 +2478,9 @@ fn wanted(
             let pid = offer.participant_id.as_str();
             // Watched, or its own tile shows it (on stage). Their camera on
             // stage pulls it only as watched (SCREEN_SHARE.md "Watching").
-            (watched.contains(pid) || video.demand.contains_key(&offer.track_name))
-                .then(|| select_rid(Quality::High, &offer.simulcast_rids))
+            let shown = video.demand.contains_key(&offer.track_name);
+            let watched = watched.contains(pid) && !video.watch_needs_tile;
+            (watched || shown).then(|| select_rid(Quality::High, &offer.simulcast_rids))
         }
     }
 }

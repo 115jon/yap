@@ -89,6 +89,24 @@ void jniMediaPicked(JNIEnv* env, jclass, jobjectArray paths, jint failed)
   post([list, failed] { Native::instance()->onMediaPicked(list, failed); });
 }
 
+QStringList toList(JNIEnv* env, jobjectArray paths)
+{
+  QStringList list;
+  const jsize n = paths ? env->GetArrayLength(paths) : 0;
+  for (jsize i = 0; i < n; ++i) {
+    auto path = static_cast<jstring>(env->GetObjectArrayElement(paths, i));
+    list.append(QJniObject(path).toString());
+    env->DeleteLocalRef(path);
+  }
+  return list;
+}
+
+void jniContentReceived(JNIEnv* env, jclass, jobjectArray paths, jint failed)
+{
+  const QStringList list = toList(env, paths);
+  post([list, failed] { Native::instance()->onContentReceived(list, failed); });
+}
+
 void jniImageSaved(JNIEnv*, jclass, jstring path, jint result)
 {
   const QString where = QJniObject(path).toString();
@@ -118,6 +136,7 @@ Native::Native(QObject* parent)
     { "nativeMediaCopying", "()V", reinterpret_cast<void*>(jniMediaCopying) },
     { "nativeMediaPicked", "([Ljava/lang/String;I)V", reinterpret_cast<void*>(jniMediaPicked) },
     { "nativeImageSaved", "(Ljava/lang/String;I)V", reinterpret_cast<void*>(jniImageSaved) },
+    { "nativeContentReceived", "([Ljava/lang/String;I)V", reinterpret_cast<void*>(jniContentReceived) },
   };
   QJniEnvironment env;
   if (!env.registerNativeMethods(kShim, methods, std::size(methods)))
@@ -292,21 +311,26 @@ void Native::flushCache() const
   yap_mobile_flush();
 }
 
-void Native::pickMedia(qreal limitBytes)
+bool Native::pickBusy() const
 {
-#ifdef Q_OS_ANDROID
   // One picker at a time (a double tap on +). A picker that never showed
   // (the app stayed in front for a few seconds) does not block the next.
   const qint64 now = QDateTime::currentMSecsSinceEpoch();
-  if (m_pickingMedia || (m_pickerOpen && (m_leftSincePick || now - m_pickStartedMs < 3000)))
+  return m_pickingMedia || (m_pickerOpen && (m_leftSincePick || now - m_pickStartedMs < 3000));
+}
+
+void Native::pickWith(const char* intentMethod, qreal limitBytes)
+{
+#ifdef Q_OS_ANDROID
+  if (pickBusy())
     return;
   const QJniObject intent = QJniObject::callStaticObjectMethod(
-      kShim, "pickMediaIntent", "(J)Landroid/content/Intent;", jlong(limitBytes));
+      kShim, intentMethod, "(J)Landroid/content/Intent;", jlong(limitBytes));
   if (!intent.isValid())
     return;
   m_pickerOpen = true;
   m_leftSincePick = false;
-  m_pickStartedMs = now;
+  m_pickStartedMs = QDateTime::currentMSecsSinceEpoch();
   // The result comes back on Android's UI thread; the shim copies the items
   // off it and reports through nativeMediaPicked.
   QtAndroidPrivate::startActivity(intent, kPickMedia, [](int, int resultCode, const QJniObject& data) {
@@ -314,8 +338,93 @@ void Native::pickMedia(qreal limitBytes)
                                        jint(resultCode), data.object());
   });
 #else
+  Q_UNUSED(intentMethod);
   Q_UNUSED(limitBytes);
 #endif
+}
+
+void Native::pickMedia(qreal limitBytes)
+{
+  pickWith("pickMediaIntent", limitBytes);
+}
+
+void Native::pickFiles(qreal limitBytes)
+{
+  pickWith("pickFilesIntent", limitBytes);
+}
+
+int Native::takePhoto()
+{
+#ifdef Q_OS_ANDROID
+  if (pickBusy())
+    return 3;
+  const int state = QJniObject::callStaticMethod<jint>(kShim, "cameraState");
+  if (state != 0)
+    return state;
+  const QJniObject intent =
+      QJniObject::callStaticObjectMethod(kShim, "takePhotoIntent", "()Landroid/content/Intent;");
+  if (!intent.isValid())
+    return 3;
+  m_pickerOpen = true;
+  m_leftSincePick = false;
+  m_pickStartedMs = QDateTime::currentMSecsSinceEpoch();
+  QtAndroidPrivate::startActivity(intent, kPickMedia, [](int, int resultCode, const QJniObject&) {
+    QJniObject::callStaticMethod<void>(kShim, "photoTaken", "(I)V", jint(resultCode));
+  });
+  return 0;
+#else
+  return 1;
+#endif
+}
+
+QString Native::takeLeftoverPhoto()
+{
+#ifdef Q_OS_ANDROID
+  return QJniObject::callStaticObjectMethod(kShim, "takeLeftoverPhoto", "()Ljava/lang/String;").toString();
+#else
+  return {};
+#endif
+}
+
+bool Native::clipboardHasFiles() const
+{
+#ifdef Q_OS_ANDROID
+  return QJniObject::callStaticMethod<jboolean>(kShim, "clipboardHasFiles");
+#else
+  return false;
+#endif
+}
+
+bool Native::pasteFiles(qreal limitBytes)
+{
+#ifdef Q_OS_ANDROID
+  return QJniObject::callStaticMethod<jboolean>(kShim, "pasteFiles", "(J)Z", jlong(limitBytes));
+#else
+  Q_UNUSED(limitBytes);
+  return false;
+#endif
+}
+
+void Native::setAcceptContent(bool on, qreal limitBytes)
+{
+#ifdef Q_OS_ANDROID
+  QJniObject::callStaticMethod<void>(kShim, "setAcceptContent", "(ZJ)V", jboolean(on), jlong(limitBytes));
+#else
+  Q_UNUSED(on);
+  Q_UNUSED(limitBytes);
+#endif
+}
+
+void Native::installContent() const
+{
+#ifdef Q_OS_ANDROID
+  QJniObject::callStaticMethod<void>(kShim, "installContent");
+#endif
+}
+
+void Native::onContentReceived(const QStringList& paths, int failed)
+{
+  emit contentReceived(paths, failed);
 }
 
 QString Native::saveTarget(const QString& name) const
