@@ -1302,6 +1302,12 @@ pub enum ViewUpdate {
         path: String,
         open: bool,
     },
+    /// A download to `path` failed (after the `Notice` that says why), so
+    /// whoever asked for it can match the failure to its own request.
+    DownloadFailed {
+        path: String,
+        message: String,
+    },
     /// The open thread's rows: its root, then the replies.
     ThreadMessages(Box<ViewDiff<MessageRow>>),
     /// The pins panel's rows, newest first.

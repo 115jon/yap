@@ -1159,3 +1159,57 @@ fn a_rate_limited_page_should_wait_and_retry_on_scroll() {
     let fx = client.command(Command::GifMore);
     find(&fx, |r| matches!(r, ApiRequest::Gifs { next: Some(_), .. }));
 }
+
+fn download_id(fx: &[Effect]) -> RequestId {
+    fx.iter()
+        .find_map(|e| match e {
+            Effect::Download { id, .. } => Some(*id),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no download in {fx:#?}"))
+}
+
+#[test]
+fn a_failed_download_should_name_its_destination() {
+    let mut client = Client::online();
+    let fx = client.command(Command::Download {
+        url: format!("{BASE}/api/attachments/{TEXT}/f1/a.png"),
+        dest: "/cache/saves/1/a.png".into(),
+        open: false,
+    });
+    let fx = client.answer(
+        download_id(&fx),
+        Err(ApiError::Http {
+            status: 404,
+            message: "download failed".into(),
+        }),
+    );
+    let updates: Vec<_> = views(&fx).collect();
+    let notice = updates.iter().find_map(|u| match u {
+        ViewUpdate::Notice(text) => Some(text.clone()),
+        _ => None,
+    });
+    let failed = updates.iter().find_map(|u| match u {
+        ViewUpdate::DownloadFailed { path, message } => Some((path.clone(), message.clone())),
+        _ => None,
+    });
+    let (path, message) = failed.expect("download failed");
+    assert_eq!(
+        (path.as_str(), Some(message)),
+        ("/cache/saves/1/a.png", notice)
+    );
+}
+
+#[test]
+fn a_finished_download_should_not_report_a_failure() {
+    let mut client = Client::online();
+    let fx = client.command(Command::Download {
+        url: format!("{BASE}/api/attachments/{TEXT}/f1/a.png"),
+        dest: "/cache/saves/1/a.png".into(),
+        open: false,
+    });
+    let fx = client.answer(download_id(&fx), Ok(ApiResponse::Done));
+    assert!(views(&fx)
+        .any(|u| matches!(u, ViewUpdate::Saved { path, .. } if path == "/cache/saves/1/a.png")));
+    assert!(!views(&fx).any(|u| matches!(u, ViewUpdate::DownloadFailed { .. })));
+}
