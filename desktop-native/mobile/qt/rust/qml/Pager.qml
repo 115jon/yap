@@ -333,6 +333,7 @@ Item {
             onProfileRequested: userId => pager.profileRequested(userId)
             onThreadRequested: messageId => pager.threadRequested(messageId)
             onDmCallRequested: action => pager.dmCallRequested(action)
+            onCallRequested: pager.callRequested()
         }
 
         // Side by side with nothing open: where the conversation will be.
