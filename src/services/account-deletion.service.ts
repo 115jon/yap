@@ -3,8 +3,8 @@
 // lib/account-deletion.ts for the gate).
 //
 // Request: the account must own no server (as on Discord; Yap has no
-// ownership transfer yet, so it deletes the server first) and confirm with
-// its username. In one batch the account
+// ownership transfer, so it deletes the server first) and confirm with its
+// username. In one batch the account
 //   - gets an account_deletions row with `delete_after` 30 days out and a
 //     snapshot of what its profile showed and which servers it was in;
 //   - shows "Deleted user" everywhere (its users row is blanked; ids stay, so

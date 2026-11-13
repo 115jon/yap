@@ -230,7 +230,7 @@ years from the relevant binary distribution date.
 
 A user can delete their Yap account in Settings, under Account, in the web,
 desktop and mobile apps. Yap asks them to type their username to confirm. A
-user who owns a server must transfer it or delete it first.
+user who owns a server must delete it first.
 
 When a user asks for deletion, Yap at once:
 

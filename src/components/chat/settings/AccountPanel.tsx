@@ -326,7 +326,7 @@ function deletionError(error: unknown): string {
       .filter((name): name is string => !!name);
     return names.length > 0
       ? `You own ${names.join(", ")}. Delete ${names.length === 1 ? "it" : "them"} in server settings first.`
-      : (failure.message ?? "Transfer or delete the servers you own first.");
+      : (failure.message ?? "Delete the servers you own first.");
   }
   if (failure?.code === "CONFIRMATION_MISMATCH") {
     return "That isn't your username. Type it exactly as shown.";
