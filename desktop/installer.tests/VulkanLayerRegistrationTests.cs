@@ -8,7 +8,7 @@ namespace Installer.Tests
 {
     public sealed class VulkanLayerRegistrationTests : IDisposable
     {
-        private const string Root = "C:\\Users\\jon\\AppData\\Local\\Yap";
+        private const string Root = "C:\\Users\\someone\\AppData\\Local\\Yap";
         private const string ImplicitLayers = @"Software\Khronos\Vulkan\ImplicitLayers";
 
         private static readonly InstallRootLayout Layout = new InstallRootLayout(Root);
@@ -25,7 +25,7 @@ namespace Installer.Tests
         [InlineData(Root + "\\capture-hook\\obs-33.0.1-c37f4412\\obs-vulkan64.json")]
         [InlineData(Root + "\\capture-hook\\obs-33.0.1-c37f4412\\obs-vulkan32.json")]
         [InlineData(Root + "\\capture-hook\\obs-32.1.2-12345678\\OBS-VULKAN64.JSON")]
-        [InlineData("c:\\users\\jon\\appdata\\local\\yap\\capture-hook\\obs-33.0.1-c37f4412\\obs-vulkan64.json")]
+        [InlineData("c:\\users\\someone\\appdata\\local\\yap\\capture-hook\\obs-33.0.1-c37f4412\\obs-vulkan64.json")]
         [InlineData(Root + "\\app-3.7.0\\obs-capture\\obs-vulkan64.json")]
         [InlineData(Root + "\\app-3.3.0\\obs-capture\\obs-vulkan32.json")]
         [InlineData(Root + "\\obs-capture\\obs-vulkan64.json")]
@@ -37,8 +37,8 @@ namespace Installer.Tests
         [Theory]
         [InlineData("C:\\ProgramData\\obs-studio-hook\\obs-vulkan64.json")]
         [InlineData("C:\\Program Files (x86)\\Steam\\SteamOverlayVulkanLayer64.json")]
-        [InlineData("C:\\Users\\jon\\AppData\\Local\\Other\\capture-hook\\obs-33.0.1-c37f4412\\obs-vulkan64.json")]
-        [InlineData("C:\\Users\\jon\\AppData\\Local\\YapEvil\\capture-hook\\obs-33.0.1-c37f4412\\obs-vulkan64.json")]
+        [InlineData("C:\\Users\\someone\\AppData\\Local\\Other\\capture-hook\\obs-33.0.1-c37f4412\\obs-vulkan64.json")]
+        [InlineData("C:\\Users\\someone\\AppData\\Local\\YapEvil\\capture-hook\\obs-33.0.1-c37f4412\\obs-vulkan64.json")]
         [InlineData(Root + "\\capture-hook\\obs-vulkan64.json")]
         [InlineData(Root + "\\capture-hook\\elsewhere\\obs-vulkan64.json")]
         [InlineData(Root + "\\capture-hook\\obs-33.0.1-c37f4412\\other-layer.json")]
