@@ -797,9 +797,12 @@ Window {
         function onBackProgressed(progress) {
             if (!window.ready)
                 return
-            if (accountPanel.shown)
-                accountPanel.backProgress = progress
-            else if (stack.depth > 1)
+            // The shim ends a committed gesture with a progress of 0 before
+            // it invokes Back: the panel leaves from where the finger left it.
+            if (accountPanel.shown) {
+                if (progress > 0)
+                    accountPanel.backProgress = progress
+            } else if (stack.depth > 1)
                 stack.currentItem.backProgress = progress
             else
                 pager.backPreview(progress)

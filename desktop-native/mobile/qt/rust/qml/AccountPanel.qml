@@ -60,7 +60,7 @@ Item {
             statusField.save()
         Qt.inputMethod.hide()
         shown = false
-        backProgress = 0
+        // The back gesture's shrink stays on the card as it leaves.
     }
     function place() {
         if (!plate)
@@ -74,6 +74,7 @@ Item {
     visible: shown || grow > 0
     // 0 closed, 1 open: the card's scale and opacity, the scrim's.
     property real grow: shown ? 1 : 0
+    onGrowChanged: if (grow <= 0) backProgress = 0
     Behavior on grow {
         NumberAnimation {
             duration: root.shown ? Theme.durPopover : Theme.durPopoverExit
