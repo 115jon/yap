@@ -4,6 +4,8 @@ import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
 
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * FCM's messages and token rotation. Yap's data-only pushes are drawn here,
@@ -21,8 +23,27 @@ public final class YapMessagingService extends FirebaseMessagingService {
             return;
         }
         String read = YapPush.readChannel(data);
-        if (read != null) MessageNotifier.cancel(getApplicationContext(), read);
-        // Call rings (kind call_*) need voice, which this app does not have yet.
+        if (read != null) {
+            MessageNotifier.cancel(getApplicationContext(), read);
+            return;
+        }
+        // A DM call rings, or stops ringing (src/services/call.service.ts).
+        String kind = YapPush.isOurs(data) ? data.get("kind") : null;
+        IncomingCall call = kind != null && kind.startsWith("call_") ? IncomingCall.from(data) : null;
+        if (call == null) return;
+        if ("call_ring".equals(kind)) {
+            // Up before this returns: FCM may let the process go after.
+            CountDownLatch up = new CountDownLatch(1);
+            IncomingCalls.ring(getApplicationContext(), call, up::countDown);
+            try {
+                up.await(8, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        } else if ("call_ring_stop".equals(kind)) {
+            String reason = data.get("reason");
+            IncomingCalls.stop(getApplicationContext(), call.callId, reason == null ? "ended" : reason, call);
+        }
     }
 
     @Override

@@ -10,7 +10,10 @@ import Yap.Ui
 // leaf at phone size: square avatar with the 2 px talk ring, the name, the
 // state glyphs, the talk LED), and the one dock: mic, deafen, where it
 // plays, leave. Opened by joining a voice channel in the drawer and from
-// the drawer's call bar; Back leaves the page, not the call.
+// the drawer's call bar; Back leaves the page, not the call. A DM call is
+// the same page under the other person's name; while ours rings them (no
+// room joined yet) it shows them ringing, with Cancel as its one key.
+// Leave hangs a DM call up (the core's Calls.leave, which ends it).
 Rectangle {
     id: root
 
@@ -29,6 +32,40 @@ Rectangle {
     readonly property real bottomInset: Math.max(SafeArea.margins.bottom, Native.gestureInset)
 
     readonly property bool inCall: Voice.channelId.length > 0
+    // A DM call (Yap.Ui's model): ours ringing them, or one we are in.
+    DmCallModel {
+        id: dmCall
+        dmId: dmCall.callChannelId
+    }
+    readonly property bool ringingOut: dmCall.outgoing && !inCall
+    readonly property bool dmCallOn: dmCall.inDmCall || dmCall.outgoing
+    // Something to show: a call, or our ring.
+    readonly property bool active: inCall || ringingOut
+    // Who our ring was for, kept past its end (the view drops the ring).
+    property string peerName: ""
+    readonly property string remoteName: dmCall.remote.name ?? ""
+    onRemoteNameChanged: if (remoteName.length > 0) peerName = remoteName
+    // Our ring stopped before any call (they are busy, or take no calls):
+    // why, until the page closes (the Expo app's unreachableText).
+    property string ringEnd: ""
+    onRingingOutChanged: if (!ringingOut && !inCall) ringEnd = dmCall.endReason
+    // Refused before it rang (CALL_RING_STOP with no CALL_RINGING first).
+    Connections {
+        target: dmCall
+        function onEndReasonChanged() {
+            if (root.active || !root.awaiting || dmCall.endReason.length === 0)
+                return
+            root.ringEnd = dmCall.endReason
+            root.awaiting = false
+            settleLater.restart()
+        }
+    }
+    // Refused before it rang, there was never a ring to name them: the
+    // open DM is theirs (the call was started from it).
+    readonly property string who: peerName.length > 0 ? peerName : Nav.activeChannelName
+    readonly property string unreachable: ringEnd === "busy" ? qsTr("%1 is in another call").arg(who)
+        : ringEnd === "unavailable" ? qsTr("%1 can't take calls right now").arg(who)
+        : ringEnd === "invalid" ? qsTr("That call can't be made") : ""
     // The call's numbers (the desktop's voice details), every 5 s.
     readonly property var calls: {
         try {
@@ -45,12 +82,14 @@ Rectangle {
     // Reconnecting and the like are amber; a live call is talk green.
     readonly property bool settled: Voice.live && Voice.status === "Connected"
     // Opened with the join: the core has not answered yet.
-    property bool awaiting: !inCall
-    readonly property bool failed: !inCall && !awaiting && Voice.error.length > 0
-    readonly property string word: !inCall ? (awaiting ? qsTr("Connecting") : failed ? qsTr("Call ended") : qsTr("Not in a call"))
+    property bool awaiting: !active
+    readonly property bool failed: !active && !awaiting && (Voice.error.length > 0 || unreachable.length > 0)
+    readonly property string word: ringingOut ? qsTr("Ringing")
+        : !inCall ? (awaiting ? qsTr("Connecting") : failed ? qsTr("Call ended") : qsTr("Not in a call"))
         : settled ? qsTr("Voice connected")
         : Voice.status.length > 0 ? Voice.status : qsTr("Connecting")
-    readonly property color wordInk: !inCall ? (awaiting ? Theme.warningInk : failed ? Theme.dangerInk : Theme.ink3)
+    readonly property color wordInk: ringingOut ? Theme.warningInk
+        : !inCall ? (awaiting ? Theme.warningInk : failed ? Theme.dangerInk : Theme.ink3)
         : settled ? Theme.successInk : Theme.warningInk
     Timer {
         interval: 10000
@@ -79,18 +118,35 @@ Rectangle {
     }
 
     // The call ended elsewhere (left from the notification, moved out,
-    // kicked): nothing to show. A failed call stays, with why.
-    onInCallChanged: {
-        if (inCall) {
+    // kicked; our ring cancelled or refused): nothing to show. A failed
+    // call stays, with why.
+    onActiveChanged: {
+        if (active) {
             awaiting = false
+            settleLater.stop()
             return
         }
-        // After the same update's other properties (the error) landed.
-        Qt.callLater(root.settle)
+        settleLater.restart()
+    }
+    // After the update's other properties (the error) landed, and past the
+    // step from our ring to its call (the ring's end and the room's join
+    // come as separate updates).
+    Timer {
+        id: settleLater
+        interval: 500
+        onTriggered: root.settle()
     }
     function settle() {
-        if (!inCall && Voice.error.length === 0)
+        if (!active && Voice.error.length === 0 && unreachable.length === 0)
             root.closeRequested()
+    }
+    function leave() {
+        Native.haptic(Native.Confirm)
+        if (root.dmCallOn)
+            dmCall.leave()
+        else
+            Voice.leave()
+        root.closeRequested()
     }
 
     color: Theme.ply0
@@ -107,7 +163,8 @@ Rectangle {
     PageHeader {
         id: header
         z: 1
-        title: Voice.channelName.length > 0 ? Voice.channelName : qsTr("Voice")
+        title: root.dmCallOn && (dmCall.remote.name ?? "").length > 0 ? dmCall.remote.name
+            : Voice.channelName.length > 0 ? Voice.channelName : qsTr("Voice")
         topInset: root.topInset
         leftInset: root.leftInset
         rightInset: root.rightInset
@@ -128,7 +185,7 @@ Rectangle {
             id: stateLed
             x: 16
             anchors.verticalCenter: parent.verticalCenter
-            lit: root.inCall || root.awaiting
+            lit: root.active || root.awaiting
             color: root.settled ? Theme.talk : Theme.idle
         }
         Text {
@@ -167,7 +224,7 @@ Rectangle {
     // that stopped flowing one way.
     Rectangle {
         id: trouble
-        readonly property string line: !root.inCall ? (root.failed ? Voice.error : "")
+        readonly property string line: !root.inCall ? (root.failed ? (root.unreachable.length > 0 ? root.unreachable : Voice.error) : "")
             : root.micStalled ? qsTr("We can't hear you. Check that nothing else is using the microphone.")
             : root.inboundStalled ? qsTr("You can't hear anyone right now. Yap is trying to get the audio back.")
             : ""
@@ -281,6 +338,52 @@ Rectangle {
         }
     }
 
+    // Ringing them: who, with the ringing ring, until they answer.
+    Column {
+        visible: root.ringingOut
+        anchors.top: trouble.bottom
+        anchors.topMargin: 56
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: parent.width - 48
+        spacing: 16
+        Item {
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: 112
+            height: 112
+            Avatar {
+                id: ringFace
+                anchors.centerIn: parent
+                size: 96
+                initials: dmCall.remote.name ?? ""
+                source: dmCall.remote.avatar ?? ""
+            }
+            Rectangle {
+                anchors.centerIn: ringFace
+                width: 112
+                height: 112
+                radius: Theme.radius + 4
+                color: "transparent"
+                border.width: 2
+                border.color: Theme.talk
+                SequentialAnimation on opacity {
+                    running: root.ringingOut && !Theme.reducedMotion
+                    loops: Animation.Infinite
+                    OpacityAnimator { from: 1; to: 0.15; duration: 900; easing.type: Easing.InOutSine }
+                    OpacityAnimator { from: 0.15; to: 1; duration: 900; easing.type: Easing.InOutSine }
+                }
+            }
+        }
+        Text {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            text: qsTr("Ringing %1").arg(dmCall.remote.name ?? "")
+            color: Theme.ink1
+            font: Theme.type.pageTitle
+        }
+    }
+
     // Alone so far: say so, rather than a one-row list and nothing else.
     Text {
         visible: root.inCall && roster.count <= 1 && root.settled
@@ -361,16 +464,38 @@ Rectangle {
                         opacity: leaveKey.down ? 0.14 : 0
                     }
                 }
-                onClicked: {
-                    Native.haptic(Native.Confirm)
-                    Voice.leave()
-                    root.closeRequested()
+                onClicked: root.leave()
+            }
+        }
+        // Ours ringing them: Cancel.
+        IconKey {
+            id: cancelKey
+            visible: root.ringingOut
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: 12
+            size: 48
+            iconName: "disconnect"
+            tip: qsTr("Cancel call")
+            Accessible.name: tip
+            plateInk: Theme.dangerFillInk
+            background: Rectangle {
+                radius: Theme.radius
+                color: Theme.dangerFill
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.radius
+                    color: Theme.dangerFillInk
+                    opacity: cancelKey.down ? 0.14 : 0
                 }
+            }
+            onClicked: {
+                Native.haptic(Native.Confirm)
+                dmCall.cancel()
             }
         }
         // A call that failed: nothing to control, one way out.
         KitButton {
-            visible: !root.inCall
+            visible: !root.active
             anchors.horizontalCenter: parent.horizontalCenter
             y: 16
             text: qsTr("Close")

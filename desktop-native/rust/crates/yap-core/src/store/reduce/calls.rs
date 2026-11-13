@@ -392,6 +392,11 @@ impl State {
                 self.leave_voice(fx);
             }
             self.end_ring(fx, &stop.reason);
+            // Refused before it rang (busy, unavailable, invalid): no ring
+            // to end, but the reason still says why (the phone's call page).
+            if !was && stop.call_id.is_none() {
+                self.calls.end_reason.clone_from(&stop.reason);
+            }
         }
         self.sync_calls(fx);
     }

@@ -116,6 +116,14 @@ void Native::requestMicrophone()
 #ifdef Q_OS_ANDROID
   if (m_askingMicrophone)
     return;
+  // Already allowed: answered without asking. Asking anyway can fail while
+  // Qt's accessibility bridge holds its lock ("Failed to acquire deadlock
+  // protector for requestPermissionsInternal()"), which reads as a refusal.
+  if (QJniObject::callStaticMethod<jboolean>(kVoice, "microphoneAllowed", "(Landroid/content/Context;)Z",
+                                             QNativeInterface::QAndroidApplication::context().object())) {
+    QMetaObject::invokeMethod(this, [this] { emit microphoneAnswered(true); }, Qt::QueuedConnection);
+    return;
+  }
   m_askingMicrophone = true;
   // Answers at once when the permission is already decided either way.
   QtAndroidPrivate::requestPermission(QStringLiteral("android.permission.RECORD_AUDIO"))

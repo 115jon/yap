@@ -32,6 +32,8 @@ Item {
     signal callRequested()
     signal serverMenuRequested()
     signal channelMenuRequested(string channelId, string name, bool voice)
+    // The open DM's call (ChatPage.dmCallRequested).
+    signal dmCallRequested(string action)
     // A message's "N replies": its thread, as a page.
     signal threadRequested(string messageId)
 
@@ -330,6 +332,7 @@ Item {
             onMembersRequested: pager.toggleMembers()
             onProfileRequested: userId => pager.profileRequested(userId)
             onThreadRequested: messageId => pager.threadRequested(messageId)
+            onDmCallRequested: action => pager.dmCallRequested(action)
         }
 
         // Side by side with nothing open: where the conversation will be.

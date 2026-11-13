@@ -4,8 +4,8 @@ import com.yap.mobile
 import Yap.Ui
 
 // The open conversation, the pager's middle page: a header (the drawer
-// key, the channel or the DM's other half, the members key), the link
-// strip and the unread banner under it, the desktop's MessageDelegate rows
+// key, the channel or the DM's other half, a DM's call key, the members
+// key), a DM's call strip, the link strip and the unread banner under it, the desktop's MessageDelegate rows
 // on its MessageListModel, the typing line and the composer. The keyboard
 // pushes the composer up as it animates in (Native.imeHeight follows the
 // IME inset frame by frame).
@@ -22,6 +22,9 @@ Item {
     signal membersRequested()
     signal profileRequested(string userId)
     signal threadRequested(string messageId)
+    // A DM's call (Main.qml): `start` (the header's key: ring them, or join
+    // the call going on), `join`, `answer`, `decline` and `open` (the strip).
+    signal dmCallRequested(string action)
 
     readonly property bool dm: Nav.dmUserId.length > 0
     // The composer's shared core, for the picker sheet (its sends reply).
@@ -142,8 +145,8 @@ Item {
                 id: title
                 anchors.left: root.menuKey ? drawerKey.right : parent.left
                 anchors.leftMargin: root.menuKey ? 8 : 16 + root.leftInset
-                anchors.right: peopleKey.visible ? peopleKey.left : parent.right
-                anchors.rightMargin: peopleKey.visible ? 8 : 16 + root.rightInset
+                anchors.right: peopleKey.visible ? peopleKey.left : callKey.visible ? callKey.left : parent.right
+                anchors.rightMargin: peopleKey.visible || callKey.visible ? 8 : 16 + root.rightInset
                 height: parent.height
                 Accessible.role: root.dm ? Accessible.Button : Accessible.Heading
                 Accessible.name: root.dm ? qsTr("%1, view profile").arg(Nav.activeChannelName)
@@ -186,6 +189,22 @@ Item {
                     onTapped: root.profileRequested(Nav.dmUserId)
                 }
             }
+            // A DM's call key (ChatHeader.tsx): ring them, or join the call
+            // going on; hidden while in it or while it rings (the strip
+            // has those).
+            IconKey {
+                id: callKey
+                DmCallModel { id: dmCall }
+                anchors.right: parent.right
+                anchors.rightMargin: 8 + root.rightInset
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.dm && dmCall.callKey
+                iconName: "call"
+                tone: "ghost"
+                tip: dmCall.callKeyLabel
+                Accessible.name: tip
+                onClicked: root.dmCallRequested("start")
+            }
             IconKey {
                 id: peopleKey
                 anchors.right: parent.right
@@ -206,10 +225,24 @@ Item {
         }
     }
 
+    // The DM's call, while it rings or has someone in it.
+    DmCallStrip {
+        id: callStrip
+        anchors.top: header.bottom
+        width: parent.width
+        z: 2
+        leftInset: root.leftInset
+        rightInset: root.rightInset
+        onJoinRequested: root.dmCallRequested("join")
+        onAnswerRequested: root.dmCallRequested("answer")
+        onDeclineRequested: root.dmCallRequested("decline")
+        onOpenRequested: root.dmCallRequested("open")
+    }
+
     // The chat link dropped, or just came back (the desktop's strip).
     ConnectionStrip {
         id: strip
-        anchors.top: header.bottom
+        anchors.top: callStrip.bottom
         width: parent.width
         z: 2
     }

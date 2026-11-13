@@ -93,6 +93,16 @@ final class PushApi {
         }
     }
 
+    /**
+     * POST /api/calls/:id/accept or /decline (`answer`): a ring answered
+     * from its notification or the lock screen, where the gateway may not
+     * be up yet (the Expo app's IncomingCalls.tellServer). The status, or
+     * -1 offline.
+     */
+    static int answerCall(PushStore.Session session, String callId, String answer) {
+        return request(session, "POST", "/api/calls/" + Uri.encode(callId) + "/" + answer, "{}");
+    }
+
     /** POST /api/push-tokens (a rotated token, the app not running). */
     static int register(PushStore.Session session, String token) {
         try {

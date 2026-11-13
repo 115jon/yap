@@ -595,6 +595,21 @@ fn signing_out_while_a_ring_goes_should_silence_it_and_reset_the_calls() {
 }
 
 #[test]
+fn a_stop_before_any_ring_should_still_say_why() {
+    let mut c = Client::online();
+    c.calls(CallsCommand::Start {
+        channel_id: DM.into(),
+    });
+    let fx = c.dispatch(
+        "CALL_RING_STOP",
+        json!({ "call_id": null, "reason": "unavailable" }),
+    );
+    assert!(!sounds(&fx).contains(&Sound::CallEnd));
+    assert_eq!(c.view.status, RingStatus::Idle);
+    assert_eq!(c.view.end_reason, "unavailable");
+}
+
+#[test]
 fn a_busy_stop_should_end_the_ring_silently() {
     let mut c = Client::online();
     start(&mut c);
