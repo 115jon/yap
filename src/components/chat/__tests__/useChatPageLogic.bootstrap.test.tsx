@@ -39,6 +39,7 @@ vi.mock("@/lib/desktop-auth", () => ({
 }));
 
 vi.mock("@/lib/platform", () => ({ isTauri: vi.fn(() => false) }));
+vi.mock("@/lib/media-pass", () => ({ startMediaPass: vi.fn(() => () => {}) }));
 
 vi.mock("@/stores/chat-store", () => ({
   useChatStore: (selector: (state: typeof mocks.state) => unknown) =>

@@ -8,6 +8,8 @@
 import { isCapProtectedMediaPath, isMediaCap } from "@/lib/media-capability";
 import { signMediaUrl } from "@/lib/media-grant";
 import { clog } from "@/lib/console-logger";
+import { getDesktopToken, getStoredKovaAuthSessionToken } from "./desktop-auth";
+import { signedMediaPathFor } from "@/lib/signed-media-paths";
 import { isDesktop, isMobile, isTauri } from "@/lib/runtime";
 import {
   DEFAULT_ABUSE_EMAIL,
@@ -279,6 +281,9 @@ function withMediaCapability(fullUrl: string): string {
       urlObj.searchParams.delete("token");
       return format(urlObj);
     }
+    // Only our own origin gets a capability (an embed can carry a
+    // protocol-relative or foreign URL with one of our paths in it).
+    if (!isOwnAssetOrigin(urlObj)) return fullUrl;
 
     const signed = signMediaUrl(urlObj);
     if (signed) return format(signed);
@@ -293,6 +298,20 @@ function withMediaCapability(fullUrl: string): string {
   return fullUrl;
 }
 
+function isOwnAssetOrigin(url: URL): boolean {
+  const origins = new Set<string>();
+  if (typeof window !== "undefined") origins.add(window.location.origin);
+  for (const base of [getApiBaseUrl(), getPublicApiUrl()]) {
+    if (!base) continue;
+    try {
+      origins.add(new URL(base).origin);
+    } catch {
+      // Not a URL: nothing to add.
+    }
+  }
+  return origins.has(url.origin);
+}
+
 function shouldProxyExternalAssetUrl(pathOrUrl: string): boolean {
   try {
     const url = new URL(pathOrUrl);
@@ -305,6 +324,43 @@ function shouldProxyExternalAssetUrl(pathOrUrl: string): boolean {
 function buildExternalAssetProxyUrl(pathOrUrl: string): string {
   const params = new URLSearchParams({ url: pathOrUrl });
   return apiUrl(`/api/proxy-media?${params.toString()}`);
+}
+
+/** `/api/proxy-media?...` when `url` is one of our proxy URLs on any host. */
+function proxyMediaPathOfAbsoluteUrl(url: string): string | null {
+  if (!url.includes("/api/proxy-media")) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname.endsWith("/api/proxy-media")
+      ? `/api/proxy-media${parsed.search}`
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasSignedInSession(): boolean {
+  try {
+    return !!(getDesktopToken() ?? getStoredKovaAuthSessionToken());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A third-party image or video, loaded through /api/proxy-media so its host
+ * never sees the viewer's address: with the server's signature when the
+ * server sent one for this URL, else on the media pass cookie a signed-in
+ * session holds (lib/media-pass). With no session there is nothing to
+ * authorize with, so only the always-proxied Google avatars go through.
+ */
+function externalAssetUrl(rawUrl: string): string {
+  const signed = signedMediaPathFor(rawUrl);
+  if (signed) return apiUrl(signed);
+  if (!hasSignedInSession() && !shouldProxyExternalAssetUrl(rawUrl)) {
+    return rawUrl;
+  }
+  return buildExternalAssetProxyUrl(rawUrl);
 }
 
 function isInternalAbsoluteAssetUrl(pathOrUrl: string): boolean {
@@ -330,16 +386,22 @@ function isInternalAbsoluteAssetUrl(pathOrUrl: string): boolean {
 /**
  * Returns a URL for an asset. Private media carries a short-lived media
  * capability for that one URL, because raw <img>/<video>/<a> requests cannot
- * set auth headers (lib/media-capability).
+ * set auth headers (lib/media-capability). Third-party media go through the
+ * media proxy (externalAssetUrl).
  */
-export function getAuthAssetUrl(pathOrUrl: string): string {
-  // If it's already an absolute URL not pointing to our API, just return it
-  if (pathOrUrl.startsWith("http")) {
-    if (shouldProxyExternalAssetUrl(pathOrUrl)) {
-      return buildExternalAssetProxyUrl(pathOrUrl);
-    }
+export function getAuthAssetUrl(input: string): string {
+  let pathOrUrl = typeof input === "string" ? input.trim() : input;
+  // Protocol-relative (`//host/x`, or `/\host/x` as browsers read it) names
+  // another host, never a path of ours.
+  if (/^[\\/]{2}/.test(pathOrUrl)) {
+    pathOrUrl = `https://${pathOrUrl.replace(/^[\\/]+/, "")}`;
+  }
+  if (/^https?:\/\//i.test(pathOrUrl)) {
+    // Our proxy on any host (a server-built payload): load it from our API.
+    const proxyPath = proxyMediaPathOfAbsoluteUrl(pathOrUrl);
+    if (proxyPath) return apiUrl(proxyPath);
     if (!isInternalAbsoluteAssetUrl(pathOrUrl)) {
-      return pathOrUrl;
+      return externalAssetUrl(pathOrUrl);
     }
   }
 

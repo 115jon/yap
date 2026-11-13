@@ -1,3 +1,4 @@
+import { getAuthAssetUrl } from "@/lib/platform";
 import {
   avatarDisplayToImageStyle,
   getAvatarDecoration,
@@ -65,7 +66,7 @@ export function AvatarImage({
       </span>
       {avatarDecoration && (
         <img
-          src={avatarDecoration.imageUrl}
+          src={getAuthAssetUrl(avatarDecoration.imageUrl)}
           alt=""
           aria-hidden="true"
           loading={loading}
