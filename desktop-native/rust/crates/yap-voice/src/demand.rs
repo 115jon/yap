@@ -34,7 +34,9 @@ pub struct Limits {
     /// first, then shares, then the largest.
     pub max_shown: Option<usize>,
     /// Nothing is shown (the app is in the background): every video is
-    /// withdrawn, and the call releases its pulls after its delay.
+    /// withdrawn and the intent is suspended, so the call releases every
+    /// video pull after its delay, watched shares too, and pulls them
+    /// again when this clears.
     pub paused: bool,
 }
 
@@ -124,6 +126,7 @@ impl Surfaces {
         VideoIntent {
             demand,
             stage: self.stage.clone(),
+            suspended: self.limits.paused,
         }
     }
 }
@@ -229,7 +232,18 @@ mod tests {
         s.limits.paused = true;
         let intent = s.intent();
         assert!(intent.demand.is_empty());
+        assert!(intent.suspended);
         assert_eq!(intent.stage.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn default_limits_should_never_suspend() {
+        let mut s = Surfaces::default();
+        assert!(!s.intent().suspended);
+        s.shown.insert(1, ("screen-video-a".into(), size(640, 360)));
+        assert!(!s.intent().suspended);
+        s.limits = Limits::phone(0, false, false);
+        assert!(!s.intent().suspended);
     }
 
     #[test]
