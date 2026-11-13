@@ -983,6 +983,81 @@ describe("chat gateway CALL_RING_STOP", () => {
     gateway.disconnectGateway();
   });
 
+  it("forgets a call start whose socket dropped before it rang", async () => {
+    const { gateway, socket, setOutgoingCall } = await connectWithCall({
+      status: "idle",
+      callId: null,
+    });
+
+    gateway.sendCallInitiate("user-2", "dm-2");
+    expect(sentMessages(socket)).toContainEqual({
+      op: 36,
+      d: { target_user_id: "user-2", channel_id: "dm-2" },
+    });
+    socket.disconnect();
+    gateway.initGateway("user-1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const next = FakeWebSocket.instances.at(-1)!;
+    next.open();
+    next.message({ op: 8, d: { heartbeat_interval: 45_000 } });
+    next.message({ op: 9 });
+    // Another session of ours calls the same DM.
+    ringing(next, "call-3", "dm-2");
+
+    expect(setOutgoingCall).not.toHaveBeenCalled();
+    gateway.disconnectGateway();
+  });
+
+  it("keeps a queued call start across a drop and takes up its ring", async () => {
+    const { gateway, socket, setOutgoingCall } = await connectWithCall({
+      status: "idle",
+      callId: null,
+    });
+    socket.disconnect();
+
+    // Offline: op 36 waits for the next Ready.
+    gateway.sendCallInitiate("user-2", "dm-2");
+    gateway.initGateway("user-1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = FakeWebSocket.instances.at(-1)!;
+    second.open();
+    second.disconnect();
+    gateway.initGateway("user-1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const third = FakeWebSocket.instances.at(-1)!;
+    third.open();
+    third.message({ op: 8, d: { heartbeat_interval: 45_000 } });
+    third.message({ op: 2, d: { participant_id: "session-2" } });
+    expect(sentMessages(third)).toContainEqual({
+      op: 36,
+      d: { target_user_id: "user-2", channel_id: "dm-2" },
+    });
+    ringing(third, "call-3", "dm-2");
+
+    expect(setOutgoingCall).toHaveBeenCalledTimes(1);
+    gateway.disconnectGateway();
+  });
+
+  it("forgets a call start when the gateway disconnects", async () => {
+    const { gateway, setOutgoingCall } = await connectWithCall({
+      status: "idle",
+      callId: null,
+    });
+
+    gateway.sendCallInitiate("user-2", "dm-2");
+    gateway.disconnectGateway();
+    gateway.initGateway("user-1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const next = FakeWebSocket.instances.at(-1)!;
+    next.open();
+    next.message({ op: 8, d: { heartbeat_interval: 45_000 } });
+    next.message({ op: 2, d: { participant_id: "session-2" } });
+    ringing(next, "call-3", "dm-2");
+
+    expect(setOutgoingCall).not.toHaveBeenCalled();
+    gateway.disconnectGateway();
+  });
+
   it("keeps the existing behaviour when the store has no call id", async () => {
     const { gateway, socket, endCall } = await connectWithCall({
       status: "ringing_outgoing",

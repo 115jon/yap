@@ -149,8 +149,13 @@ export function createChatGateway(
   // The server sends a call's ring, CALL_RINGING and CALL_RING_STOP to every
   // session of both users, without saying which one answered. Only the tab
   // that started the call (op 36) or answered it (op 37) joins its room.
-  /** The DM this tab rang (op 36), until its CALL_RINGING or a refusal. */
+  /**
+   * The DM this tab rang (op 36), until its CALL_RINGING, a refusal, or the
+   * loss of the socket it went out on.
+   */
   let initiatingChannelId: string | null = null;
+  /** That op 36 still waits in the socket's queue for the next Ready. */
+  let initiateQueued = false;
   /** The call this tab started or answered. */
   let ownCallId: string | null = null;
 
@@ -208,6 +213,10 @@ export function createChatGateway(
         identified = false;
         resumeInFlight = false;
         resetSubscriptions();
+        // An op 36 sent on this socket may be lost with it. Waiting for its
+        // CALL_RINGING would take up a later call another session of ours
+        // places in that DM. One still queued goes out on the next Ready.
+        if (!initiateQueued) initiatingChannelId = null;
       },
       // The slow auth retry is not a reconnect attempt: the strip keeps
       // showing "Signed out", so only backoff retries count here.
@@ -1041,6 +1050,8 @@ export function createChatGateway(
       });
     }
     socket.markReady();
+    // The queue went out on this socket.
+    initiateQueued = false;
 
     const servers = get().servers;
     for (const server of servers) {
@@ -1135,7 +1146,10 @@ export function createChatGateway(
   };
 
   const disconnectGateway = () => {
+    // stop() clears the send queue, a queued op 36 included.
     socket.stop();
+    initiatingChannelId = null;
+    initiateQueued = false;
     releaseReconnectSoundSuppression?.();
     releaseReconnectSoundSuppression = null;
     resetSubscriptions();
@@ -1212,9 +1226,8 @@ export function createChatGateway(
     }
   };
 
-  const sendWhenReady = (msg: OutboundFrame) => {
-    socket.sendWhenReady(msg);
-  };
+  /** Sends now or queues for the next Ready; false only if a send failed. */
+  const sendWhenReady = (msg: OutboundFrame) => socket.sendWhenReady(msg);
 
   const subscribeChannel = (channelId: string) => {
     if (subscribedChannelId === channelId) return;
@@ -1283,10 +1296,15 @@ export function createChatGateway(
     sendGateway,
     sendCallInitiate: (targetUserId: string, channelId: string) => {
       initiatingChannelId = channelId;
-      sendWhenReady({
+      initiateQueued = !socket.isReady;
+      const sent = sendWhenReady({
         op: GatewayOp.CallInitiate,
         d: { target_user_id: targetUserId, channel_id: channelId },
       });
+      if (!sent) {
+        initiatingChannelId = null;
+        initiateQueued = false;
+      }
     },
     sendCallAccept: (callId: string) => {
       ownCallId = callId;
