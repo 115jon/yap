@@ -22,8 +22,7 @@
 // node:crypto (nodejs_compat) keeps signing synchronous, so payload rewriting
 // can run where messages are serialized without threading async through.
 
-// A namespace import, for the same reason as origin.ts: the desktop build
-// bundles this against an empty browser stub; it only runs on the Worker.
+// A namespace import, for the same reason as origin.ts (server only).
 import * as nodeCrypto from "node:crypto";
 
 const URL_SIGNATURE_DOMAIN = "yap/media-proxy/url/v1";
