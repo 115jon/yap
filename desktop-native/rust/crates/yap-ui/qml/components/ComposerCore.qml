@@ -402,10 +402,8 @@ Item {
 
     // Signed out, the field and the reply empty too (ComposerDrafts drops
     // the kept ones), so nothing typed by one account shows for the next.
-    property bool clearOnSignOut: true
     Connections {
         target: Session
-        enabled: root.clearOnSignOut
         function onPhaseChanged() {
             if (Session.phase !== Session.Ready)
                 root.reset()

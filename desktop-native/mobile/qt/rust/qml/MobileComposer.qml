@@ -16,7 +16,7 @@ import Yap.Ui
 // any Android messaging app, and the word being composed counts as typed
 // (Send, `@` suggestions, typing pings) before the keyboard commits it.
 // Each channel keeps its unsent text and reply (ComposerDrafts) while the
-// app runs.
+// app runs; signed out, the field and the reply empty.
 Rectangle {
     id: root
 
@@ -40,8 +40,6 @@ Rectangle {
         mentions: mentionPanel
         liveWord: true
         atomicMentions: false
-        // The page outlives a sign-out, and its field kept its text.
-        clearOnSignOut: false
         onSend: (text, replyToId) => root.send(text, replyToId)
         onSent: root.emojiOpen = false
     }
