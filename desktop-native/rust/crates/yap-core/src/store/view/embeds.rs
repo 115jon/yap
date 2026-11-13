@@ -52,6 +52,10 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
 /// the API's proxy (no auth; it allow-lists the CDNs and refreshes signed
 /// URLs through `sourceUrl`).
 pub fn proxied(url: &str, page: &str, api_base: &str) -> String {
+    let Some(web) = super::media::web_url(url) else {
+        return String::new();
+    };
+    let url = web.as_str();
     if !is_web(url) {
         return String::new();
     }

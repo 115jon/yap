@@ -50,11 +50,46 @@ pub fn media_kind(content_type: &str) -> &'static str {
     }
 }
 
+/// `url` as an http(s) URL with its host after `//`, the way URL libraries
+/// (QUrl, the server's WHATWG parser) read it, or None when it names no web
+/// host. Cleaned first of what they ignore: tab and newline anywhere, C0
+/// controls and spaces at the ends. Lenient like them about the slashes and
+/// the scheme's case: `//host/x`, `\\host/x` and `HTTPS:host/x` all name
+/// `host`. A check on the raw text would read those as local and hand them
+/// to the image loader, which then fetches the host directly.
+pub(crate) fn web_url(url: &str) -> Option<String> {
+    let cleaned: String = url
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    let value = cleaned.trim_matches(|c: char| c <= ' ');
+    let (scheme, rest) = if value.starts_with("//")
+        || value.starts_with("\\\\")
+        || value.starts_with("/\\")
+        || value.starts_with("\\/")
+    {
+        ("https", value)
+    } else {
+        let (scheme, rest) = value.split_once(':')?;
+        let scheme = scheme.to_ascii_lowercase();
+        if scheme != "https" && scheme != "http" {
+            return None;
+        }
+        (if scheme == "https" { "https" } else { "http" }, rest)
+    };
+    let rest = rest.trim_start_matches(['/', '\\']);
+    if rest.is_empty() || rest.starts_with(['?', '#']) {
+        return None;
+    }
+    Some(format!("{scheme}://{rest}"))
+}
+
 fn host_of(url: &str) -> Option<String> {
+    let url = web_url(url)?;
     let rest = url
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))?;
-    let host = rest.split(['/', '?', '#']).next()?;
+    let host = rest.split(['/', '\\', '?', '#']).next()?;
     let host = host.rsplit('@').next()?.split(':').next()?;
     Some(host.to_ascii_lowercase())
 }
@@ -86,6 +121,10 @@ fn is_proxy_url(url: &str) -> bool {
 /// built (signed, or the social form with its post) load as they are; an
 /// unsigned one carries the session (`api::media_needs_auth`).
 pub(crate) fn via_media_proxy(url: &str, api_base: &str) -> String {
+    let Some(web) = web_url(url) else {
+        return url.to_owned();
+    };
+    let url = web.as_str();
     if !is_web_url(url) || crate::api::is_api_url(api_base, url) {
         return url.to_owned();
     }
@@ -357,6 +396,10 @@ pub(crate) fn needs_proxy(url: &str) -> bool {
 /// An embed picture's URL: http(s) only, always through the media proxy
 /// (X, TikTok and Instagram with their post, so the server can refresh them).
 pub(super) fn embed_image_url(url: &str, page: &str, api_base: &str) -> String {
+    let Some(web) = web_url(url) else {
+        return String::new();
+    };
+    let url = web.as_str();
     if !is_web_url(url) {
         return String::new();
     }
@@ -1018,6 +1061,61 @@ mod tests {
         assert!(is_proxy_url("https://y/api/proxy-media"));
         assert!(!is_proxy_url("https://y/api/proxy-media-not"));
         assert!(!is_proxy_url("https://evil.example/x?u=/api/proxy-media"));
+    }
+
+    #[test]
+    fn a_host_hidden_behind_ignored_characters_should_still_go_through_the_proxy() {
+        let want = "https://y/api/proxy-media?url=https%3A%2F%2Fevil.example%2Fa.png";
+        for url in [
+            " https://evil.example/a.png",
+            "\thttps://evil.example/a.png",
+            "https://evil.example/a.png\r\n",
+            "ht\ttps://evil.example/a.png",
+            "\u{0}https://evil.example/a.png",
+            "HTTPS://evil.example/a.png",
+            "https:evil.example/a.png",
+            "https:/evil.example/a.png",
+            "https:\\\\evil.example/a.png",
+            "//evil.example/a.png",
+            "/\t/evil.example/a.png",
+            "\\\\evil.example/a.png",
+        ] {
+            assert_eq!(via_media_proxy(url, "https://y"), want, "{url:?}");
+            assert_eq!(
+                embed_image_url(url, "https://news.example/s", "https://y"),
+                want,
+                "{url:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn values_without_a_web_host_should_not_load_from_one() {
+        for url in [
+            "file:///c:/x.png",
+            "qrc:/a.png",
+            "data:image/png;base64,AA",
+            "https:",
+            "https://",
+            "a.png",
+            "",
+        ] {
+            assert_eq!(web_url(url), None, "{url:?}");
+            assert_eq!(via_media_proxy(url, "https://y"), url, "{url:?}");
+            assert_eq!(
+                embed_image_url(url, "https://a", "https://y"),
+                "",
+                "{url:?}"
+            );
+        }
+        assert_eq!(
+            web_url(" https://y/api/a.png\n").as_deref(),
+            Some("https://y/api/a.png")
+        );
+        assert_eq!(
+            via_media_proxy(" https://y/api/a.png", "https://y"),
+            "https://y/api/a.png"
+        );
     }
 
     #[test]
