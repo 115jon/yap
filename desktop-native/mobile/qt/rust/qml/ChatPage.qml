@@ -3,12 +3,14 @@ import Yap.Mobile
 import com.yap.mobile
 import Yap.Ui
 
-// The open conversation, the pager's middle page: a header (the drawer
-// key, the channel or the DM's other half, a DM's call key, the members
-// key), a DM's call strip, the link strip and the unread banner under it, the desktop's MessageDelegate rows
-// on its MessageListModel, the typing line and the composer. The keyboard
-// pushes the composer up as it animates in (Native.imeHeight follows the
-// IME inset frame by frame).
+// The open conversation, the pager's middle page: a floating header that
+// compacts as you read back (the drawer key, the server over the channel
+// or the DM's other half, the call label, a DM's call key, the members
+// key), a DM's call strip, the link strip and the unread banner under it,
+// the desktop's MessageDelegate rows on its MessageListModel running up
+// behind them, the jump to the present, the typing line and the composer.
+// The keyboard pushes the composer up as it animates in (Native.imeHeight
+// follows the IME inset frame by frame).
 Item {
     id: root
 
@@ -25,6 +27,8 @@ Item {
     // A DM's call (Main.qml): `start` (the header's key: ring them, or join
     // the call going on), `join`, `answer`, `decline` and `open` (the strip).
     signal dmCallRequested(string action)
+    // The bar's call label: the call page.
+    signal callRequested()
 
     readonly property bool dm: Nav.dmUserId.length > 0
     // The composer's shared core, for the picker sheet (its sends reply).
@@ -71,7 +75,8 @@ Item {
         id: scroll
         view: view
         endSlack: 56
-        dividerGap: banner.height
+        // Under the floating bar, the strips and the banner.
+        dividerGap: root.listTop + banner.height + 8
         historyFetchPx: 600
         landTries: 6
         landInterval: 60
@@ -119,119 +124,236 @@ Item {
         color: Theme.ply0
     }
 
-    Rectangle {
-        id: header
-        width: parent.width
-        height: root.topInset + 56
-        color: Theme.ply0
-        z: 2
+    // The bar compacts as you read back (CollapseTracker: the finger's
+    // scrolling only) and comes back as you scroll toward the present.
+    CollapseTracker {
+        id: collapse
+        view: view
+        distance: 48
+    }
+
+    // The header, floating (Drawer Plus): a ply-3 plate 8 below the status
+    // bar and 8 in from the sides, over the list's top rows. Its heights
+    // come from its text (the system's text size): full is the kicker (the
+    // server, or "Direct message") over the title, compact the title alone.
+    // Compacting moves nothing in layout: the plate scales from its top, the
+    // kicker fades, the title and keys slide up.
+    Item {
+        id: bar
+        x: 8 + root.leftInset
+        y: root.topInset + 8
+        width: parent.width - 16 - root.leftInset - root.rightInset
+        height: full
+        z: 3
+
+        readonly property real titleHeight: titleRow.height
+        readonly property real full: Math.max(56, Math.ceil(kicker.implicitHeight + titleHeight + 12))
+        readonly property real compact: Math.max(44, Math.ceil(titleHeight + 12))
+        // How far the plate's foot rises, 0 to full - compact.
+        readonly property real lift: (full - compact) * collapse.value
+        // From where the title row stands at full to where it stands compact.
+        readonly property real titleShift: collapse.value
+            * ((compact - titleHeight) / 2 - ((full - titleColumn.height) / 2 + kicker.height))
+
+        FloatPlate {
+            anchors.fill: parent
+            transform: Scale { yScale: 1 - bar.lift / Math.max(1, bar.full) }
+        }
 
         Item {
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 56
+            anchors.fill: parent
+            opacity: collapse.veil
 
             IconKey {
                 id: drawerKey
                 anchors.left: parent.left
-                anchors.leftMargin: 8 + root.leftInset
+                anchors.leftMargin: 4
                 anchors.verticalCenter: parent.verticalCenter
                 visible: root.menuKey
                 iconName: "menu"
                 tip: qsTr("Servers and channels")
                 onClicked: root.menuRequested()
+                transform: Translate { y: -bar.lift / 2 }
             }
-            // A DM's other half: the avatar and name open the profile.
+            // The kicker and the title. A DM's other half: the avatar and
+            // name open the profile.
             Item {
                 id: title
                 anchors.left: root.menuKey ? drawerKey.right : parent.left
-                anchors.leftMargin: root.menuKey ? 8 : 16 + root.leftInset
-                anchors.right: peopleKey.visible ? peopleKey.left : callKey.visible ? callKey.left : parent.right
-                anchors.rightMargin: peopleKey.visible || callKey.visible ? 8 : 16 + root.rightInset
+                anchors.leftMargin: root.menuKey ? 4 : 12
+                anchors.right: keys.left
+                anchors.rightMargin: 8
                 height: parent.height
                 Accessible.role: root.dm ? Accessible.Button : Accessible.Heading
                 Accessible.name: root.dm ? qsTr("%1, view profile").arg(Nav.activeChannelName)
                     : qsTr("Channel %1").arg(Nav.activeChannelName)
                 Accessible.onPressAction: if (root.dm) root.profileRequested(Nav.dmUserId)
 
-                Loader {
-                    id: face
+                Column {
+                    id: titleColumn
+                    width: parent.width
                     anchors.verticalCenter: parent.verticalCenter
-                    active: root.dm
-                    visible: active
-                    sourceComponent: Avatar {
-                        size: 28
-                        initials: Nav.activeChannelName.charAt(0).toUpperCase()
-                        source: Nav.dmAvatar
-                        deco: Nav.dmDeco
+                    transform: Translate { y: bar.titleShift }
+                    Text {
+                        id: kicker
+                        width: parent.width
+                        textFormat: Text.PlainText
+                        text: root.dm ? qsTr("Direct message") : Nav.home ? qsTr("Direct messages") : Nav.activeServerName
+                        elide: Text.ElideRight
+                        color: Theme.ink3
+                        font: Theme.type.silk
+                        // Gone by halfway, so it never sits under the title.
+                        opacity: 1 - Math.min(1, collapse.value * 2)
+                        Accessible.ignored: true
                     }
-                }
-                Icon {
-                    id: glyph
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: !root.dm
-                    name: "textChannel"
-                    size: Theme.iconMd
-                    color: Theme.ink3
-                }
-                Text {
-                    anchors.left: root.dm ? face.right : glyph.right
-                    anchors.leftMargin: root.dm ? 10 : 6
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.PlainText
-                    text: Nav.activeChannelName
-                    color: Theme.ink1
-                    font: Theme.type.columnTitle
-                    elide: Text.ElideRight
+                    Item {
+                        id: titleRow
+                        width: parent.width
+                        height: Math.max(name.implicitHeight, root.dm ? 28 : Theme.iconMd)
+                        Loader {
+                            id: face
+                            anchors.verticalCenter: parent.verticalCenter
+                            active: root.dm
+                            visible: active
+                            sourceComponent: Avatar {
+                                size: 28
+                                initials: Nav.activeChannelName.charAt(0).toUpperCase()
+                                source: Nav.dmAvatar
+                                deco: Nav.dmDeco
+                            }
+                        }
+                        Icon {
+                            id: glyph
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: !root.dm
+                            name: "textChannel"
+                            size: Theme.iconMd
+                            color: Theme.ink3
+                        }
+                        Text {
+                            id: name
+                            anchors.left: root.dm ? face.right : glyph.right
+                            anchors.leftMargin: root.dm ? 10 : 4
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            textFormat: Text.PlainText
+                            text: Nav.activeChannelName
+                            color: Theme.ink1
+                            font: Theme.type.columnTitle
+                            elide: Text.ElideRight
+                        }
+                    }
                 }
                 TapHandler {
                     enabled: root.dm
                     onTapped: root.profileRequested(Nav.dmUserId)
                 }
             }
-            // A DM's call key (ChatHeader.tsx): ring them, or join the call
-            // going on; hidden while in it or while it rings (the strip
-            // has those).
-            IconKey {
-                id: callKey
-                DmCallModel { id: dmCall }
+
+            Row {
+                id: keys
                 anchors.right: parent.right
-                anchors.rightMargin: 8 + root.rightInset
+                anchors.rightMargin: 4
                 anchors.verticalCenter: parent.verticalCenter
-                visible: root.dm && dmCall.callKey
-                iconName: "call"
-                tone: "ghost"
-                tip: dmCall.callKeyLabel
-                Accessible.name: tip
-                onClicked: root.dmCallRequested("start")
+                spacing: 4
+                transform: Translate { y: -bar.lift / 2 }
+
+                // In a call: its LED and channel; a tap opens the call page
+                // (its controls are there and on the drawer's account row).
+                Rectangle {
+                    id: callLabel
+                    readonly property bool settled: Voice.live && Voice.status === "Connected"
+                    visible: Voice.channelId.length > 0
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: callLabelRow.implicitWidth + 16
+                    height: Math.max(28, callWord.implicitHeight + 8)
+                    radius: Theme.radius
+                    color: callTap.pressed ? Theme.tint2 : Theme.tint1
+                    Accessible.role: Accessible.Button
+                    Accessible.name: qsTr("In a call in %1. Open the call").arg(Voice.channelName)
+                    Accessible.onPressAction: root.callRequested()
+                    Row {
+                        id: callLabelRow
+                        x: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 6
+                        Led {
+                            anchors.verticalCenter: parent.verticalCenter
+                            lit: callLabel.settled ? Voice.speaking && !Voice.muted : true
+                            color: callLabel.settled ? Theme.talk : Theme.idle
+                        }
+                        Text {
+                            id: callWord
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(implicitWidth, Math.max(48, bar.width / 4))
+                            textFormat: Text.PlainText
+                            text: Voice.channelName
+                            elide: Text.ElideRight
+                            color: callLabel.settled ? Theme.successInk : Theme.warningInk
+                            font: Theme.type.silk
+                        }
+                    }
+                    // A thumb's height, however short the label.
+                    Item {
+                        anchors.centerIn: parent
+                        width: parent.width
+                        height: Math.max(parent.height, Theme.hitMin)
+                        TapHandler {
+                            id: callTap
+                            // The tap is this key's alone, not also the row's under it.
+                            gesturePolicy: TapHandler.ReleaseWithinBounds
+                            onTapped: root.callRequested()
+                        }
+                    }
+                }
+                // A DM's call key (ChatHeader.tsx): ring them, or join the
+                // call going on; hidden while in it or while it rings (the
+                // strip has those).
+                IconKey {
+                    id: callKey
+                    DmCallModel { id: dmCall }
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.dm && dmCall.callKey
+                    iconName: "call"
+                    tone: "ghost"
+                    tip: dmCall.callKeyLabel
+                    Accessible.name: tip
+                    onClicked: root.dmCallRequested("start")
+                }
+                IconKey {
+                    id: peopleKey
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.membersKey
+                    iconName: "members"
+                    tone: root.membersOn ? "toggled" : "ghost"
+                    tip: root.membersOn ? qsTr("Hide members") : qsTr("Members")
+                    onClicked: root.membersRequested()
+                }
             }
-            IconKey {
-                id: peopleKey
-                anchors.right: parent.right
-                anchors.rightMargin: 8 + root.rightInset
-                anchors.verticalCenter: parent.verticalCenter
-                visible: root.membersKey
-                iconName: "members"
-                tone: root.membersOn ? "toggled" : "ghost"
-                tip: root.membersOn ? qsTr("Hide members") : qsTr("Members")
-                onClicked: root.membersRequested()
-            }
-        }
-        Rectangle {
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 1
-            color: Theme.line
         }
     }
 
-    // The DM's call, while it rings or has someone in it.
+    // A solid band under the status bar: the rows scroll behind the bar's
+    // plate, never behind the clock and the system's icons.
+    Rectangle {
+        width: parent.width
+        height: root.topInset
+        color: Theme.ply0
+        z: 4
+    }
+
+    // Under the bar, lifted with its foot: the DM's call (while it rings or
+    // has someone in it), then the chat link's state. The rows start below
+    // them (the list's top margin) and scroll up behind them.
+    readonly property real stripsTop: bar.y + bar.full + 8
+    readonly property real listTop: stripsTop + callStrip.height + strip.height
+
     DmCallStrip {
         id: callStrip
-        anchors.top: header.bottom
+        y: root.stripsTop
         width: parent.width
         z: 2
+        transform: Translate { y: -bar.lift }
         leftInset: root.leftInset
         rightInset: root.rightInset
         onJoinRequested: root.dmCallRequested("join")
@@ -246,16 +368,27 @@ Item {
         anchors.top: callStrip.bottom
         width: parent.width
         z: 2
+        transform: Translate { y: -bar.lift }
     }
 
     // Unread from before this visit: how many and since when; a tap jumps
-    // to the first of them. It lies over the list, which never jumps.
+    // to the first of them. A float of its own under the bar, over the
+    // list, which never jumps.
+    FloatPlate {
+        anchors.fill: banner
+        visible: banner.visible
+        z: 2
+        transform: Translate { y: -bar.lift }
+    }
     UnreadBanner {
         id: banner
-        anchors.top: strip.bottom
-        width: parent.width
-        height: 40
+        x: 8 + root.leftInset
+        y: root.listTop
+        width: parent.width - 16 - root.leftInset - root.rightInset
+        height: Math.max(40, Theme.hitMin)
         z: 2
+        transform: Translate { y: -bar.lift }
+        color: "transparent"
         visible: Chat.unreadBanner && Chat.dividerId.length > 0
         count: Chat.unreadCount
         sinceTime: Chat.unreadSinceTime
@@ -273,13 +406,15 @@ Item {
 
     PlatformList {
         id: view
-        anchors.top: strip.bottom
+        anchors.top: parent.top
         anchors.bottom: typing.top
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.leftMargin: root.leftInset
         anchors.rightMargin: root.rightInset
         clip: true
+        // The rows start clear of the floating bar and run up behind it.
+        topMargin: root.listTop
         bottomMargin: 8
         // Still under a sheet. The long press that opened it ends with no
         // grabber (the row lets go of it), so the list never hears the
@@ -379,6 +514,106 @@ Item {
     Spinner {
         anchors.centerIn: view
         running: Chat.pageLoading && view.count === 0
+    }
+
+    // Messages that came in below while you read back (the jump key's chip).
+    property int newBelow: 0
+    Connections {
+        target: MessageListModel
+        // Appended rows (an older page goes in at 0) while away from the end.
+        function onRowsInserted(parent, first, last) {
+            if (first > 0 && !scroll.nearEnd && !Chat.hasNewer)
+                root.newBelow += last - first + 1
+        }
+    }
+    Connections {
+        target: scroll
+        function onNearEndChanged() {
+            if (scroll.nearEnd)
+                root.newBelow = 0
+        }
+    }
+    Connections {
+        target: Nav
+        function onActiveChannelIdChanged() {
+            root.newBelow = 0
+            collapse.reset()
+        }
+    }
+
+    // Jump to present (ChatJumpToPresent.tsx, as a float): away from the
+    // newest message, a ply-3 key with the ink rule over the typing line,
+    // with how many came in since. It rises 8 and fades in.
+    Item {
+        id: present
+        readonly property bool shown: view.count > 0 && scroll.landed && (Chat.hasNewer || !scroll.nearEnd)
+        property real rise: shown || Theme.reducedMotion ? 0 : 8
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: typing.y - height - 8 + rise
+        z: 2
+        width: presentRow.implicitWidth + 18
+        height: Math.max(36, presentWord.implicitHeight + 16)
+        visible: opacity > 0
+        opacity: shown ? 1 : 0
+        scale: presentTap.pressed ? Theme.scalePress : 1
+        Behavior on opacity { NumberAnimation { duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+        Behavior on rise { NumberAnimation { duration: Theme.dur3; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
+        Behavior on scale { NumberAnimation { duration: Theme.dur1 } }
+        Accessible.role: Accessible.Button
+        Accessible.name: root.newBelow > 0 && !Chat.hasNewer
+            ? qsTr("Jump to present, %n new", "", root.newBelow) : qsTr("Jump to present")
+        Accessible.onPressAction: root.jumpToPresent()
+
+        FloatPlate {
+            anchors.fill: parent
+            rule: true
+        }
+        Row {
+            id: presentRow
+            x: 8
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: 1
+            spacing: 8
+            Icon {
+                anchors.verticalCenter: parent.verticalCenter
+                name: "chevronDown"
+                size: Theme.iconSm
+                color: Theme.ink1
+            }
+            Text {
+                id: presentWord
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("Jump to present")
+                color: Theme.ink1
+                font: Theme.type.silk
+            }
+            CountBadge {
+                anchors.verticalCenter: parent.verticalCenter
+                count: Chat.hasNewer ? 0 : root.newBelow
+                Accessible.ignored: true
+            }
+        }
+        // A thumb's height, whatever the key's.
+        Item {
+            anchors.centerIn: parent
+            width: parent.width
+            height: Math.max(parent.height, Theme.hitMin)
+            TapHandler {
+                id: presentTap
+                // The tap is this key's alone, not also the row's under it.
+                gesturePolicy: TapHandler.ReleaseWithinBounds
+                enabled: present.shown
+                onTapped: root.jumpToPresent()
+            }
+        }
+    }
+    function jumpToPresent() {
+        Native.haptic(Native.Tick)
+        collapse.reset()
+        if (Chat.hasNewer)
+            Chat.jumpToPresent()
+        else
+            scroll.toEnd()
     }
 
     Text {
