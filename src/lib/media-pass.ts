@@ -1,9 +1,11 @@
 // The media pass: an HttpOnly cookie, scoped to /api/proxy-media, that lets
 // this signed-in browser load third-party images and videos through our
 // media proxy (`getAuthAssetUrl` builds unsigned proxy URLs for them). The
-// server issues it on POST /api/proxy-media for a valid session and it lasts
-// a week; it is renewed when less than three days are left, on every app
-// start, and cleared on sign-out.
+// server issues it on POST /api/proxy-media for a valid session, bound to
+// the user, and it lasts an hour; it is renewed when less than 20 minutes
+// are left (checked every 10 minutes and when the tab comes back), on every
+// app start, and cleared on sign-out. Each renewal checks the session, so a
+// signed-out session's pass ends within the hour.
 
 import {
   getDesktopToken,
@@ -14,9 +16,9 @@ import { KOVA_AUTH_PUBLISHABLE_KEY } from "@/lib/kova-auth-config";
 import { getApiBaseUrl, isTauri } from "@/lib/platform";
 
 const EXPIRY_STORAGE_KEY = "yap.mediaPass.expiresAt";
-/** Renew once less than this is left on the cookie. */
-const RENEW_MARGIN_MS = 3 * 24 * 60 * 60 * 1000;
-const CHECK_INTERVAL_MS = 30 * 60 * 1000;
+/** Renew once less than this is left on the cookie (it lasts an hour). */
+export const RENEW_MARGIN_MS = 20 * 60 * 1000;
+const CHECK_INTERVAL_MS = 10 * 60 * 1000;
 
 function currentToken(): string | null {
   try {

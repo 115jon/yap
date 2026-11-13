@@ -191,18 +191,74 @@ describe("platform asset urls", () => {
       "/\\evil.example/api/attachments/x.png",
       " //evil.example/api/attachments/x.png",
       "https://evil.example/api/attachments/x.png",
+      // Characters the URL parser drops before it reads the host.
+      "/\t/evil.example/api/attachments/x.png",
+      "/\n/evil.example/api/attachments/x.png",
+      "\r\n//evil.example/api/attachments/x.png",
+      "\u0000https://evil.example/api/attachments/x.png",
+      "ht\ttps://evil.example/api/attachments/x.png",
+      "https:\\\\evil.example/api/attachments/x.png",
     ]) {
       const out = getAuthAssetUrl(input);
-      expect(out, input).not.toContain("session-token");
+      expect(out, JSON.stringify(input)).not.toContain("session-token");
       // Nor a media capability: another host never gets one.
-      expect(out, input).not.toContain("cap=");
+      expect(out, JSON.stringify(input)).not.toContain("cap=");
       const url = new URL(out, "https://app.invalid");
-      expect(url.pathname, input).toBe("/api/proxy-media");
-      expect(url.searchParams.get("url"), input).toBe(
-        "https://evil.example/api/attachments/x.png",
-      );
+      expect(url.pathname, JSON.stringify(input)).toBe("/api/proxy-media");
+      // The host the browser would have loaded, with the page's scheme
+      // for a protocol-relative URL.
+      const target = new URL(url.searchParams.get("url")!);
+      expect(target.host, JSON.stringify(input)).toBe("evil.example");
+      expect(target.pathname).toBe("/api/attachments/x.png");
     }
     window.localStorage.removeItem("desktop_auth_token");
+  });
+
+  it("reads a scheme-relative URL as the page does", () => {
+    signInWithGrant();
+    // On an http page (the desktop webview is http://tauri.localhost) this
+    // names another host; it must not load from it.
+    const out = new URL(
+      getAuthAssetUrl("https:evil.example/x.png"),
+      "https://app.invalid",
+    );
+    expect(out.pathname).toBe("/api/proxy-media");
+    expect(new URL(out.searchParams.get("url")!).host).toBe("evil.example");
+    window.localStorage.removeItem("desktop_auth_token");
+  });
+
+  it("loads absolute URLs of this page's origin and our zones directly", () => {
+    signInWithGrant();
+    const origin = window.location.origin;
+    expect(getAuthAssetUrl(`${origin}/og-image.png`)).toBe(
+      `${origin}/og-image.png`,
+    );
+    for (const input of [
+      "https://yap.115jon.com/og-image.png",
+      "https://YAP.115jon.com./og-image.png",
+      "https://cdn.115jon.com/f/a.png",
+    ]) {
+      expect(getAuthAssetUrl(input), input).not.toContain("/api/proxy-media");
+    }
+    window.localStorage.removeItem("desktop_auth_token");
+  });
+
+  it("loads the public API's own absolute URLs directly", () => {
+    signInWithGrant();
+    const api = getPublicApiUrl();
+    const out = getAuthAssetUrl(`${api}/api/emojis/assets/e1.png`);
+    expect(out.startsWith(`${api}/api/emojis/assets/e1.png`)).toBe(true);
+    expect(out).not.toContain("/api/proxy-media");
+    window.localStorage.removeItem("desktop_auth_token");
+  });
+
+  it("leaves data and blob URLs alone", () => {
+    expect(getAuthAssetUrl("data:image/png;base64,AA")).toBe(
+      "data:image/png;base64,AA",
+    );
+    expect(getAuthAssetUrl("blob:http://localhost/1")).toBe(
+      "blob:http://localhost/1",
+    );
   });
 
   it("loads an unwrapped original with the server's signature", () => {
