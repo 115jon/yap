@@ -2,18 +2,20 @@ pragma Singleton
 import QtQuick
 import Yap.Ui
 
-// Each channel's unsent text and reply target while the app runs (the
-// desktop's ChatView `drafts`): the chat page is made anew for each open,
-// so the composer keeps them here and puts them back on return. A send
-// clears the channel's. Signed out, nothing typed by one account waits
-// for the next.
+// Each channel's unsent text and reply target while the app runs
+// (Discord's drafts). ComposerCore keeps the channel's here as it is left
+// and puts it back on return; a send clears it. The phone's chat page can
+// be made anew, so the drafts live outside any composer. Signed out,
+// nothing typed by one account waits for the next.
 QtObject {
     id: root
 
     property var byChannel: ({})
 
-    // `draft` is { text, replyToId, replyToName, replyToText }; an empty
-    // one (no text, no reply) drops the channel's.
+    // `draft` is { text, map, replyToId, replyToName, replyToStyle,
+    // replyToText, replyToFiles } (`map`: the server emoji placeholders,
+    // ComposerCore.customMap). An empty one (no text, no reply) or null
+    // drops the channel's.
     function keep(channelId, draft) {
         if (channelId.length === 0)
             return

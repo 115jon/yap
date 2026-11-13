@@ -15,36 +15,47 @@ import Yap.Ui
 // Shift+Enter adds a line. Autocorrect and suggestions stay on, as in
 // any Android messaging app, and the word being composed counts as typed
 // (Send, `@` suggestions, typing pings) before the keyboard commits it.
-// Each channel keeps its unsent text and reply (Drafts) while the app runs.
+// Each channel keeps its unsent text and reply (ComposerDrafts) while the
+// app runs; signed out, the field and the reply empty.
 Rectangle {
     id: root
 
     property string placeholder: ""
-    // The message being replied to (empty: none).
-    property string replyToId: ""
-    property string replyToName: ""
-    property string replyToText: ""
+    // The message being replied to (empty: none): ComposerCore's.
+    property alias replyToId: core.replyToId
+    property alias replyToName: core.replyToName
+    property alias replyToText: core.replyToText
 
     signal send(string text, string replyToId)
     // An attached picture was tapped (the viewer's images and index).
     signal openImages(var images, int index)
 
+    // The draft, reply, `@` suggestions, typing pings and the send, shared
+    // with the desktop's composer; the keyboard's word in progress counts
+    // (`liveWord`). The touch row, the keyboard, the emoji row, the notices
+    // and the media picker are the phone's.
+    ComposerCore {
+        id: core
+        textField: field
+        mentions: mentionPanel
+        liveWord: true
+        atomicMentions: false
+        onSend: (text, replyToId) => root.send(text, replyToId)
+        onSent: root.emojiOpen = false
+    }
+
     // What is in the field, the keyboard's word in progress included.
-    readonly property string typed: field.text + field.preeditText
-    readonly property bool canSend: typed.trim().length > 0 || Chat.uploadsReady > 0
+    readonly property string typed: core.typed
+    readonly property bool canSend: core.canSend
 
     // ChatPage.startReply: the bar shows and the keyboard comes up.
     function startReply(messageId, author, text) {
-        root.replyToId = messageId
-        root.replyToName = author
-        root.replyToText = text
+        core.startReply(messageId, author, text, 0, "")
         root.focusField()
     }
 
     function cancelReply() {
-        root.replyToId = ""
-        root.replyToName = ""
-        root.replyToText = ""
+        core.cancelReply()
     }
 
     function focusField() {
@@ -53,109 +64,12 @@ Rectangle {
     }
 
     function submit() {
-        // The keyboard's word in progress is not in `text` until committed.
-        Qt.inputMethod.commit()
-        const text = field.text.trim()
-        // Finished uploads go without text too.
-        if (text.length === 0 && Chat.uploadsReady === 0)
-            return
-        root.send(text, root.replyToId)
-        field.clear()
-        root.cancelReply()
-        root.typingSentAt = 0
-        root.emojiOpen = false
+        core.submit()
     }
 
     // Inserts at the caret, after the word in progress (an emoji).
     function insertText(text) {
-        Qt.inputMethod.commit()
-        const at = field.cursorPosition
-        field.insert(at, text)
-        field.cursorPosition = at + text.length
-    }
-
-    // ---- Typing pings -------------------------------------------------------
-
-    // When the last ping went out: the core sends each one, so the composer
-    // keeps to the web's TYPING_THROTTLE (useMessageInput.ts), 3 s.
-    property double typingSentAt: 0
-    function typedSomething() {
-        const now = Date.now()
-        if (!root.puttingDraft && root.typed.trim().length > 0 && now - root.typingSentAt > 3000) {
-            root.typingSentAt = now
-            Chat.sendTyping()
-        }
-    }
-
-    // ---- Mentions -----------------------------------------------------------
-
-    // The `@` token before the caret: where it starts and what follows it.
-    property int mentionStart: -1
-    property string mentionQuery: ""
-    readonly property bool mentionOpen: mentionStart >= 0 && mentionPanel.count > 0
-
-    function updateMention() {
-        const before = field.text.slice(0, field.cursorPosition) + field.preeditText
-        const token = mentionPanel.tokenBefore(before)
-        const asked = root.mentionStart >= 0
-        root.mentionStart = token ? token.start : -1
-        root.mentionQuery = token ? token.query : ""
-        if (token || asked)
-            Chat.queryMentions(root.mentionQuery, token !== null)
-    }
-
-    function insertMention(username) {
-        // Commit the word in progress first: it is part of the query.
-        Qt.inputMethod.commit()
-        const before = field.text.slice(0, field.cursorPosition)
-        const token = mentionPanel.tokenBefore(before)
-        if (!token)
-            return
-        const start = token.start
-        const insert = "@" + username + " "
-        field.remove(start, field.cursorPosition)
-        field.insert(start, insert)
-        field.cursorPosition = start + insert.length
-        Native.haptic(Native.Tick)
-    }
-
-    // ---- Drafts -------------------------------------------------------------
-
-    // The channel the text belongs to: set here, never bound, so it still
-    // names the channel being left when a switch arrives.
-    property string draftChannel: ""
-    property bool puttingDraft: false
-
-    function keepDraft() {
-        Drafts.keep(root.draftChannel, {
-            text: root.typed, replyToId: root.replyToId,
-            replyToName: root.replyToName, replyToText: root.replyToText
-        })
-    }
-
-    function restoreDraft(channelId) {
-        const draft = Drafts.take(channelId)
-        root.draftChannel = channelId
-        root.puttingDraft = true
-        field.text = draft ? draft.text : ""
-        field.cursorPosition = field.length
-        root.replyToId = draft ? draft.replyToId : ""
-        root.replyToName = draft ? draft.replyToName : ""
-        root.replyToText = draft ? draft.replyToText : ""
-        root.puttingDraft = false
-        root.typingSentAt = 0
-    }
-
-    Component.onCompleted: restoreDraft(Nav.activeChannelId)
-    Component.onDestruction: keepDraft()
-    Connections {
-        target: Nav
-        function onActiveChannelIdChanged() {
-            if (Nav.activeChannelId === root.draftChannel)
-                return
-            root.keepDraft()
-            root.restoreDraft(Nav.activeChannelId)
-        }
+        core.insertText(text)
     }
 
     // ---- Notices ------------------------------------------------------------
@@ -247,13 +161,16 @@ Rectangle {
     // messages, a tap puts `@username ` in.
     MentionPanel {
         id: mentionPanel
-        open: root.mentionOpen
+        open: core.mentionOpen
         heading: false
         z: 3
         x: 8
         width: parent.width - 16
         y: -height - 4
-        onPicked: username => root.insertMention(username)
+        onPicked: username => {
+            if (core.insertMention(username))
+                Native.haptic(Native.Tick)
+        }
     }
 
     Column {
@@ -471,15 +388,6 @@ Rectangle {
                         }
                         root.submit()
                     }
-                    onTextChanged: {
-                        root.typedSomething()
-                        root.updateMention()
-                    }
-                    onPreeditTextChanged: {
-                        root.typedSomething()
-                        root.updateMention()
-                    }
-                    onCursorPositionChanged: root.updateMention()
                 }
             }
 

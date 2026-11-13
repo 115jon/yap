@@ -20,14 +20,6 @@ Rectangle {
     property int enterRow: -1
     property double enterAt: 0
     property string editingId
-    property string replyToId
-    property string replyToName
-    // The replied author's display-name style (ReplyIndicator.tsx
-    // UserDisplayName).
-    property string replyToStyle
-    property string replyToText
-    // Its attachments, for "Click to see attachment" when it has no text.
-    property int replyToFiles: 0
     readonly property bool windowActive: Window.active
     // How far the composer's top stands above this view's foot: the floating
     // players keep clear of it (MessageInput.tsx `data-floating-avoid`).
@@ -36,10 +28,7 @@ Rectangle {
     color: Theme.ply0
 
     onWindowActiveChanged: Chat.setFocused(windowActive)
-    Component.onCompleted: {
-        Chat.setFocused(windowActive)
-        root.draftChannel = Nav.activeChannelId
-    }
+    Component.onCompleted: Chat.setFocused(windowActive)
 
     // Landing, following the end, read state and paging: Yap.Ui's
     // ChatScroll, the phone's too. The wheel's eased scroll and the bar are
@@ -79,11 +68,7 @@ Rectangle {
     }
 
     function replyTo(id, author, text, attachments, nameStyle) {
-        root.replyToId = id
-        root.replyToName = author
-        root.replyToStyle = nameStyle ?? ""
-        root.replyToText = text
-        root.replyToFiles = attachments && attachments.length > 0 ? JSON.parse(attachments).length : 0
+        composer.startReply(id, author, text, attachments && attachments.length > 0 ? JSON.parse(attachments).length : 0, nameStyle ?? "")
         composer.focusInput()
     }
 
@@ -290,37 +275,11 @@ Rectangle {
         }
     }
 
-    // Each channel's unsent text and reply target, kept while the app runs
-    // and put back on return (Discord's drafts); a send clears it. The
-    // composer is one instance, so nothing typed for one channel can be
-    // posted in the next.
-    property var drafts: ({})
-    // The channel the composer's text belongs to: set here, never bound,
-    // so it still names the channel being left when the switch arrives.
-    property string draftChannel
-    function keepDraft(channelId) {
-        const draft = composer.takeDraft()
-        if (channelId.length === 0)
-            return
-        if (draft.text.length > 0 || root.replyToId.length > 0) {
-            root.drafts[channelId] = {
-                text: draft.text, map: draft.map, replyToId: root.replyToId,
-                replyToName: root.replyToName, replyToStyle: root.replyToStyle,
-                replyToText: root.replyToText, replyToFiles: root.replyToFiles
-            }
-        } else {
-            delete root.drafts[channelId]
-        }
-    }
-    function restoreDraft(channelId) {
-        const draft = root.drafts[channelId]
-        composer.putDraft(draft ?? null)
-        root.replyToId = draft ? draft.replyToId : ""
-        root.replyToName = draft ? draft.replyToName : ""
-        root.replyToStyle = draft ? draft.replyToStyle : ""
-        root.replyToText = draft ? draft.replyToText : ""
-        root.replyToFiles = draft ? draft.replyToFiles : 0
-    }
+    // Each channel's unsent text and reply target are kept while the app
+    // runs and put back on return (Discord's drafts): the composer's
+    // ComposerCore does it, in ComposerDrafts. The composer is one
+    // instance, so nothing typed for one channel can be posted in the next.
+
     function isInside(item) {
         for (let at = item; at; at = at.parent) {
             if (at === root)
@@ -342,24 +301,10 @@ Rectangle {
             return
         composer.focusInput()
     }
-    // Signed out: nothing typed by one account waits for the next.
-    Connections {
-        target: Session
-        function onPhaseChanged() {
-            if (Session.phase === Session.Ready)
-                return
-            root.drafts = ({})
-            composer.putDraft(null)
-            root.replyToId = ""
-        }
-    }
     Connections {
         target: Nav
         function onActiveChannelIdChanged() {
             root.editingId = ""
-            root.keepDraft(root.draftChannel)
-            root.draftChannel = Nav.activeChannelId
-            root.restoreDraft(Nav.activeChannelId)
             if (Nav.activeChannelId.length > 0)
                 Qt.callLater(root.focusAfterSwitch)
         }
@@ -1080,17 +1025,7 @@ Rectangle {
         voice: root.docked
         readOnly: Chat.readOnly && Nav.dmUsername.length === 0
         enabled: Nav.activeChannelId.length > 0
-        replyToId: root.replyToId
-        replyToName: root.replyToName
-        replyToStyle: root.replyToStyle
-        replyToText: root.replyToText
-        replyToFiles: root.replyToFiles
-        onSend: (text, replyToId) => {
-            Chat.sendMessage(text, replyToId)
-            root.replyToId = ""
-            delete root.drafts[Nav.activeChannelId]
-        }
-        onCancelReply: root.replyToId = ""
+        onSend: (text, replyToId) => Chat.sendMessage(text, replyToId)
         onEditLast: root.startEdit(Chat.lastEditableId())
         // Esc with nothing to close (ChatView's other Esc uses come first).
         onMarkRead: if (root.editingId.length === 0) Chat.markRead()

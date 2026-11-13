@@ -14,8 +14,10 @@ fn main() {
     let files = [
         QmlFile::from("qml/Theme.qml").singleton(true),
         QmlFile::from("qml/ShellState.qml").singleton(true),
+        QmlFile::from("qml/ComposerDrafts.qml").singleton(true),
         QmlFile::from("qml/components/Avatar.qml"),
         QmlFile::from("qml/components/ChatScroll.qml"),
+        QmlFile::from("qml/components/ComposerCore.qml"),
         QmlFile::from("qml/components/CountBadge.qml"),
         QmlFile::from("qml/components/DisplayName.qml"),
         QmlFile::from("qml/components/EaseColor.qml"),
