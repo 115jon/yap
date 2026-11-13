@@ -32,6 +32,11 @@ import {
   type ProfileBoardDeps,
 } from "../../src/services/profile-board-handlers";
 import { recordVoiceSession } from "../../src/services/stats.service";
+import { UNCHECKED_IMAGE_MESSAGE } from "../../src/lib/upload-metadata/strip-upload";
+import {
+  pngChunk,
+  pngWith,
+} from "../../src/lib/__tests__/fixtures/metadata-files";
 
 const db = env.DB as unknown as D1Database;
 const bucket = env.BUCKET as unknown as R2Bucket;
@@ -420,8 +425,18 @@ describe("the Custom widget", () => {
 
 // ── Widget images ──────────────────────────────────────────────────────────
 
+/** A real PNG of at least `size` bytes (padded with a private chunk). */
 function png(size = 64): Uint8Array<ArrayBuffer> {
-  const bytes = new Uint8Array(size);
+  const base = pngWith();
+  const padding = size - base.length - 12;
+  const file =
+    padding > 0 ? pngWith(pngChunk("prVt", new Uint8Array(padding))) : base;
+  return new Uint8Array(file);
+}
+
+/** A PNG signature and nothing a decoder can walk. */
+function brokenPng(): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(64);
   bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   return bytes;
 }
@@ -483,6 +498,19 @@ describe("widget images", () => {
     expect(
       (await upload(owner, png(8 * 1024 * 1024 + 16), "big.png")).status,
     ).toBe(201);
+  });
+
+  it("refuses an image its metadata scan couldn't finish", async () => {
+    const owner = await addUser(`img-${tag()}`);
+    const response = await upload(owner, brokenPng(), "broken.png");
+    expect(response.status).toBe(415);
+    expect(JSON.stringify(await response.json())).toContain(
+      UNCHECKED_IMAGE_MESSAGE,
+    );
+    const stored = await bucket.list({
+      prefix: `profile-assets/widget/${owner}/`,
+    });
+    expect(stored.objects).toEqual([]);
   });
 });
 

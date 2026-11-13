@@ -10,6 +10,14 @@
 // Each logs what it removed by kind ("gps", "camera", ...), never a value,
 // and `metadataResponseFields` gives the routes the same list to return, so
 // a client can say "location removed".
+//
+// Fail-closed rule: a route that only takes images (avatar, banner,
+// nameplate, server icon, profile board, camera background, voice status
+// media) refuses a JPEG, PNG, WebP or GIF the scanner couldn't finish
+// (`uncleanImageError`), since it may still say where it was taken.
+// Attachments are stored and flagged instead (`metadata_unchecked`), and
+// formats the scanner doesn't clean (HEIF, AVIF, TIFF, video, anything
+// else) pass through on every route, flagged when they may carry metadata.
 
 import { logger } from "@/lib/logger";
 
@@ -17,6 +25,7 @@ import {
   applyPatches,
   blobSource,
   bufferSource,
+  type MetadataFormat,
   type MetadataKind,
   type MetadataScan,
   patchingStream,
@@ -66,6 +75,29 @@ export function metadataResponseFields(
   if (scan.stripped.length > 0) fields.metadata_stripped = scan.stripped;
   if (scan.unchecked) fields.metadata_unchecked = scan.unchecked;
   return fields;
+}
+
+/** The formats the scanner cleans, so the ones it can fail on. */
+const CLEANED_IMAGE_FORMATS: ReadonlySet<MetadataFormat> = new Set([
+  "jpeg",
+  "png",
+  "webp",
+  "gif",
+]);
+
+export const UNCHECKED_IMAGE_MESSAGE =
+  "This image couldn't be checked for location data, so it wasn't uploaded. Save it again as a JPEG or PNG and try again.";
+
+/**
+ * The error an image-only route returns (as a 415) instead of storing the
+ * file, or null when the file may be stored: a JPEG, PNG, WebP or GIF
+ * whose scan stopped early (malformed, too large) may still carry its
+ * location.
+ */
+export function uncleanImageError(scan: MetadataScan): string | null {
+  return scan.unchecked && CLEANED_IMAGE_FORMATS.has(scan.format)
+    ? UNCHECKED_IMAGE_MESSAGE
+    : null;
 }
 
 /** Cleans an upload the route holds in memory; `buffer` is changed. */

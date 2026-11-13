@@ -18,6 +18,7 @@ import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
 import {
   metadataResponseFields,
   stripMetadataInPlace,
+  uncleanImageError,
 } from "@/lib/upload-metadata/strip-upload";
 
 interface CameraBackgroundAsset {
@@ -152,6 +153,8 @@ export const POST = async ({ request }: any) => {
     route: "camera-background",
     userId,
   });
+  const unclean = uncleanImageError(metadata);
+  if (unclean) return apiError(unclean, 415, undefined, request);
 
   const id = genId();
   const filename = `${sanitizeBaseName(file.name)}.${validation.ext}`;

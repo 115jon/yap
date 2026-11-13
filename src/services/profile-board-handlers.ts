@@ -18,6 +18,7 @@ import { validateImageBuffer } from "@/lib/image-validation";
 import {
   metadataResponseFields,
   stripMetadataInPlace,
+  uncleanImageError,
 } from "@/lib/upload-metadata/strip-upload";
 import {
   ACTIVITY_RETENTION_DAYS,
@@ -306,6 +307,8 @@ export function createProfileBoardHandlers(deps: ProfileBoardDeps) {
         route: "profile-board",
         userId: session.userId,
       });
+      const unclean = uncleanImageError(metadata);
+      if (unclean) return error(unclean, 415, "IMAGE_UNCHECKED");
       const asset = `${newWidgetId()}${newWidgetId()}.${checked.ext}`;
       await deps.bucket.put(
         `${widgetAssetPrefix(session.userId)}${asset}`,

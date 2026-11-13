@@ -13,6 +13,7 @@ import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
 import {
   metadataResponseFields,
   stripMetadataInPlace,
+  uncleanImageError,
 } from "@/lib/upload-metadata/strip-upload";
 
 // POST /api/servers/icon-upload — upload a server icon to R2
@@ -58,6 +59,8 @@ const POST = async ({ request, params: _params }: any) => {
     route: "server-icon",
     userId,
   });
+  const unclean = uncleanImageError(metadata);
+  if (unclean) return apiError(unclean, 415);
 
   const iconId = genId();
   const key = `server-icons/${iconId}.${validation.ext}`;

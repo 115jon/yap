@@ -13,6 +13,7 @@ import { validateImageBuffer } from "@/lib/image-validation";
 import {
   metadataResponseFields,
   stripMetadataInPlace,
+  uncleanImageError,
 } from "@/lib/upload-metadata/strip-upload";
 import { tooLargeMessage } from "@/lib/upload-limits";
 import { uploadLimitForUser } from "@/services/entitlement.service";
@@ -86,6 +87,8 @@ const POST = async ({ request, params: _params }: any) => {
     route: "avatar",
     userId,
   });
+  const unclean = uncleanImageError(metadata);
+  if (unclean) return apiError(unclean, 415);
 
   const previousUser = await getDB()
     .prepare("SELECT avatar_url FROM users WHERE id = ?")

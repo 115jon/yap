@@ -16,6 +16,10 @@ import {
   write,
   zero,
 } from "@/lib/upload-metadata/scan-state";
+import {
+  UNCHECKED_IMAGE_MESSAGE,
+  uncleanImageError,
+} from "@/lib/upload-metadata/strip-upload";
 
 import {
   BASE_JPEG,
@@ -686,5 +690,30 @@ describe("early exits", () => {
     const cut = file.slice(0, file.length - 10);
     const { scan } = await strip(cut);
     expect(scan.unchecked).toBe("malformed");
+  });
+});
+
+describe("fail-closed rule", () => {
+  const scanOf = (
+    format: MetadataScan["format"],
+    unchecked: MetadataScan["unchecked"],
+  ): MetadataScan => ({ format, stripped: [], unchecked, patches: [] });
+
+  it("refuses a cleaned image format whose scan stopped early", () => {
+    for (const format of ["jpeg", "png", "webp", "gif"] as const) {
+      expect(uncleanImageError(scanOf(format, "malformed"))).toBe(
+        UNCHECKED_IMAGE_MESSAGE,
+      );
+      expect(uncleanImageError(scanOf(format, "too-large"))).toBe(
+        UNCHECKED_IMAGE_MESSAGE,
+      );
+      expect(uncleanImageError(scanOf(format, null))).toBeNull();
+    }
+  });
+
+  it("lets formats it doesn't clean through", () => {
+    expect(uncleanImageError(scanOf("heif", "unsupported-format"))).toBeNull();
+    expect(uncleanImageError(scanOf("video", "malformed"))).toBeNull();
+    expect(uncleanImageError(scanOf("other", null))).toBeNull();
   });
 });

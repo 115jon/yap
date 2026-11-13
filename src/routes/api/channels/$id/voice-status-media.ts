@@ -15,6 +15,7 @@ import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
 import {
   metadataResponseFields,
   stripMetadataInPlace,
+  uncleanImageError,
 } from "@/lib/upload-metadata/strip-upload";
 import { requireChannelAccess } from "@/lib/require-channel-access";
 import { requireChannelPermission } from "@/lib/require-permission";
@@ -193,6 +194,8 @@ export const POST = async ({ request, params }: any) => {
       userId: access.userId,
       channelId,
     });
+    const unclean = uncleanImageError(metadata);
+    if (unclean) return apiError(unclean, 415, undefined, request);
     const bucket = getBucket();
 
     await bucket.put(fileKey, buffer, {
