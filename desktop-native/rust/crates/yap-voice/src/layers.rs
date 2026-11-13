@@ -86,6 +86,25 @@ impl RenderSize {
             self
         }
     }
+
+    /// This size, scaled down (aspect kept) until it needs no more than
+    /// `quality`'s layer; a size within it already is returned as it is.
+    pub fn within(self, quality: Quality) -> Self {
+        let most = match quality {
+            Quality::Low => LOW_LAYER_MAX_WIDTH,
+            Quality::Medium => MEDIUM_LAYER_MAX_WIDTH,
+            Quality::High => return self,
+        };
+        let need = self.need();
+        if need <= most {
+            return self;
+        }
+        let scale = |n: u32| u32::try_from(u64::from(n) * u64::from(most) / u64::from(need)).unwrap_or(0);
+        Self {
+            width: scale(self.width),
+            height: scale(self.height),
+        }
+    }
 }
 
 /// The layer a camera needs for the largest size it is rendered at; one
@@ -153,6 +172,28 @@ mod tests {
     fn single_layer_should_have_no_rid() {
         assert_eq!(select_rid(Quality::High, &["f".to_owned()]), None);
         assert_eq!(select_rid(Quality::Low, &[]), None);
+    }
+
+    #[test]
+    fn within_should_cap_a_size_at_the_layer_and_keep_smaller_ones() {
+        let big = RenderSize {
+            width: 1280,
+            height: 720,
+        };
+        assert_eq!(big.within(Quality::High), big);
+        assert_eq!(resolve_quality(Some(big.within(Quality::Medium))), Quality::Medium);
+        assert_eq!(resolve_quality(Some(big.within(Quality::Low))), Quality::Low);
+        let small = RenderSize {
+            width: 320,
+            height: 180,
+        };
+        assert_eq!(small.within(Quality::Low), small);
+        // A tall box is capped by what its height needs.
+        let tall = RenderSize {
+            width: 300,
+            height: 600,
+        };
+        assert_eq!(resolve_quality(Some(tall.within(Quality::Medium))), Quality::Medium);
     }
 
     #[test]

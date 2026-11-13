@@ -120,6 +120,7 @@ pub mod background;
 #[cfg(feature = "store")]
 pub mod call;
 mod camera;
+pub mod demand;
 mod driver;
 pub mod dsp;
 mod engine;
