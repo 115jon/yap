@@ -28,7 +28,8 @@ import { checkRateLimitDO, RATE_LIMITS } from "@/lib/rate-limit";
 import {
   metadataResponseFields,
   stripMetadataInPlace,
-  uncleanImageError,
+  UNCHECKED_UPLOAD_CODE,
+  uncheckedUploadError,
 } from "@/lib/upload-metadata/strip-upload";
 import { tooLargeMessage } from "@/lib/upload-limits";
 import { uploadLimitForUser } from "@/services/entitlement.service";
@@ -133,8 +134,8 @@ const POST = async ({ request }: any) => {
     route: kindValue,
     userId,
   });
-  const unclean = uncleanImageError(metadata);
-  if (unclean) return apiError(unclean, 415);
+  const unclean = uncheckedUploadError(metadata);
+  if (unclean) return apiError(unclean, 415, UNCHECKED_UPLOAD_CODE);
 
   const key = getProfileAssetStorageKey(kindValue, userId, validation.ext);
   const url = getProfileAssetUrl(kindValue, userId, validation.ext);

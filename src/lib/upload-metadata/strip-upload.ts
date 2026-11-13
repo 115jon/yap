@@ -11,13 +11,18 @@
 // and `metadataResponseFields` gives the routes the same list to return, so
 // a client can say "location removed".
 //
-// Fail-closed rule: a route that only takes images (avatar, banner,
-// nameplate, server icon, profile board, camera background, voice status
-// media) refuses a JPEG, PNG, WebP or GIF the scanner couldn't finish
-// (`uncleanImageError`), since it may still say where it was taken.
-// Attachments are stored and flagged instead (`metadata_unchecked`), and
-// formats the scanner doesn't clean (HEIF, AVIF, TIFF, video, anything
-// else) pass through on every route, flagged when they may carry metadata.
+// Fail-closed rule, by route class:
+//
+//   public display (avatar, banner, nameplate, server icon, profile board,
+//   camera background, voice status media): any scan that comes back
+//   `unchecked` is refused with a 415 (`uncheckedUploadError`), whatever the
+//   format and reason: a HEIF/AVIF still the scanner can't clean, a JPEG it
+//   couldn't finish, a video with a GPS or subtitle track.
+//   attachments (form and chunked): stored, with `metadata_unchecked` set
+//   in the response and the log.
+//
+// Formats with no metadata the scanner knows of ("other": WebM, Ogg, zip,
+// ...) pass on every route.
 
 import { logger } from "@/lib/logger";
 
@@ -77,27 +82,55 @@ export function metadataResponseFields(
   return fields;
 }
 
-/** The formats the scanner cleans, so the ones it can fail on. */
-const CLEANED_IMAGE_FORMATS: ReadonlySet<MetadataFormat> = new Set([
+/** Formats a public route takes as a still image. */
+const IMAGE_FORMATS: ReadonlySet<MetadataFormat> = new Set([
   "jpeg",
   "png",
   "webp",
   "gif",
+  "heif",
+  "avif",
+  "tiff",
+  "jxl",
 ]);
+
+/** The `code` a public route sends with its 415. */
+export const UNCHECKED_UPLOAD_CODE = "METADATA_UNCHECKED";
 
 export const UNCHECKED_IMAGE_MESSAGE =
   "This image couldn't be checked for location data, so it wasn't uploaded. Save it again as a JPEG or PNG and try again.";
+export const UNSUPPORTED_IMAGE_MESSAGE =
+  "This image format can't be checked for location data. Use JPEG, PNG, WebP or GIF.";
+export const UNSUPPORTED_FILE_MESSAGE =
+  "This file format can't be checked for location data. Use JPEG, PNG, WebP, GIF or MP4.";
+export const UNCHECKED_VIDEO_MESSAGE =
+  "This video couldn't be checked for location data, so it wasn't uploaded. Export it again as an MP4 and try again.";
+export const LOCATION_TRACK_MESSAGE =
+  "This video has a track that may record where it was filmed (GPS, sensor or subtitle data), so it wasn't uploaded. Export it without that track and try again.";
 
 /**
- * The error an image-only route returns (as a 415) instead of storing the
- * file, or null when the file may be stored: a JPEG, PNG, WebP or GIF
- * whose scan stopped early (malformed, too large) may still carry its
- * location.
+ * The error a public-display route returns (as a 415, code
+ * UNCHECKED_UPLOAD_CODE) instead of storing the file, or null when the file
+ * may be stored. Any `unchecked` scan is refused: the file may still say
+ * where it was taken.
  */
-export function uncleanImageError(scan: MetadataScan): string | null {
-  return scan.unchecked && CLEANED_IMAGE_FORMATS.has(scan.format)
-    ? UNCHECKED_IMAGE_MESSAGE
-    : null;
+export function uncheckedUploadError(scan: MetadataScan): string | null {
+  switch (scan.unchecked) {
+    case null:
+      return null;
+    case "unsupported-format":
+      return IMAGE_FORMATS.has(scan.format)
+        ? UNSUPPORTED_IMAGE_MESSAGE
+        : UNSUPPORTED_FILE_MESSAGE;
+    case "timed-metadata":
+    case "vendor-data":
+      return LOCATION_TRACK_MESSAGE;
+    case "malformed":
+    case "too-large":
+      return IMAGE_FORMATS.has(scan.format)
+        ? UNCHECKED_IMAGE_MESSAGE
+        : UNCHECKED_VIDEO_MESSAGE;
+  }
 }
 
 /** Cleans an upload the route holds in memory; `buffer` is changed. */

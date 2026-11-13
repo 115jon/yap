@@ -32,10 +32,16 @@ import {
   type ProfileBoardDeps,
 } from "../../src/services/profile-board-handlers";
 import { recordVoiceSession } from "../../src/services/stats.service";
-import { UNCHECKED_IMAGE_MESSAGE } from "../../src/lib/upload-metadata/strip-upload";
 import {
+  UNCHECKED_IMAGE_MESSAGE,
+  UNCHECKED_UPLOAD_CODE,
+} from "../../src/lib/upload-metadata/strip-upload";
+import {
+  box,
+  concat,
   pngChunk,
   pngWith,
+  text,
 } from "../../src/lib/__tests__/fixtures/metadata-files";
 
 const db = env.DB as unknown as D1Database;
@@ -500,12 +506,21 @@ describe("widget images", () => {
     ).toBe(201);
   });
 
-  it("refuses an image its metadata scan couldn't finish", async () => {
+  it("refuses an image its metadata scan couldn't finish, and AVIF", async () => {
     const owner = await addUser(`img-${tag()}`);
     const response = await upload(owner, brokenPng(), "broken.png");
     expect(response.status).toBe(415);
-    expect(JSON.stringify(await response.json())).toContain(
-      UNCHECKED_IMAGE_MESSAGE,
+    expect(await response.json()).toMatchObject({
+      error: UNCHECKED_IMAGE_MESSAGE,
+      code: UNCHECKED_UPLOAD_CODE,
+    });
+    // The board takes no AVIF at all (refused before the scan).
+    const avif = concat(
+      box("ftyp", text("avif"), [0, 0, 0, 0], text("mif1"), text("avif")),
+      box("meta", [0, 0, 0, 0]),
+    );
+    expect((await upload(owner, new Uint8Array(avif), "a.avif")).status).toBe(
+      415,
     );
     const stored = await bucket.list({
       prefix: `profile-assets/widget/${owner}/`,

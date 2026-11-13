@@ -17,8 +17,12 @@ import {
   zero,
 } from "@/lib/upload-metadata/scan-state";
 import {
+  LOCATION_TRACK_MESSAGE,
   UNCHECKED_IMAGE_MESSAGE,
-  uncleanImageError,
+  UNCHECKED_VIDEO_MESSAGE,
+  uncheckedUploadError,
+  UNSUPPORTED_FILE_MESSAGE,
+  UNSUPPORTED_IMAGE_MESSAGE,
 } from "@/lib/upload-metadata/strip-upload";
 
 import {
@@ -764,22 +768,59 @@ describe("fail-closed rule", () => {
     unchecked: MetadataScan["unchecked"],
   ): MetadataScan => ({ format, stripped: [], unchecked, patches: [] });
 
-  it("refuses a cleaned image format whose scan stopped early", () => {
+  it("refuses an image whose scan stopped early", () => {
     for (const format of ["jpeg", "png", "webp", "gif"] as const) {
-      expect(uncleanImageError(scanOf(format, "malformed"))).toBe(
+      expect(uncheckedUploadError(scanOf(format, "malformed"))).toBe(
         UNCHECKED_IMAGE_MESSAGE,
       );
-      expect(uncleanImageError(scanOf(format, "too-large"))).toBe(
+      expect(uncheckedUploadError(scanOf(format, "too-large"))).toBe(
         UNCHECKED_IMAGE_MESSAGE,
       );
-      expect(uncleanImageError(scanOf(format, null))).toBeNull();
+      expect(uncheckedUploadError(scanOf(format, null))).toBeNull();
     }
   });
 
-  it("lets formats it doesn't clean through", () => {
-    expect(uncleanImageError(scanOf("heif", "unsupported-format"))).toBeNull();
-    expect(uncleanImageError(scanOf("video", "malformed"))).toBeNull();
-    expect(uncleanImageError(scanOf("other", null))).toBeNull();
+  it("refuses an image format it can't clean", () => {
+    for (const format of ["heif", "avif", "tiff", "jxl"] as const) {
+      expect(uncheckedUploadError(scanOf(format, "unsupported-format"))).toBe(
+        UNSUPPORTED_IMAGE_MESSAGE,
+      );
+    }
+    expect(uncheckedUploadError(scanOf("isobmff", "unsupported-format"))).toBe(
+      UNSUPPORTED_FILE_MESSAGE,
+    );
+  });
+
+  it("refuses a video it couldn't finish or that has a location track", () => {
+    expect(uncheckedUploadError(scanOf("video", "malformed"))).toBe(
+      UNCHECKED_VIDEO_MESSAGE,
+    );
+    expect(uncheckedUploadError(scanOf("video", "too-large"))).toBe(
+      UNCHECKED_VIDEO_MESSAGE,
+    );
+    expect(uncheckedUploadError(scanOf("video", "timed-metadata"))).toBe(
+      LOCATION_TRACK_MESSAGE,
+    );
+    expect(uncheckedUploadError(scanOf("video", "vendor-data"))).toBe(
+      LOCATION_TRACK_MESSAGE,
+    );
+    expect(uncheckedUploadError(scanOf("video", null))).toBeNull();
+  });
+
+  it("lets a format with nothing to check through", () => {
+    expect(uncheckedUploadError(scanOf("other", null))).toBeNull();
+  });
+
+  it("refuses a real AVIF and HEIC header", async () => {
+    for (const major of ["avif", "mif1", "heic"]) {
+      const file = concat(
+        box("ftyp", text(major), [0, 0, 0, 0], text("mif1"), text(major)),
+        box("meta", u32(0)),
+      );
+      const scan = await scanUploadMetadata(bufferSource(file));
+      expect(scan.unchecked).toBe("unsupported-format");
+      expect(uncheckedUploadError(scan)).toBe(UNSUPPORTED_IMAGE_MESSAGE);
+    }
   });
 });
 

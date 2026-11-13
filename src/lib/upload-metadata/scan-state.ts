@@ -14,8 +14,16 @@ export type UncheckedReason =
   | "unsupported-format"
   | "too-large"
   | "malformed"
-  /** A video track of samples that may hold location (GoPro GPMF, camm). */
-  | "timed-metadata";
+  /**
+   * A video track whose samples may hold location: GoPro GPMF, camm, DJI
+   * djmd, a timed-metadata (`meta`) track, a subtitle or text track.
+   */
+  | "timed-metadata"
+  /**
+   * A dashcam's own GPS store: a Novatek `gps ` atom, or data left in a
+   * top-level `free`/`skip` box.
+   */
+  | "vendor-data";
 
 /** What a format scanner collects as it walks a file. */
 export interface ScanState {
