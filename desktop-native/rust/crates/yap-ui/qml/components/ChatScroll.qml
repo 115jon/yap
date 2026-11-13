@@ -37,6 +37,10 @@ Item {
     property real endSlack: 12
     // The divider lands this far down, under the banner over the list.
     property real dividerGap: 32
+    // How much of the list's top lies under something opaque (the phone's
+    // floating bar, strips and banner): rows there are not on screen, so
+    // the top row is the first one below it.
+    property real topInset: 0
     // Older and newer pages load once the top or end is this close
     // (HISTORY_FETCH_PX).
     property int historyFetchPx: 800
@@ -98,11 +102,11 @@ Item {
         }
     }
 
-    // The first message row on screen (the list's header or a day rule may
-    // stand above it).
+    // The first message row on screen, below `topInset` (the list's header
+    // or a day rule may stand above it).
     function topRow() {
         const v = root.view
-        for (let y = v.contentY + 1; y < v.contentY + v.height; y += 8) {
+        for (let y = v.contentY + root.topInset + 1; y < v.contentY + v.height; y += 8) {
             const row = v.itemAt(v.width / 2, y)
             if (row && row.messageId)
                 return row
@@ -241,9 +245,11 @@ Item {
             return false
         v.positionViewAtIndex(index, ListView.Beginning)
         // Just under the banner, not behind it (unless the list ends here).
+        // An early divider stops at the first row, which a top margin keeps
+        // clear of what floats over the list.
         root.followEnd = root.isNearEnd()
         if (!root.followEnd)
-            v.contentY = Math.max(v.originY, v.contentY - root.dividerGap)
+            v.contentY = Math.max(v.originY - v.topMargin, v.contentY - root.dividerGap)
         return true
     }
 

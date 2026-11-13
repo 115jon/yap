@@ -77,6 +77,9 @@ Item {
         endSlack: 56
         // Under the floating bar, the strips and the banner.
         dividerGap: root.listTop + banner.height + 8
+        // Rows behind the bar, its band and the strips are not on screen
+        // (what counts as seen starts below them).
+        topInset: root.listTop - bar.lift
         historyFetchPx: 600
         landTries: 6
         landInterval: 60
