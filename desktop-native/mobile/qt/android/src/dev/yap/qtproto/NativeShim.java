@@ -725,9 +725,26 @@ public final class NativeShim {
             return false;
         }
         if (Build.VERSION.SDK_INT >= 29) {
+            // Published: until IS_PENDING is 0 the entry is hidden from the
+            // gallery (and removed by the system after a week), so a failure
+            // here is a failed save.
             ContentValues done = new ContentValues();
             done.put(MediaStore.MediaColumns.IS_PENDING, 0);
-            resolver.update(uri, done, null, null);
+            boolean published;
+            try {
+                published = resolver.update(uri, done, null, null) > 0;
+            } catch (RuntimeException e) {
+                Log.w("yap-native", "could not publish a picture in the gallery", e);
+                published = false;
+            }
+            if (!published) {
+                try {
+                    resolver.delete(uri, null, null);
+                } catch (RuntimeException ignored) {
+                    // Already gone.
+                }
+                return false;
+            }
         }
         return true;
     }
