@@ -1,7 +1,8 @@
 # Installer (Velopack)
 
 The native client ships as one static `Yap.exe` and replaces the Tauri
-desktop app (`desktop/`) under its name: "Yap". Until 0.2.21 it was "Yap
+desktop app (`desktop/`, now on the `archive/tauri-desktop` branch) under
+its name: "Yap". Until 0.2.21 it was "Yap
 Native" (`YapNative.exe`, pack id `YapNative.App`) and ran beside the Tauri
 app; see "Rename from Yap Native" for what moved. Its installer is
 [Velopack](https://docs.velopack.io): `vpk pack` wraps the exe into a native
@@ -772,8 +773,8 @@ someone with Owner must first assign the Signer role to that user.
   Cargo.toml's), `channel` (`beta`, or `win` before 4.0.0), `notes`, and
   `dry_run`. Tags `desktop-native-v<version>`, `make_latest=false`.
 
-`desktop-release.yml` (the Tauri app) is no longer called by
-release-please; it stays, dispatch only, until `desktop/` is removed.
+`desktop-release.yml` (the Tauri app) and `desktop/` were removed from
+`main`; both are on the `archive/tauri-desktop` branch.
 
 | job       | runner        | token                                | does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | --------- | ------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

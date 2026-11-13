@@ -26,8 +26,8 @@ when someone reaches for it.
 
 ## Positioning
 
-A self-owned hangout for one friend group, with a Windows desktop client built
-on Tauri and a custom CEF/Chromium runtime, OBS-derived game capture, and
+A self-owned hangout for one friend group, with a native Windows desktop client
+(a Rust core and a Qt/QML UI), OBS-derived game capture, and
 Cloudflare-backed realtime (PartyTracks/SFU, Durable Objects). It is not a
 general community platform and does not need to scale its interface for
 thousands of members.
@@ -36,9 +36,9 @@ thousands of members.
 
 - **First surface: the Windows desktop app.** It runs beside a game for
   hours, so frame cost, memory, idle CPU and GPU use matter more than anywhere
-  else. The desktop shell loads the same React UI as the web app.
+  else.
 - The web app (TanStack Start on Cloudflare Workers) is the second surface;
-  Tauri mobile and phone web are secondary.
+  the Qt Android app and phone web are secondary.
 - Typical session: join a voice channel, alt-tab into a game, come back to
   glance at chat, react, share a screen or start listen-together, leave hours
   later. Glanceability and low-friction voice controls matter more than

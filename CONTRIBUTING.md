@@ -56,8 +56,8 @@ outside `desktop-native/mobile/qt/`.
 ## Review expectations
 
 One pull request should contain one logical change. Changes to installer
-behavior, release workflows, signing configuration, authentication, CEF runtime
-provenance, policies, or game capture require explicit maintainer review before
+behavior, release workflows, signing configuration, authentication, Qt and libwebrtc
+toolchain provenance, policies, or game capture require explicit maintainer review before
 merge. Do not commit directly to `main` or bypass review for release-sensitive
 files.
 

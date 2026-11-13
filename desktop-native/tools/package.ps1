@@ -45,7 +45,7 @@ param(
     [string]$SigningAccount = $(if ($env:ARTIFACT_SIGNING_ACCOUNT) { $env:ARTIFACT_SIGNING_ACCOUNT } else { "jon115signing" }),
     [string]$SigningProfile = $(if ($env:ARTIFACT_SIGNING_PROFILE) { $env:ARTIFACT_SIGNING_PROFILE } else { "publictrust" }),
     # The game capture hook's OBS-signed files (docs/INSTALLER.md): fetched
-    # and verified by the desktop app's script, into a cache folder that is
+    # and verified by fetch-obs-signed-hook.ps1, into a cache folder that is
     # reused across runs. -ObsZip uses an OBS release zip already on disk.
     [string]$ObsCacheDir = $(if ($env:YAP_OBS_CACHE_DIR) { $env:YAP_OBS_CACHE_DIR } else { Join-Path $env:TEMP "ralph-obs-signed-hook" }),
     [string]$ObsZip,

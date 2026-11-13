@@ -19,8 +19,8 @@ a Compose baseline that has since been archived:
   ([browse it](https://github.com/115jon/yap/tree/archive/compose-baseline/desktop-native/mobile)).
   The comparison and measurements below stay as history.
 
-The Expo app (`apps/mobile`) is untouched and keeps shipping. Nothing here
-is built by its workflows or changes its package, signing or store listing.
+The Expo app (`apps/mobile`) was removed from `main` and is archived on the
+`archive/expo-mobile` branch; paths under `apps/mobile` below point there.
 
 ## Recommendation
 
