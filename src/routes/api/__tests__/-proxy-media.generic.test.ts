@@ -16,6 +16,21 @@ function proxyUrl(params: Record<string, string>): string {
   return `https://yap.example/api/proxy-media?${new URLSearchParams(params)}`;
 }
 
+/** `url`, `exp` (an hour ahead) and `sig`, as the server signs them. */
+function signed(
+  target: string,
+  withKey: Buffer = key,
+): { url: string; exp: string; sig: string } {
+  const exp = Math.floor(Date.now() / 1000) + 3600;
+  return {
+    url: target,
+    exp: String(exp),
+    sig: signMediaUrl(target, withKey, exp),
+  };
+}
+
+const allow = async () => null;
+
 /** Answers DoH lookups (public unless the name starts with "internal.") and media. */
 function stubNetwork(media: Record<string, () => Response>) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -55,10 +70,16 @@ describe("authorizeGenericMediaRequest", () => {
   const target = "https://cdn.example.com/og.png";
   const noBearer = async () => null;
 
+  it("refuses a signature without exp (none is permanent)", async () => {
+    const { sig } = signed(target);
+    const request = new Request(proxyUrl({ url: target, sig }));
+    expect(
+      await authorizeGenericMediaRequest(request, target, key, noBearer),
+    ).toBeNull();
+  });
+
   it("accepts the server's signature for exactly that URL", async () => {
-    const request = new Request(
-      proxyUrl({ url: target, sig: signMediaUrl(target, key) }),
-    );
+    const request = new Request(proxyUrl(signed(target)));
     expect(
       await authorizeGenericMediaRequest(request, target, key, noBearer),
     ).toEqual({ via: "signature" });
@@ -102,9 +123,7 @@ describe("authorizeGenericMediaRequest", () => {
 
   it("refuses a signature made for another URL", async () => {
     const other = "http://169.254.169.254/latest/meta-data";
-    const request = new Request(
-      proxyUrl({ url: other, sig: signMediaUrl(target, key) }),
-    );
+    const request = new Request(proxyUrl({ ...signed(target), url: other }));
     expect(
       await authorizeGenericMediaRequest(request, other, key, noBearer),
     ).toBeNull();
@@ -175,7 +194,7 @@ describe("handleProxyMedia", () => {
       [target]: () =>
         new Response(PNG, { headers: { "Content-Type": "image/png" } }),
     });
-    const inner = proxyUrl({ url: target, sig: signMediaUrl(target, key) });
+    const inner = proxyUrl(signed(target));
     const response = await handleProxyMedia(
       new Request(
         proxyUrl({ url: inner, sourceUrl: "https://news.example/post" }),
@@ -189,7 +208,7 @@ describe("handleProxyMedia", () => {
   it("unwraps only one level", async () => {
     stubNetwork({});
     const target = "https://cdn.example.com/og.png";
-    const inner = proxyUrl({ url: target, sig: signMediaUrl(target, key) });
+    const inner = proxyUrl(signed(target));
     const twice = proxyUrl({ url: proxyUrl({ url: inner }) });
     const response = await handleProxyMedia(new Request(twice), true);
     expect(response.status).toBeGreaterThanOrEqual(400);
@@ -201,13 +220,13 @@ describe("handleProxyMedia", () => {
       [target]: () =>
         new Response(PNG, { headers: { "Content-Type": "image/png" } }),
     });
-    const stale = signMediaUrl(
+    const stale = signed(
       target,
       mediaProxyKey({ MEDIA_PROXY_SECRET: "old-secret" })!,
     );
     const pass = issueMediaPass(key, "user-1").value;
     const response = await handleProxyMedia(
-      new Request(proxyUrl({ url: target, sig: stale }), {
+      new Request(proxyUrl(stale), {
         headers: { Cookie: `${MEDIA_PASS_COOKIE}=${pass}` },
       }),
       true,
@@ -232,7 +251,7 @@ describe("handleProxyMedia", () => {
         new Response(PNG, { headers: { "Content-Type": "image/png" } }),
     });
     const response = await handleProxyMedia(
-      new Request(proxyUrl({ url: target, sig: signMediaUrl(target, key) })),
+      new Request(proxyUrl(signed(target))),
       true,
     );
     expect(response.status).toBe(200);
@@ -247,7 +266,7 @@ describe("handleProxyMedia", () => {
         new Response(PNG, { headers: { "Content-Type": "image/png" } }),
     });
     const response = await handleProxyMedia(
-      new Request(proxyUrl({ url: target, sig: signMediaUrl(target, key) })),
+      new Request(proxyUrl(signed(target))),
       true,
     );
     expect(response.status).toBe(403);
@@ -260,7 +279,7 @@ describe("handleProxyMedia", () => {
     const target = "https://yap.example/api/avatars/u.png";
     stubNetwork({});
     const response = await handleProxyMedia(
-      new Request(proxyUrl({ url: target, sig: signMediaUrl(target, key) })),
+      new Request(proxyUrl(signed(target))),
       true,
     );
     expect(response.status).toBe(400);
@@ -282,16 +301,19 @@ describe("handleProxyMedia", () => {
     ).toBe(true);
   });
 
-  it("limits unsigned requests per user, not signed ones", async () => {
+  it("limits unsigned requests per user and signed ones per IP", async () => {
     const target = "https://cdn.example.com/og.png";
-    stubNetwork({
+    const fetchMock = stubNetwork({
       [target]: () =>
         new Response(PNG, { headers: { "Content-Type": "image/png" } }),
     });
-    const limited = vi.fn(async (userId: string) =>
-      userId === "user-1"
-        ? Response.json({ error: "Rate limit exceeded" }, { status: 429 })
-        : null,
+    const tooMany = () =>
+      Response.json({ error: "Rate limit exceeded" }, { status: 429 });
+    const user = vi.fn(async (userId: string) =>
+      userId === "user-1" ? tooMany() : null,
+    );
+    const signedIp = vi.fn(async (ip: string) =>
+      ip === "203.0.113.9" ? tooMany() : null,
     );
     const pass = issueMediaPass(key, "user-1").value;
     const unsigned = await handleProxyMedia(
@@ -300,29 +322,47 @@ describe("handleProxyMedia", () => {
       }),
       true,
       false,
-      limited,
+      { user, signedIp },
     );
     expect(unsigned.status).toBe(429);
-    expect(limited).toHaveBeenCalledWith("user-1");
+    expect(user).toHaveBeenCalledWith("user-1");
+    expect(signedIp).not.toHaveBeenCalled();
 
-    limited.mockClear();
-    const signed = await handleProxyMedia(
-      new Request(proxyUrl({ url: target, sig: signMediaUrl(target, key) })),
+    user.mockClear();
+    const fromBusyIp = await handleProxyMedia(
+      new Request(proxyUrl(signed(target)), {
+        headers: { "CF-Connecting-IP": "203.0.113.9" },
+      }),
       true,
       false,
-      limited,
+      { user, signedIp },
     );
-    expect(signed.status).toBe(200);
-    expect(limited).not.toHaveBeenCalled();
+    expect(fromBusyIp.status).toBe(429);
+    expect(signedIp).toHaveBeenCalledWith("203.0.113.9");
+    expect(user).not.toHaveBeenCalled();
+    // Refused before anything was fetched upstream.
+    expect(
+      fetchMock.mock.calls.some(([input]) => String(input) === target),
+    ).toBe(false);
+
+    const fromOtherIp = await handleProxyMedia(
+      new Request(proxyUrl(signed(target)), {
+        headers: { "CF-Connecting-IP": "198.51.100.7" },
+      }),
+      true,
+      false,
+      { user, signedIp },
+    );
+    expect(fromOtherIp.status).toBe(200);
+    expect(signedIp).toHaveBeenLastCalledWith("198.51.100.7");
   });
 
-  it("refuses non-default ports on unsigned requests only", async () => {
+  it("refuses non-default ports, signed or not", async () => {
     const target = "https://cdn.example.com:8443/og.png";
-    stubNetwork({
+    const fetchMock = stubNetwork({
       [target]: () =>
         new Response(PNG, { headers: { "Content-Type": "image/png" } }),
     });
-    const allow = async () => null;
     const pass = issueMediaPass(key, "user-1").value;
     const unsigned = await handleProxyMedia(
       new Request(proxyUrl({ url: target }), {
@@ -330,16 +370,47 @@ describe("handleProxyMedia", () => {
       }),
       true,
       false,
-      allow,
+      { user: allow, signedIp: allow },
     );
     expect(unsigned.status).toBe(400);
-    const signed = await handleProxyMedia(
-      new Request(proxyUrl({ url: target, sig: signMediaUrl(target, key) })),
+    const signedRequest = await handleProxyMedia(
+      new Request(proxyUrl(signed(target))),
       true,
       false,
-      allow,
+      { user: allow, signedIp: allow },
     );
-    expect(signed.status).toBe(200);
+    expect(signedRequest.status).toBe(400);
+    expect(
+      fetchMock.mock.calls.some(([input]) => String(input) === target),
+    ).toBe(false);
+  });
+
+  it("holds every redirect hop to the default ports", async () => {
+    const target = "https://cdn.example.com/og.png";
+    const hop = "https://cdn.example.com:8080/og.png";
+    const fetchMock = stubNetwork({
+      [target]: () =>
+        new Response(null, { status: 302, headers: { Location: hop } }),
+      [hop]: () =>
+        new Response(PNG, { headers: { "Content-Type": "image/png" } }),
+    });
+    const pass = issueMediaPass(key, "user-1").value;
+    for (const request of [
+      new Request(proxyUrl({ url: target }), {
+        headers: { Cookie: `${MEDIA_PASS_COOKIE}=${pass}` },
+      }),
+      new Request(proxyUrl(signed(target))),
+    ]) {
+      const response = await handleProxyMedia(request, true, false, {
+        user: allow,
+        signedIp: allow,
+      });
+      expect(response.status).toBe(403);
+      expect(await response.text()).toContain("port");
+    }
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === hop)).toBe(
+      false,
+    );
   });
 
   it("refuses our own zones and the trailing-dot form of its host", async () => {
@@ -354,10 +425,10 @@ describe("handleProxyMedia", () => {
       "https://other.example/API/Proxy-Media",
     ]) {
       const response = await handleProxyMedia(
-        new Request(proxyUrl({ url: target, sig: signMediaUrl(target, key) })),
+        new Request(proxyUrl(signed(target))),
         true,
         false,
-        async () => null,
+        { user: allow, signedIp: allow },
       );
       expect(response.status, target).toBeGreaterThanOrEqual(400);
       expect(response.status, target).toBeLessThan(500);
@@ -374,7 +445,7 @@ describe("handleProxyMedia", () => {
     const target = "https://cdn.example.com/og.png";
     stubNetwork({});
     const response = await handleProxyMedia(
-      new Request(proxyUrl({ url: target, sig: signMediaUrl(target, key) })),
+      new Request(proxyUrl(signed(target))),
       true,
     );
     expect(response.status).toBe(401);

@@ -6,6 +6,9 @@ import {
   mediaPassCookie,
   mediaProxyKey,
   readMediaPassCookie,
+  SERVER_URL_SIGNATURE_ROUND_SECONDS,
+  SERVER_URL_SIGNATURE_TTL_SECONDS,
+  signatureExpiry,
   signMediaUrl,
   verifyMediaPass,
   verifyMediaUrlSignature,
@@ -35,64 +38,70 @@ describe("media proxy key", () => {
 });
 
 describe("URL signatures", () => {
-  it("verifies the URL it was made for", () => {
-    const sig = signMediaUrl(target, key);
+  const now = Date.UTC(2026, 10, 13, 12);
+  const exp = now / 1000 + 3600;
+  const verify = (
+    url: string,
+    sig: string | null,
+    withKey = key,
+    expires: string | null = String(exp),
+    at = now,
+  ) => verifyMediaUrlSignature(url, sig, withKey, expires, at);
+
+  it("verifies the URL it was made for, until `exp`", () => {
+    const sig = signMediaUrl(target, key, exp);
     expect(sig).toMatch(/^[A-Za-z0-9_-]{22}$/);
-    expect(verifyMediaUrlSignature(target, sig, key)).toBe(true);
+    expect(verify(target, sig)).toBe(true);
+    expect(verify(target, sig, key, String(exp), exp * 1000 - 1)).toBe(true);
+    expect(verify(target, sig, key, String(exp), exp * 1000)).toBe(false);
   });
 
-  it("is stable per URL (cacheable)", () => {
-    expect(signMediaUrl(target, key)).toBe(signMediaUrl(target, key));
+  it("is the same for the same URL and expiry (cacheable)", () => {
+    expect(signMediaUrl(target, key, exp)).toBe(signMediaUrl(target, key, exp));
   });
 
-  it("refuses another URL, another key, and malformed signatures", () => {
-    const sig = signMediaUrl(target, key);
-    expect(verifyMediaUrlSignature(`${target}&x=1`, sig, key)).toBe(false);
-    expect(verifyMediaUrlSignature("http://169.254.169.254/", sig, key)).toBe(
-      false,
-    );
+  it("is refused without `exp`: no signature is permanent", () => {
+    const sig = signMediaUrl(target, key, exp);
+    expect(verify(target, sig, key, null)).toBe(false);
+  });
+
+  it("refuses another URL, key or expiry, and malformed signatures", () => {
+    const sig = signMediaUrl(target, key, exp);
+    expect(verify(`${target}&x=1`, sig)).toBe(false);
+    expect(verify("http://169.254.169.254/", sig)).toBe(false);
     const otherKey = mediaProxyKey({ MEDIA_PROXY_SECRET: "other" })!;
-    expect(verifyMediaUrlSignature(target, sig, otherKey)).toBe(false);
-    expect(verifyMediaUrlSignature(target, null, key)).toBe(false);
-    expect(verifyMediaUrlSignature(target, "", key)).toBe(false);
-    expect(verifyMediaUrlSignature(target, sig.slice(0, 10), key)).toBe(false);
-    expect(verifyMediaUrlSignature(target, `${sig}AA`, key)).toBe(false);
-    expect(verifyMediaUrlSignature(target, "!!!!", key)).toBe(false);
+    expect(verify(target, sig, otherKey)).toBe(false);
+    expect(verify(target, sig, key, String(exp + 1))).toBe(false);
+    expect(verify(target, null)).toBe(false);
+    expect(verify(target, "")).toBe(false);
+    expect(verify(target, sig.slice(0, 10))).toBe(false);
+    expect(verify(target, `${sig}AA`)).toBe(false);
+    expect(verify(target, "!!!!")).toBe(false);
     const flipped = `${sig[0] === "A" ? "B" : "A"}${sig.slice(1)}`;
-    expect(verifyMediaUrlSignature(target, flipped, key)).toBe(false);
+    expect(verify(target, flipped)).toBe(false);
+    for (const bad of ["", "-1", "1e9", "12.5", "x"]) {
+      expect(verify(target, sig, key, bad)).toBe(false);
+    }
   });
 });
 
-describe("expiring URL signatures", () => {
-  const now = Date.UTC(2026, 10, 13, 12);
-  const exp = now / 1000 + 3600;
-
-  it("verify until `exp`, and only with it", () => {
-    const sig = signMediaUrl(target, key, exp);
-    expect(sig).not.toBe(signMediaUrl(target, key));
-    expect(verifyMediaUrlSignature(target, sig, key, String(exp), now)).toBe(
-      true,
-    );
+describe("signatureExpiry", () => {
+  it("rounds up to the boundary, at least the TTL away", () => {
+    const day = 86_400;
+    const now = Date.UTC(2026, 10, 13, 12);
+    const exp = signatureExpiry(7 * day, day, now);
+    expect(exp % day).toBe(0);
+    expect(exp - now / 1000).toBeGreaterThanOrEqual(7 * day);
+    expect(exp - now / 1000).toBeLessThan(8 * day);
+    // Same all day long: the URL stays cacheable.
+    expect(signatureExpiry(7 * day, day, now + 3_600_000)).toBe(exp);
     expect(
-      verifyMediaUrlSignature(target, sig, key, String(exp), exp * 1000),
-    ).toBe(false);
-    expect(verifyMediaUrlSignature(target, sig, key, null, now)).toBe(false);
-    expect(
-      verifyMediaUrlSignature(target, sig, key, String(exp + 1), now),
-    ).toBe(false);
-    // A stable signature does not pass as an expiring one.
-    expect(
-      verifyMediaUrlSignature(
-        target,
-        signMediaUrl(target, key),
-        key,
-        String(exp),
+      signatureExpiry(
+        SERVER_URL_SIGNATURE_TTL_SECONDS,
+        SERVER_URL_SIGNATURE_ROUND_SECONDS,
         now,
       ),
-    ).toBe(false);
-    for (const bad of ["", "-1", "1e9", "12.5", "x"]) {
-      expect(verifyMediaUrlSignature(target, sig, key, bad, now)).toBe(false);
-    }
+    ).toBe(exp);
   });
 });
 

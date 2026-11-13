@@ -2,18 +2,18 @@
 //
 // The proxy fetches any public http(s) image or video, so it must not be an
 // open proxy. A request is let through when it carries one of:
-//   - `sig`: an HMAC over the exact target URL, minted by this server when it
-//     builds a payload. Two kinds:
-//       - stable (no `exp`) for URLs the server read from data it fetched
-//         itself: link embeds, GIF provider results, Listen Together search
-//         and resolve artwork, radio station favicons. Stable per URL, so
-//         browsers and the edge cache keep the response. Anyone who can make
-//         the server read a page can get one for a URL that page names, so a
-//         stable sig only limits the proxy to URLs that appeared in some
-//         payload; the per-IP limit still applies to them.
-//       - expiring (`exp`, seconds since the epoch, inside the MAC) for URLs
-//         a client handed in, such as a Listen Together track's artwork, so a
-//         participant cannot mint a lasting open-proxy link.
+//   - `sig` with `exp`: an HMAC over the exact target URL and its expiry
+//     (seconds since the epoch), minted by this server when it builds a
+//     payload. Every signature expires, so a URL anyone got the server to
+//     sign (a link whose preview names it) stops working on its own:
+//       - URLs the server read from data it fetched itself (link embeds, GIF
+//         provider results, Listen Together search and resolve artwork,
+//         radio station favicons, stored avatars) last a week, rounded up
+//         to the day, so a URL stays the same (and cacheable) for a day.
+//         Payloads are rewritten when they leave the server, so clients
+//         always get a fresh one.
+//       - URLs a client handed in, such as a Listen Together track's
+//         artwork, last a day, rounded up to the hour.
 //   - the media pass cookie (POST /api/proxy-media): a signed value bound to
 //     the user and valid for an hour, which the web app renews (a session
 //     check) while signed in, so URLs it builds itself need no sig.
@@ -25,7 +25,6 @@
 // A namespace import, for the same reason as origin.ts (server only).
 import * as nodeCrypto from "node:crypto";
 
-const URL_SIGNATURE_DOMAIN = "yap/media-proxy/url/v1";
 const EXPIRING_URL_SIGNATURE_DOMAIN = "yap/media-proxy/url-exp/v1";
 const PASS_DOMAIN = "yap/media-proxy/pass/v2";
 const KEY_DOMAIN = "yap/media-proxy/key/v1";
@@ -36,8 +35,27 @@ const PASS_VERSION = "mp2";
 export const MEDIA_PASS_COOKIE = "yap_media_pass";
 /** An hour: renewing it checks the session, so sign-out ends it soon. */
 export const MEDIA_PASS_TTL_SECONDS = 60 * 60;
+/** How long a signature over a URL the server read itself lasts. */
+export const SERVER_URL_SIGNATURE_TTL_SECONDS = 7 * 24 * 60 * 60;
+/** Server-read signatures expire on a day boundary (cacheable URLs). */
+export const SERVER_URL_SIGNATURE_ROUND_SECONDS = 24 * 60 * 60;
 /** How long a signature over a client-supplied URL lasts. */
 export const CLIENT_URL_SIGNATURE_TTL_SECONDS = 24 * 60 * 60;
+/** Client-supplied signatures expire on an hour boundary. */
+export const CLIENT_URL_SIGNATURE_ROUND_SECONDS = 60 * 60;
+
+/**
+ * The `exp` for a signature made at `nowMs` that lasts at least
+ * `ttlSeconds`, rounded up to a multiple of `roundSeconds`.
+ */
+export function signatureExpiry(
+  ttlSeconds: number,
+  roundSeconds: number,
+  nowMs: number = Date.now(),
+): number {
+  const nowSeconds = Math.floor(nowMs / 1000);
+  return Math.ceil((nowSeconds + ttlSeconds) / roundSeconds) * roundSeconds;
+}
 
 export interface MediaProxySecretEnv {
   MEDIA_PROXY_SECRET?: string;
@@ -73,46 +91,44 @@ function decodeBase64Url(value: string): Buffer | null {
   return Buffer.from(value, "base64url");
 }
 
-function urlMac(targetUrl: string, key: Buffer, expiresAt?: number): Buffer {
-  const digest =
-    expiresAt === undefined
-      ? mac(key, URL_SIGNATURE_DOMAIN, targetUrl)
-      : mac(key, EXPIRING_URL_SIGNATURE_DOMAIN, `${expiresAt}\n${targetUrl}`);
-  return digest.subarray(0, SIGNATURE_BYTES);
+function urlMac(targetUrl: string, key: Buffer, expiresAt: number): Buffer {
+  return mac(
+    key,
+    EXPIRING_URL_SIGNATURE_DOMAIN,
+    `${expiresAt}\n${targetUrl}`,
+  ).subarray(0, SIGNATURE_BYTES);
 }
 
 /**
- * The `sig` for `targetUrl` (the exact string sent as `url=`). With
- * `expiresAt` (seconds since the epoch, sent as `exp=`) it lasts until then.
+ * The `sig` for `targetUrl` (the exact string sent as `url=`), valid until
+ * `expiresAt` (seconds since the epoch, sent as `exp=`).
  */
 export function signMediaUrl(
   targetUrl: string,
   key: Buffer,
-  expiresAt?: number,
+  expiresAt: number,
 ): string {
   return urlMac(targetUrl, key, expiresAt).toString("base64url");
 }
 
 /**
- * True when `signature` is ours for `targetUrl` and, with `expires` (the
- * `exp` parameter), that time has not passed yet.
+ * True when `signature` is ours for `targetUrl` and `expires` (the `exp`
+ * parameter) has not passed yet. A signature without `exp` is refused:
+ * none is minted without one.
  */
 export function verifyMediaUrlSignature(
   targetUrl: string,
   signature: string | null,
   key: Buffer,
-  expires: string | null = null,
+  expires: string | null,
   nowMs: number = Date.now(),
 ): boolean {
-  if (!signature) return false;
+  if (!signature || expires === null) return false;
   const given = decodeBase64Url(signature);
   if (!given || given.length !== SIGNATURE_BYTES) return false;
-  let expiresAt: number | undefined;
-  if (expires !== null) {
-    if (!/^\d{1,12}$/.test(expires)) return false;
-    expiresAt = Number(expires);
-    if (Math.floor(nowMs / 1000) >= expiresAt) return false;
-  }
+  if (!/^\d{1,12}$/.test(expires)) return false;
+  const expiresAt = Number(expires);
+  if (Math.floor(nowMs / 1000) >= expiresAt) return false;
   return equalBytes(given, urlMac(targetUrl, key, expiresAt));
 }
 

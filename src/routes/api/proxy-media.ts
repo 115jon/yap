@@ -29,7 +29,7 @@ import {
   verifyMediaPass,
   verifyMediaUrlSignature,
 } from "@/server/media-proxy/signing";
-import { createDohResolver } from "@/server/media-proxy/ssrf";
+import { createDohResolver, MEDIA_PORTS } from "@/server/media-proxy/ssrf";
 import { extractAndProcessEmbeds } from "@/services/embed-fetcher";
 
 const log = clog("proxy-media");
@@ -1222,13 +1222,25 @@ export async function authorizeGenericMediaRequest(
 
 /**
  * Per-user limit for URLs a client chose (pass or bearer), on top of the
- * per-IP one: global, through the RATE_LIMITER Durable Object. Signed URLs
- * are limited to what payloads named and skip it. Fails open, like the
- * other users of the limiter.
+ * per-IP one: global, through the RATE_LIMITER Durable Object. Fails open,
+ * like the other users of the limiter.
  */
 export const PROXY_MEDIA_USER_RATE_LIMIT = { limit: 600, windowMs: 60_000 };
 
+/**
+ * Signed requests carry no user, so they get a per-IP bucket of their own
+ * (global, through the same Durable Object), counted only when the request
+ * reaches upstream: edge cache hits cost nothing. Without it a signature
+ * anyone can get (a link whose preview names the URL) would make the proxy
+ * fetch for them limited only by the per-isolate IP limit.
+ */
+export const PROXY_MEDIA_SIGNED_IP_RATE_LIMIT = {
+  limit: 600,
+  windowMs: 60_000,
+};
+
 export type UserRateCheck = (userId: string) => Promise<Response | null>;
+export type SignedIpRateCheck = (clientIp: string) => Promise<Response | null>;
 
 const checkProxyUserRate: UserRateCheck = async (userId) => {
   try {
@@ -1242,8 +1254,22 @@ const checkProxyUserRate: UserRateCheck = async (userId) => {
   }
 };
 
-/** Ports a URL a client chose may name: the default http(s) ones. */
-const UNSIGNED_PORTS = new Set(["", "80", "443"]);
+const checkProxySignedIpRate: SignedIpRateCheck = async (clientIp) => {
+  try {
+    return await checkRateLimitDO(
+      `ip:${clientIp}`,
+      "proxy-media-signed",
+      PROXY_MEDIA_SIGNED_IP_RATE_LIMIT,
+    );
+  } catch {
+    return null;
+  }
+};
+
+export interface ProxyMediaRateChecks {
+  user?: UserRateCheck;
+  signedIp?: SignedIpRateCheck;
+}
 
 function hostKey(url: URL): string {
   return `${url.hostname.replace(/\.+$/, "")}:${url.port}`;
@@ -1260,8 +1286,10 @@ export async function handleProxyMedia(
   request: Request,
   includeBody: boolean,
   nested = false,
-  checkUserRate: UserRateCheck = checkProxyUserRate,
+  rateChecks: ProxyMediaRateChecks = {},
 ): Promise<Response> {
+  const checkUserRate = rateChecks.user ?? checkProxyUserRate;
+  const checkSignedIpRate = rateChecks.signedIp ?? checkProxySignedIpRate;
   const requestUrl = new URL(request.url);
   const target = requestUrl.searchParams.get("url");
   if (!target) return new Response("Missing media URL", { status: 400 });
@@ -1282,7 +1310,7 @@ export async function handleProxyMedia(
       new Request(inner, { method: request.method, headers: request.headers }),
       includeBody,
       true,
-      checkUserRate,
+      rateChecks,
     );
   }
 
@@ -1313,13 +1341,20 @@ export async function handleProxyMedia(
     return new Response("Unsupported media URL", { status: 400 });
   }
 
-  if (authorization.via !== "signature") {
-    if (!UNSIGNED_PORTS.has(targetUrl.port)) {
-      return new Response("Unsupported media port", {
-        status: 400,
-        headers: { "Cache-Control": "no-store" },
-      });
-    }
+  // The default http(s) ports only, signed or not; redirect hops are held
+  // to the same rule (allowedPorts below).
+  if (!MEDIA_PORTS.has(targetUrl.port)) {
+    return new Response("Unsupported media port", {
+      status: 400,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+
+  let beforeUpstream: (() => Promise<Response | null>) | undefined;
+  if (authorization.via === "signature") {
+    const clientIp = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    beforeUpstream = () => checkSignedIpRate(clientIp);
+  } else {
     const limited = await checkUserRate(authorization.userId);
     if (limited) return limited;
   }
@@ -1329,6 +1364,8 @@ export async function handleProxyMedia(
     ownHost: requestUrl.host,
     cache: getDefaultCache(),
     waitUntil: getWaitUntil(),
+    allowedPorts: MEDIA_PORTS,
+    beforeUpstream,
   });
 }
 
@@ -1355,7 +1392,13 @@ const POST = async ({ request }: { request: Request }) => {
   );
   if (!key) return apiError("Media proxy is not configured", 503);
   const pass = issueMediaPass(key, auth.userId);
-  const response = apiSuccess({ expiresAt: pass.expiresAt }, 200, request);
+  // `expiresIn` (seconds) lets the client time its renewal on its own
+  // clock; `expiresAt` stays for clients that read it.
+  const response = apiSuccess(
+    { expiresAt: pass.expiresAt, expiresIn: MEDIA_PASS_TTL_SECONDS },
+    200,
+    request,
+  );
   response.headers.set(
     "Set-Cookie",
     mediaPassCookie(pass.value, MEDIA_PASS_TTL_SECONDS, {

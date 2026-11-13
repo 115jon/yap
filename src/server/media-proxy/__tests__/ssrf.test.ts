@@ -92,6 +92,8 @@ describe("checkMediaTarget", () => {
     ["javascript:alert(1)", "scheme"],
     ["https://user:pass@example.com/a.png", "credentials"],
     ["https://example.com:22/a.png", "port"],
+    ["https://example.com:8080/a.png", "port"],
+    ["https://example.com:8443/a.png", "port"],
     ["http://localhost/a.png", "hostname"],
     ["http://app.localhost/a.png", "hostname"],
     ["http://intranet/a.png", "hostname"],
@@ -109,6 +111,20 @@ describe("checkMediaTarget", () => {
   ])("refuses %s (%s)", async (url, reason) => {
     const result = await checkMediaTarget(url, publicResolver);
     expect(result).toEqual({ ok: false, reason });
+  });
+
+  it("takes the caller's port policy", async () => {
+    const url = "https://example.com:8443/a.png";
+    expect(
+      (await checkMediaTarget(url, publicResolver, new Set(["", "8443"]))).ok,
+    ).toBe(true);
+    expect(
+      await checkMediaTarget(
+        "https://example.com/a.png",
+        publicResolver,
+        new Set(["8443"]),
+      ),
+    ).toEqual({ ok: false, reason: "port" });
   });
 
   it("refuses a name that resolves to a private address", async () => {

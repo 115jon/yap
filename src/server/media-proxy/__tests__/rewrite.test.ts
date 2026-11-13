@@ -5,6 +5,8 @@ import {
   proxiedMediaUrl,
   proxyArtworkUrlsForDelivery,
   proxyAttachmentUrlForDelivery,
+  resignedMediaUrl,
+  resignRoomMediaForDelivery,
   rewriteEmbedsMedia,
   rewriteGifItemMedia,
   unwrapProxiedMediaUrl,
@@ -26,6 +28,7 @@ function parse(url: string | null) {
     path: parsed.pathname,
     target: parsed.searchParams.get("url"),
     sig: parsed.searchParams.get("sig"),
+    exp: parsed.searchParams.get("exp"),
     sourceUrl: parsed.searchParams.get("sourceUrl"),
   };
 }
@@ -39,8 +42,28 @@ describe("proxiedMediaUrl", () => {
       path: "/api/proxy-media",
       target: raw,
     });
-    expect(verifyMediaUrlSignature(raw, out.sig, key)).toBe(true);
-    expect(out.sig).toBe(signMediaUrl(raw, key));
+    expect(verifyMediaUrlSignature(raw, out.sig, key, out.exp)).toBe(true);
+    expect(out.sig).toBe(signMediaUrl(raw, key, Number(out.exp)));
+  });
+
+  it("signs for a week, rounded up to the day, and never without exp", () => {
+    const now = Date.UTC(2026, 10, 13, 12, 30);
+    const raw = "https://cdn.example.com/og.png";
+    const out = parse(proxiedMediaUrl(raw, ctx, null, "media", { nowMs: now }));
+    expect(Number(out.exp)).toBe(Date.UTC(2026, 10, 21) / 1000);
+    expect(verifyMediaUrlSignature(raw, out.sig, key, out.exp, now)).toBe(true);
+    expect(verifyMediaUrlSignature(raw, out.sig, key, null, now)).toBe(false);
+    // The same URL all day (cacheable), a new one the next.
+    const later = proxiedMediaUrl(raw, ctx, null, "media", {
+      nowMs: now + 10 * 3_600_000,
+    });
+    expect(later).toBe(
+      proxiedMediaUrl(raw, ctx, null, "media", { nowMs: now }),
+    );
+    const tomorrow = parse(
+      proxiedMediaUrl(raw, ctx, null, "media", { nowMs: now + 86_400_000 }),
+    );
+    expect(Number(tomorrow.exp)).toBe(Number(out.exp) + 86_400);
   });
 
   it("keeps social CDN media on the allowlisted form with the post", () => {
@@ -113,15 +136,19 @@ describe("proxiedMediaUrl", () => {
       expect(out.target, JSON.stringify(value)).toBe(
         "https://evil.example/a.png",
       );
-      expect(verifyMediaUrlSignature(out.target!, out.sig, key)).toBe(true);
+      expect(verifyMediaUrlSignature(out.target!, out.sig, key, out.exp)).toBe(
+        true,
+      );
     }
   });
 
   it("moves a proxy URL we signed on another host onto ours", () => {
     const raw = "https://cdn.example.com/og.png";
+    const exp = Math.floor(Date.now() / 1000) + 3600;
     const query = new URLSearchParams({
       url: raw,
-      sig: signMediaUrl(raw, key),
+      exp: String(exp),
+      sig: signMediaUrl(raw, key, exp),
     });
     const ours = `https://alias.example/api/proxy-media?${query}`;
     expect(proxiedMediaUrl(ours, ctx)).toBe(
@@ -235,8 +262,13 @@ describe("rewriteEmbedsMedia", () => {
     for (const url of media) {
       expect(url, url).toMatch(/^https:\/\/yap\.example\/api\/proxy-media\?/);
     }
-    expect(parse(out.thumbnail!.url).sig).toBe(
-      signMediaUrl("https://cdn.news.example/og.jpg", key),
+    const thumbnail = parse(out.thumbnail!.url);
+    expect(thumbnail.sig).toBe(
+      signMediaUrl(
+        "https://cdn.news.example/og.jpg",
+        key,
+        Number(thumbnail.exp),
+      ),
     );
     // A quoted tweet's media keep the quoted post as their source.
     expect(parse(out.referencedTweet!.media![0].url).sourceUrl).toBe(
@@ -321,7 +353,8 @@ describe("GIF results", () => {
     };
     const out = rewriteGifItemMedia(item, ctx);
     expect(parse(out.preview.url).target).toBe(item.preview.url);
-    expect(parse(out.send.url).sig).toBe(signMediaUrl(item.send.url, key));
+    const send = parse(out.send.url);
+    expect(send.sig).toBe(signMediaUrl(item.send.url, key, Number(send.exp)));
     expect(out.sourceUrl).toBe(item.sourceUrl);
     expect(out.preview.width).toBe(1);
     expect(unwrapProxiedMediaUrl(out.send.url, { keepSocialForm: true })).toBe(
@@ -350,8 +383,8 @@ describe("client-supplied URLs", () => {
     expect(Number(exp)).toBe(Date.UTC(2026, 10, 14, 13) / 1000);
     const sig = out.searchParams.get("sig");
     expect(verifyMediaUrlSignature(raw, sig, key, exp, now)).toBe(true);
-    // Not a stable signature: it cannot be replayed without `exp`.
-    expect(verifyMediaUrlSignature(raw, sig, key)).toBe(false);
+    // It cannot be replayed without `exp`.
+    expect(verifyMediaUrlSignature(raw, sig, key, null, now)).toBe(false);
     expect(
       verifyMediaUrlSignature(raw, sig, key, exp, Number(exp) * 1000),
     ).toBe(false);
@@ -397,9 +430,73 @@ describe("Listen Together artwork", () => {
       "https://i.ytimg.com/vi/abc/hqdefault.jpg",
     );
     expect(out.tracks[1].artworkUrl).toBeNull();
-    expect(parse(out.collection.artworkUrl).sig).toBe(
-      signMediaUrl("https://i.scdn.co/image/xyz", key),
+    const artwork = parse(out.collection.artworkUrl);
+    expect(artwork.sig).toBe(
+      signMediaUrl("https://i.scdn.co/image/xyz", key, Number(artwork.exp)),
     );
     expect(out.collection.url).toBe("https://open.spotify.com/x");
+  });
+});
+
+describe("room media re-signed on delivery", () => {
+  const now = Date.UTC(2026, 10, 13, 12, 30);
+
+  it("gives a stored URL we signed, even an expired one, a fresh signature", () => {
+    const raw = "https://i.ytimg.com/vi/a/0.jpg";
+    const old = proxiedMediaUrl(raw, ctx, null, "media", {
+      nowMs: now - 30 * 86_400_000,
+    })!;
+    const out = parse(resignedMediaUrl(old, ctx, now));
+    expect(out.target).toBe(raw);
+    expect(Number(out.exp)).toBeGreaterThan(now / 1000);
+    expect(verifyMediaUrlSignature(raw, out.sig, key, out.exp, now)).toBe(true);
+  });
+
+  it("never signs a URL we did not sign", () => {
+    for (const value of [
+      "https://yap.example/api/proxy-media?url=https%3A%2F%2Fevil.example%2Fa.png",
+      "https://yap.example/api/proxy-media?url=https%3A%2F%2Fevil.example%2Fa.png&exp=9999999999&sig=AAAAAAAAAAAAAAAAAAAAAA",
+      "https://evil.example/a.png",
+      "file://evil.example/a.png",
+    ]) {
+      expect(resignedMediaUrl(value, ctx, now)).toBe(value);
+    }
+  });
+
+  it("re-signs artwork and avatars anywhere in a snapshot", () => {
+    const raw = "https://i.ytimg.com/vi/a/0.jpg";
+    const old = proxiedClientMediaUrl(raw, ctx, now - 3 * 86_400_000)!;
+    const snapshot = {
+      queue: [
+        {
+          track: { artworkUrl: old, title: "a" },
+          requester: { avatarUrl: old },
+        },
+      ],
+      recentlyPlayed: [{ entry: { track: { artworkUrl: null } } }],
+    };
+    const out = resignRoomMediaForDelivery(snapshot, ctx, now);
+    for (const value of [
+      out.queue[0]!.track.artworkUrl,
+      out.queue[0]!.requester.avatarUrl,
+    ]) {
+      const parsed = parse(value);
+      expect(
+        verifyMediaUrlSignature(raw, parsed.sig, key, parsed.exp, now),
+      ).toBe(true);
+    }
+    expect(out.recentlyPlayed[0]!.entry.track.artworkUrl).toBeNull();
+    expect(out.queue[0]!.track.title).toBe("a");
+  });
+});
+
+describe("ports", () => {
+  it("drops media on a port the proxy refuses", () => {
+    expect(proxiedMediaUrl("https://cdn.example.com:8443/a.png", ctx)).toBe(
+      null,
+    );
+    expect(
+      parse(proxiedMediaUrl("https://cdn.example.com:443/a.png", ctx)).target,
+    ).toBe("https://cdn.example.com/a.png");
   });
 });

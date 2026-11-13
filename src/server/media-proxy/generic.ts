@@ -4,7 +4,7 @@
 // type allowlist and a size cap, streamed (never buffered), and kept in the
 // Cloudflare cache. Callers authorize the request first (route file).
 
-import { checkMediaTarget, type ResolveHost } from "./ssrf";
+import { checkMediaTarget, MEDIA_PORTS, type ResolveHost } from "./ssrf";
 
 export type MediaKind = "image" | "video" | "audio";
 
@@ -182,6 +182,16 @@ export interface GenericProxyDeps {
   waitUntil?: (promise: Promise<unknown>) => void;
   /** This Worker's host: never fetched (no loops through ourselves). */
   ownHost?: string;
+  /**
+   * The ports the request may reach, checked on the first URL and on every
+   * redirect hop (MEDIA_PORTS when absent).
+   */
+  allowedPorts?: ReadonlySet<string>;
+  /**
+   * Runs before anything is fetched upstream (after a cache miss); a
+   * Response it returns (a rate limit) is served instead.
+   */
+  beforeUpstream?: () => Promise<Response | null>;
 }
 
 export type UpstreamResult =
@@ -210,7 +220,8 @@ export function isSelfTarget(url: URL, ownHost?: string): boolean {
 
 /**
  * Fetches `target` with redirects followed by hand (at most
- * `maxRedirects`), every hop re-checked against the SSRF guard. Only our own
+ * `maxRedirects`), every hop re-checked against the SSRF guard and the
+ * request's port policy (`deps.allowedPorts`). Only our own
  * headers go upstream: no cookies, no client headers, no Referer.
  */
 export async function fetchPublicMedia(
@@ -225,7 +236,11 @@ export async function fetchPublicMedia(
     if (isSelfTarget(current, deps.ownHost)) {
       return { ok: false, status: 403, message: "Blocked media URL (self)" };
     }
-    const check = await checkMediaTarget(current, deps.resolve);
+    const check = await checkMediaTarget(
+      current,
+      deps.resolve,
+      deps.allowedPorts ?? MEDIA_PORTS,
+    );
     if (!check.ok) {
       return {
         ok: false,
@@ -349,6 +364,11 @@ export async function serveGenericMedia(
     } catch {
       // A cache failure is a miss.
     }
+  }
+
+  if (deps.beforeUpstream) {
+    const refused = await deps.beforeUpstream();
+    if (refused) return refused;
   }
 
   const upstreamResult = await fetchPublicMedia(

@@ -22,9 +22,14 @@ import {
 import { isOwnZoneHostname, classifyMediaUrl } from "@/lib/media-url-class";
 import type { EmbedInfo } from "@/lib/types";
 import { currentPublicOrigin } from "./origin";
+import { MEDIA_PORTS } from "./ssrf";
 import {
+  CLIENT_URL_SIGNATURE_ROUND_SECONDS,
   CLIENT_URL_SIGNATURE_TTL_SECONDS,
   mediaProxyKey,
+  SERVER_URL_SIGNATURE_ROUND_SECONDS,
+  SERVER_URL_SIGNATURE_TTL_SECONDS,
+  signatureExpiry,
   signMediaUrl,
   verifyMediaUrlSignature,
 } from "./signing";
@@ -93,11 +98,15 @@ export function getMediaRewriteContext(): MediaRewriteContext {
 
 export interface ProxiedMediaUrlOptions {
   /**
-   * For a URL a client handed in (not one the server read from data it
-   * fetched): the signature expires this many seconds from now, rounded up
-   * to the hour so the URL stays cacheable for a while.
+   * How long the signature lasts. Defaults to a week, for URLs the server
+   * read from data it fetched; a URL a client handed in gets a day.
    */
   expiresInSeconds?: number;
+  /**
+   * The expiry is rounded up to a multiple of this (a day by default), so
+   * the URL stays the same, and cacheable, for that long.
+   */
+  roundToSeconds?: number;
   /** Tests only. */
   nowMs?: number;
 }
@@ -175,17 +184,21 @@ export function proxiedMediaUrl(
   if (field === "video" && url.pathname.toLowerCase().endsWith(".m3u8")) {
     return target;
   }
+  // The proxy serves the default http(s) ports only: a signed URL for
+  // another one could only answer 400.
+  if (!MEDIA_PORTS.has(url.port)) return null;
 
+  // Every signature expires (signing.ts): a week for what the server read,
+  // a day for what a client handed in. Payloads are rewritten as they
+  // leave the server, so clients always get a fresh one.
+  const expiresAt = signatureExpiry(
+    options.expiresInSeconds ?? SERVER_URL_SIGNATURE_TTL_SECONDS,
+    options.roundToSeconds ?? SERVER_URL_SIGNATURE_ROUND_SECONDS,
+    options.nowMs,
+  );
   const params = new URLSearchParams({ url: target });
-  if (options.expiresInSeconds !== undefined) {
-    const nowSeconds = Math.floor((options.nowMs ?? Date.now()) / 1000);
-    const expiresAt =
-      Math.ceil((nowSeconds + options.expiresInSeconds) / 3600) * 3600;
-    params.set("exp", String(expiresAt));
-    params.set("sig", signMediaUrl(target, ctx.key, expiresAt));
-  } else {
-    params.set("sig", signMediaUrl(target, ctx.key));
-  }
+  params.set("exp", String(expiresAt));
+  params.set("sig", signMediaUrl(target, ctx.key, expiresAt));
   return `${ctx.origin}${PROXY_MEDIA_PATH}?${params}`;
 }
 
@@ -200,6 +213,7 @@ export function proxiedClientMediaUrl(
 ): string | null {
   return proxiedMediaUrl(raw, ctx, null, "media", {
     expiresInSeconds: CLIENT_URL_SIGNATURE_TTL_SECONDS,
+    roundToSeconds: CLIENT_URL_SIGNATURE_ROUND_SECONDS,
     nowMs,
   });
 }
@@ -310,7 +324,7 @@ export function proxyAvatarUrlForDelivery<T>(avatarUrl: T): T | null {
 /**
  * A Listen Together response with every `artworkUrl` (YouTube and Spotify
  * thumbnails) proxied, or null when no client may load it. The server read
- * these from the providers, so their signatures do not expire. Clients
+ * these from the providers, so their signatures last a week. Clients
  * enqueue tracks as they got them, so the room's queue carries the proxied
  * URL to everyone in it.
  */
@@ -328,6 +342,72 @@ export function proxyArtworkUrlsForDelivery<T>(
       field === "artworkUrl" && typeof fieldValue === "string"
         ? proxiedMediaUrl(fieldValue, ctx)
         : proxyArtworkUrlsForDelivery(fieldValue, ctx);
+  }
+  return next as T;
+}
+
+/**
+ * A proxy URL this server signed at some point (its signature valid for
+ * its own `exp`, whether or not that has passed), signed again from now;
+ * any other value as it is. For URLs kept in room state (a Listen Together
+ * queue) and sent again later: the payload is rewritten as it leaves, like
+ * embeds, so a stored signature that has since expired still loads. A
+ * value we never signed is never signed here.
+ */
+export function resignedMediaUrl<T>(
+  value: T,
+  ctx: MediaRewriteContext,
+  nowMs?: number,
+): T {
+  if (typeof value !== "string" || !ctx.key) return value;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return value;
+  }
+  if (!isProxyMediaUrl(url) || url.searchParams.has("sourceUrl")) return value;
+  const inner = url.searchParams.get("url");
+  const exp = url.searchParams.get("exp");
+  if (
+    !inner ||
+    !exp ||
+    // Epoch 0: the MAC over `exp` is checked, its expiry is not.
+    !verifyMediaUrlSignature(
+      inner,
+      url.searchParams.get("sig"),
+      ctx.key,
+      exp,
+      0,
+    )
+  ) {
+    return value;
+  }
+  return (proxiedMediaUrl(inner, ctx, null, "media", { nowMs }) ?? value) as T;
+}
+
+/**
+ * `value` with every `artworkUrl` and `avatarUrl` inside it re-signed
+ * ([`resignedMediaUrl`]): a Listen Together snapshot as it leaves the room.
+ */
+export function resignRoomMediaForDelivery<T>(
+  value: T,
+  ctx: MediaRewriteContext = getMediaRewriteContext(),
+  nowMs?: number,
+): T {
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      resignRoomMediaForDelivery(item, ctx, nowMs),
+    ) as T;
+  }
+  if (!value || typeof value !== "object") return value;
+  const next: Record<string, unknown> = {};
+  for (const [field, fieldValue] of Object.entries(value)) {
+    next[field] =
+      (field === "artworkUrl" || field === "avatarUrl") &&
+      typeof fieldValue === "string"
+        ? resignedMediaUrl(fieldValue, ctx, nowMs)
+        : resignRoomMediaForDelivery(fieldValue, ctx, nowMs);
   }
   return next as T;
 }

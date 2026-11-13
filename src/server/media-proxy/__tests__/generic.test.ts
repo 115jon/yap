@@ -156,6 +156,50 @@ describe("fetchPublicMedia", () => {
     expect(fake.calls).toHaveLength(1);
   });
 
+  it("holds every redirect hop to the port policy", async () => {
+    for (const location of [
+      "https://img.example:8443/a.png",
+      "http://img.example:8080/a.png",
+      "https://img.example:22/a.png",
+    ]) {
+      const { fake, deps: d } = deps({
+        "https://short.example/x": () =>
+          new Response(null, { status: 302, headers: { Location: location } }),
+        [location]: () =>
+          new Response(PNG, { headers: { "Content-Type": "image/png" } }),
+      });
+      const result = await fetchPublicMedia(
+        new URL("https://short.example/x"),
+        { method: "GET" },
+        d,
+      );
+      expect(result, location).toMatchObject({
+        ok: false,
+        status: 403,
+        message: "Blocked media URL (port)",
+      });
+      expect(fake.calls.map((call) => call.url)).toEqual([
+        "https://short.example/x",
+      ]);
+    }
+  });
+
+  it("checks hops against the ports it is given", async () => {
+    const location = "https://img.example:8443/a.png";
+    const { deps: d } = deps({
+      "https://short.example/x": () =>
+        new Response(null, { status: 302, headers: { Location: location } }),
+      [location]: () =>
+        new Response(PNG, { headers: { "Content-Type": "image/png" } }),
+    });
+    const result = await fetchPublicMedia(
+      new URL("https://short.example/x"),
+      { method: "GET" },
+      { ...d, allowedPorts: new Set(["", "8443"]) },
+    );
+    expect(result.ok && result.url.href).toBe(location);
+  });
+
   it("refuses a redirect to a name that resolves privately", async () => {
     const { fake, deps: d } = deps({
       "https://img.example/a.png": () =>
@@ -475,6 +519,7 @@ describe("serveGenericMedia", () => {
       }),
     } as unknown as Cache;
     const pending: Promise<unknown>[] = [];
+    const beforeUpstream = vi.fn(async () => null);
     const { fake, deps: d } = deps(
       {
         "https://img.example/a.png": () =>
@@ -485,7 +530,7 @@ describe("serveGenericMedia", () => {
             },
           }),
       },
-      { cache, waitUntil: (promise) => pending.push(promise) },
+      { cache, waitUntil: (promise) => pending.push(promise), beforeUpstream },
     );
 
     const first = await serveGenericMedia(
@@ -510,6 +555,28 @@ describe("serveGenericMedia", () => {
     );
     expect(new Uint8Array(await second.arrayBuffer())).toEqual(PNG);
     expect(fake.calls).toHaveLength(1);
+    // The upstream hook (the signed per-IP limit) runs on the miss only.
+    expect(beforeUpstream).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves what the upstream hook returns instead of fetching", async () => {
+    const { fake, deps: d } = deps(
+      {
+        "https://img.example/a.png": () =>
+          new Response(PNG, { headers: { "Content-Type": "image/png" } }),
+      },
+      {
+        beforeUpstream: async () => new Response("slow down", { status: 429 }),
+      },
+    );
+    const response = await serveGenericMedia(
+      proxyRequest("https://img.example/a.png"),
+      new URL("https://img.example/a.png"),
+      true,
+      d,
+    );
+    expect(response.status).toBe(429);
+    expect(fake.calls).toHaveLength(0);
   });
 
   it("keeps the declared length and skips the cache for large files", async () => {

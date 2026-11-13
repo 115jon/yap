@@ -28,7 +28,12 @@ export type TargetRejection =
   | "private_address"
   | "unresolved";
 
-const ALLOWED_PORTS = new Set(["", "80", "443", "8080", "8443"]);
+/**
+ * The ports a media URL may name, on its first URL and every redirect hop:
+ * the default http(s) ones. Signed and unsigned requests alike; no server-
+ * read media URL has needed another.
+ */
+export const MEDIA_PORTS: ReadonlySet<string> = new Set(["", "80", "443"]);
 const BLOCKED_SUFFIXES = [
   ".localhost",
   ".local",
@@ -162,12 +167,14 @@ function isIpLiteral(hostname: string): boolean {
 }
 
 /**
- * Checks `rawUrl` before a fetch: http(s) only, no credentials, a usual port,
- * a public name, and every A/AAAA answer public.
+ * Checks `rawUrl` before a fetch: http(s) only, no credentials, a port in
+ * `ports` (MEDIA_PORTS unless the caller says otherwise), a public name,
+ * and every A/AAAA answer public.
  */
 export async function checkMediaTarget(
   rawUrl: string | URL,
   resolve: ResolveHost,
+  ports: ReadonlySet<string> = MEDIA_PORTS,
 ): Promise<TargetCheck> {
   let url: URL;
   try {
@@ -181,7 +188,7 @@ export async function checkMediaTarget(
   if (url.username || url.password) {
     return { ok: false, reason: "credentials" };
   }
-  if (!ALLOWED_PORTS.has(url.port)) return { ok: false, reason: "port" };
+  if (!ports.has(url.port)) return { ok: false, reason: "port" };
 
   const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
   if (!hostname) return { ok: false, reason: "hostname" };
