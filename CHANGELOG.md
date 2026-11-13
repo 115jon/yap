@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.1.3](https://github.com/115jon/yap/compare/v4.1.2...v4.1.3) (2026-11-13)
+
+
+### Bug Fixes
+
+* **api:** 🐛 zero padding boxes instead of refusing the video ([1f47933](https://github.com/115jon/yap/commit/1f47933c07a3ed5c9716ff5829defb470511d7dd))
+* **api:** close privacy audit quick wins ([ea06ded](https://github.com/115jon/yap/commit/ea06ded357ca086221780a6bcf8ad5b76b9d1158))
+* **api:** uploads no longer keep location and camera metadata ([cf3c92d](https://github.com/115jon/yap/commit/cf3c92dfcc1738cfa4a4556c4439c10b661ffd0c))
+
 ## [4.1.2](https://github.com/115jon/yap/compare/v4.1.1...v4.1.2) (2026-11-13)
 
 
