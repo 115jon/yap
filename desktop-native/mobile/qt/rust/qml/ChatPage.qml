@@ -82,9 +82,10 @@ Item {
         composer.startReply(messageId, author, text)
     }
 
-    // Something lies over the chat (the image viewer, a message sheet):
-    // Back and its gesture are that thing's, and the pager does not pan.
-    readonly property bool overlayShown: viewer.shown || actions.shown
+    // Something lies over the chat (the image viewer, a message sheet, the
+    // emoji and GIF picker): Back and its gesture are that thing's, and the
+    // pager does not pan.
+    readonly property bool overlayShown: viewer.shown || actions.shown || (picker.item?.up ?? false)
     // The back gesture's progress while it does (the viewer shrinks and
     // fades); the pager passes it on.
     property real backProgress: 0
