@@ -11,10 +11,16 @@ import {
   isExpectedListenTogetherPlayCancellation,
   LISTEN_TOGETHER_MAX_TRANSIENT_RETRIES,
   planListenTogetherPlaybackRecovery,
+  prefetchListenTogetherStream,
   probeListenTogetherStream,
   shouldTryAlternateListenTogetherFormat,
 } from "@/lib/voice/listen-together-player";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { issueMediaGrant, verifyMediaCap } from "@/lib/media-capability";
+import {
+  resetMediaGrantForTests,
+  seedMediaGrantForTests,
+} from "@/lib/media-grant";
 
 function makeSnapshot(
   overrides: Partial<ListenTogetherStateSnapshot> = {},
@@ -117,6 +123,35 @@ describe("listen together playback plan", () => {
         true,
       ),
     ).toBe(false);
+  });
+
+  it("does not reload the playing track for a fresh media capability alone", () => {
+    const plan = getListenTogetherPlaybackPlan({
+      snapshot: makeSnapshot({ positionMs: 10_000 }),
+      playback: {
+        src: "/api/listen-together/stream?videoId=video-1&cap=m1.old",
+        currentTimeMs: 10_000,
+        paused: false,
+      },
+      streamUrl: "/api/listen-together/stream?videoId=video-1&cap=m1.new",
+    });
+
+    expect(plan.shouldLoad).toBe(false);
+    expect(plan.seekToMs).toBeNull();
+  });
+
+  it("reloads when the track itself changes", () => {
+    const plan = getListenTogetherPlaybackPlan({
+      snapshot: makeSnapshot({ positionMs: 0 }),
+      playback: {
+        src: "/api/listen-together/stream?videoId=video-0&cap=m1.old",
+        currentTimeMs: 10_000,
+        paused: false,
+      },
+      streamUrl: "/api/listen-together/stream?videoId=video-1&cap=m1.old",
+    });
+
+    expect(plan.shouldLoad).toBe(true);
   });
 
   it("requests a seek when drift exceeds the tolerance", () => {
@@ -223,11 +258,15 @@ afterEach(() => {
 });
 
 describe("listen together stream url", () => {
-  it("uses the tokenized media URL path for tauri audio playback", () => {
+  it("signs the media URL for tauri audio playback, never with the session token", () => {
     (
       window as typeof window & { __TAURI_INTERNALS__?: unknown }
     ).__TAURI_INTERNALS__ = {};
     localStorage.setItem("desktop_auth_token", "desktop-token");
+    seedMediaGrantForTests(
+      issueMediaGrant("test-secret", "user-1", Date.now()),
+      "desktop-token",
+    );
 
     const parsed = new URL(
       buildListenTogetherStreamUrl({
@@ -244,7 +283,53 @@ describe("listen together stream url", () => {
     expect(parsed.searchParams.get("roomSlug")).toBe("room-1");
     expect(parsed.searchParams.get("sessionId")).toBe("session-1");
     expect(parsed.searchParams.get("format")).toBe("mp4");
-    expect(parsed.searchParams.get("token")).toBe("desktop-token");
+    expect(parsed.searchParams.has("token")).toBe(false);
+    expect(
+      verifyMediaCap(
+        parsed.searchParams.get("cap") ?? "",
+        parsed,
+        "test-secret",
+        Date.now(),
+      ),
+    ).toMatchObject({ ok: true, userId: "user-1" });
+    resetMediaGrantForTests();
+  });
+});
+
+describe("listen together warm-up", () => {
+  it("signs warm=1 into the capability instead of appending it after", async () => {
+    (
+      window as typeof window & { __TAURI_INTERNALS__?: unknown }
+    ).__TAURI_INTERNALS__ = {};
+    localStorage.setItem("desktop_auth_token", "desktop-token");
+    seedMediaGrantForTests(
+      issueMediaGrant("test-secret", "user-1", Date.now()),
+      "desktop-token",
+    );
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(null, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const src = buildListenTogetherStreamUrl({
+      videoId: "abc123def45",
+      roomSlug: "room-1",
+      voiceSessionId: "session-1",
+    });
+    await prefetchListenTogetherStream(src);
+
+    const warmed = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(warmed.searchParams.get("warm")).toBe("1");
+    expect(
+      verifyMediaCap(
+        warmed.searchParams.get("cap") ?? "",
+        warmed,
+        "test-secret",
+        Date.now(),
+      ),
+    ).toMatchObject({ ok: true });
+    resetMediaGrantForTests();
   });
 });
 

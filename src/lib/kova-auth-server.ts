@@ -80,10 +80,7 @@ function sessionHeaders(headers?: Headers): SessionHeaders {
  * (routes that call `requireAuth()` without passing the request).
  */
 export function requestCredentials(req?: Request): Credentials {
-  return {
-    ...sessionHeaders(req?.headers),
-    queryToken: req ? new URL(req.url).searchParams.get("token") : null,
-  };
+  return sessionHeaders(req?.headers);
 }
 
 /** One get-session call with these headers (or the current request's). */
@@ -93,7 +90,7 @@ export async function checkKovaAuthSession(
   return settle(lookup(sessionHeaders(headers)));
 }
 
-/** The full check `requireAuth` makes: request headers, then the bearer or `?token=` alone. */
+/** The full check `requireAuth` makes: request headers, then the bearer alone. */
 export async function checkCredentials(
   credentials: Credentials,
 ): Promise<KovaSessionCheck> {
