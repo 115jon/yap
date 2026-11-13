@@ -56,7 +56,8 @@ Item {
     property bool followEnd: true
     // Whether it shows its end (`endSlack`).
     property bool nearEnd: true
-    // Others' new messages leave the list where it is (an edit in place).
+    // Others' new messages and the user's own scrolling leave the list
+    // where it is (an edit in place).
     property bool holdEnd: false
     // The conversation has landed: following, reporting and paging start.
     property bool landed: false
@@ -344,7 +345,7 @@ Item {
             root.userMoved = true
         }
         function onMovementEnded() {
-            root.followEnd = root.isNearEnd()
+            root.followEnd = !root.holdEnd && root.isNearEnd()
             root.noteTop()
         }
         function onContentYChanged() {
@@ -352,7 +353,7 @@ Item {
             // Only the user's own scrolling decides whether the end is
             // followed.
             if (root.userScrolling())
-                root.followEnd = root.isNearEnd()
+                root.followEnd = !root.holdEnd && root.isNearEnd()
             root.updateNearEnd()
             if (root.landed)
                 settled.restart()
@@ -479,11 +480,11 @@ Item {
                 root.view.positionViewAtEnd()
         }
         function onMovementEnded() {
-            root.followEnd = root.isNearEnd()
+            root.followEnd = !root.holdEnd && root.isNearEnd()
         }
         function onContentYChanged() {
             if (root.userScrolling())
-                root.followEnd = root.isNearEnd()
+                root.followEnd = !root.holdEnd && root.isNearEnd()
         }
     }
 
