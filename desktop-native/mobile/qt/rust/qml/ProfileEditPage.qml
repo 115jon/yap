@@ -122,6 +122,8 @@ Rectangle {
         draft.save()
     }
     function cancel() {
+        // The word being composed goes with the rest.
+        Qt.inputMethod.reset()
         Qt.inputMethod.hide()
         root.avatarTooBig = ""
         draft.reset()
@@ -577,6 +579,10 @@ Rectangle {
         // Clamped at `max` while typing; else the count turns red past it.
         property bool clamp: true
         property bool multiline: false
+        // `value` is what the field shows, the word the keyboard is still
+        // composing included (ThreadPage's send key): the draft, its count,
+        // Save and the Back guard see it before the keyboard commits it.
+        // Lengths are UTF-16 units, as the server and the core count.
         readonly property bool over: value.length > max
         signal edited(string value)
         width: parent ? parent.width : 0
@@ -596,16 +602,28 @@ Rectangle {
             font: Theme.type.labelStrong
         }
         MobileField {
+            id: line
             visible: !field.multiline
             width: parent.width
-            text: field.value
             maximumLength: field.clamp ? field.max : 32767
             placeholderText: field.placeholder
             invalid: field.error.length > 0 || field.over
             inputMethodHints: Qt.ImhNoAutoUppercase
             EnterKey.type: Qt.EnterKeyDone
             Accessible.name: field.label
-            onTextChanged: if (text !== field.value) field.edited(text)
+            readonly property string live: text + preeditText
+            // Follows the draft without a binding: the draft holds the word
+            // being composed too, which `text` must not take.
+            Component.onCompleted: text = field.value
+            Connections {
+                target: field
+                function onValueChanged() {
+                    if (line.live !== field.value)
+                        line.text = field.value
+                }
+            }
+            // Only the shown editor edits (the other just follows).
+            onLiveChanged: if (!field.multiline && live !== field.value) field.edited(live)
             onActiveFocusChanged: field.focused(activeFocus)
             onAccepted: {
                 focus = false
@@ -636,24 +654,30 @@ Rectangle {
                 border.color: field.over ? Theme.dangerInk : area.activeFocus ? Theme.ink1 : Theme.lineField
                 Behavior on border.color { ColorAnimation { duration: Theme.dur1 } }
             }
-            // Follows the draft without a binding: the clamp assigns `text`.
+            readonly property string live: text + preeditText
+            // Follows the draft without a binding: the clamp assigns `text`,
+            // and the draft holds the word being composed too.
             Component.onCompleted: text = field.value
             Connections {
                 target: field
                 function onValueChanged() {
-                    if (area.text !== field.value)
+                    if (area.live !== field.value)
                         area.text = field.value
                 }
             }
             onTextChanged: {
-                if (field.clamp && text.length > field.max) {
+                if (field.multiline && field.clamp && text.length > field.max) {
+                    // Not between the halves of a surrogate pair (an emoji).
+                    let cut = field.max
+                    const unit = text.charCodeAt(cut - 1)
+                    if (unit >= 0xD800 && unit <= 0xDBFF)
+                        cut -= 1
                     const at = cursorPosition
-                    text = text.slice(0, field.max)
-                    cursorPosition = Math.min(at, field.max)
+                    text = text.slice(0, cut)
+                    cursorPosition = Math.min(at, cut)
                 }
-                if (text !== field.value)
-                    field.edited(text)
             }
+            onLiveChanged: if (field.multiline && live !== field.value) field.edited(live)
             onActiveFocusChanged: field.focused(activeFocus)
             onHeightChanged: if (activeFocus) Qt.callLater(root.reveal, field)
         }
