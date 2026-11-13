@@ -493,13 +493,16 @@ function buildProxyHeaders(
   return headers;
 }
 
+/**
+ * A URL for logs: host and query keys, never the path or values (the source
+ * is a user-posted link; its path says what someone shared).
+ */
 function summarizeUrlForLog(value: string | URL) {
   try {
     const url = typeof value === "string" ? new URL(value) : value;
     return {
       protocol: url.protocol,
       hostname: url.hostname,
-      pathname: url.pathname,
       queryKeys: Array.from(url.searchParams.keys()).slice(0, 12),
     };
   } catch {

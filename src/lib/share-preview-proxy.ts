@@ -6,6 +6,7 @@ import { clog } from "@/lib/console-logger";
 import { safeFetch, readJsonCapped, readTextCapped } from "@/lib/safe-fetch";
 import { cacheGet, cacheSet } from "@/lib/cache";
 import { singleFlight } from "@/lib/single-flight";
+import { logHost } from "@/lib/log-host";
 import { TtlMemo, upstreamGuard } from "@/lib/upstream-guard";
 import {
   egressEnabled,
@@ -491,7 +492,7 @@ async function resolveTikTokLookupUrl(rawUrl: string): Promise<string> {
       if (extractTikTokItemId(resolved)) return remember(resolved);
     } catch (error) {
       log.warn("TikTok short link resolve via egress failed", {
-        sourceUrl: rawUrl,
+        sourceHost: logHost(rawUrl),
         error: describeError(error),
       });
     }
@@ -738,11 +739,11 @@ async function fetchTikTokPlayerApiSource(
       response.headers.get("Content-Type")?.toLowerCase() ?? "";
     if (!response.ok || !contentType.includes("json")) {
       log.warn("TikTok player api request failed", {
-        apiUrl,
+        apiHost: logHost(apiUrl),
         via,
         status: response.status,
         contentType,
-        sourceUrl,
+        sourceHost: logHost(sourceUrl),
       });
       return {
         metadata: null,
@@ -760,7 +761,7 @@ async function fetchTikTokPlayerApiSource(
     };
   } catch (error) {
     log.warn("TikTok player api request threw", {
-      sourceUrl,
+      sourceHost: logHost(sourceUrl),
       via,
       error: describeError(error),
     });
@@ -874,7 +875,7 @@ async function fetchTikTokPageSource(
       log.warn("TikTok page request failed", {
         via,
         status: response.status,
-        sourceUrl: pageUrl,
+        sourceHost: logHost(pageUrl),
       });
       return {
         metadata: null,
@@ -888,7 +889,10 @@ async function fetchTikTokPageSource(
     );
     if (!detail) {
       // A captcha or bot wall: no answer either way.
-      log.warn("TikTok page had no video detail", { via, sourceUrl: pageUrl });
+      log.warn("TikTok page had no video detail", {
+        via,
+        sourceHost: logHost(pageUrl),
+      });
       return { metadata: null, transient: false, unanswered: true };
     }
     if (isTikTokPageGone(detail)) {
@@ -905,7 +909,7 @@ async function fetchTikTokPageSource(
     };
   } catch (error) {
     log.warn("TikTok page request threw", {
-      sourceUrl: pageUrl,
+      sourceHost: logHost(pageUrl),
       via,
       error: describeError(error),
     });
@@ -999,11 +1003,11 @@ async function fetchTikTokTikwmSource(
       // a non-JSON body fails the parse below as a thrown (transient) miss.
       if (!response.ok || (via === "direct" && !contentType.includes("json"))) {
         log.warn("TikTok proxy metadata request failed", {
-          apiUrl: baseUrl,
+          apiHost: logHost(baseUrl),
           via,
           status: response.status,
           contentType,
-          sourceUrl: url,
+          sourceHost: logHost(url),
         });
         transient ||= isTransientUpstreamStatus(response.status);
         continue;
@@ -1012,9 +1016,9 @@ async function fetchTikTokTikwmSource(
       const payload = await readJsonCapped(response, TikwmResponse);
       if (payload?.code !== 0 || !payload.data) {
         log.warn("TikTok proxy metadata payload missing data", {
-          apiUrl: baseUrl,
+          apiHost: logHost(baseUrl),
           code: payload?.code ?? null,
-          sourceUrl: url,
+          sourceHost: logHost(url),
         });
         // "Free Api Limit: 1 request/second": the other host shares it.
         if (payload?.msg && /limit/i.test(payload.msg)) {
@@ -1033,8 +1037,8 @@ async function fetchTikTokTikwmSource(
       break;
     } catch (error) {
       log.warn("TikTok proxy metadata request threw", {
-        apiUrl: baseUrl,
-        sourceUrl: url,
+        apiHost: logHost(baseUrl),
+        sourceHost: logHost(url),
         error: describeError(error),
       });
       transient = true;
