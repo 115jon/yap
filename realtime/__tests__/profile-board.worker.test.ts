@@ -161,6 +161,15 @@ async function addDm(id: string, members: string[]) {
   }
 }
 
+async function say(channelId: string, authorId: string) {
+  await db
+    .prepare(
+      `INSERT INTO messages (id, channel_id, author_id, content) VALUES (?, ?, ?, 'hi')`,
+    )
+    .bind(`msg-${tag()}`, channelId, authorId)
+    .run();
+}
+
 async function block(userId: string, targetId: string) {
   await db
     .prepare(
@@ -1089,7 +1098,15 @@ describe("activity privacy", () => {
     const stranger = await addUser(`stranger-${tag()}`);
     await addServer(`srv-${tag()}`, owner, [owner, member]);
     await befriend(owner, friend);
-    await addDm(`dm-${tag()}`, [owner, dmPartner]);
+    const dm = `dm-${tag()}`;
+    await addDm(dm, [owner, dmPartner]);
+    await say(dm, owner);
+    // Anyone can open a DM with anyone: one the owner never wrote in does
+    // not count.
+    const opener = await addUser(`opener-${tag()}`);
+    const opened = `dm-${tag()}`;
+    await addDm(opened, [owner, opener]);
+    await say(opened, opener);
     await insertEvent(owner, "game", 1, { name: "Deadlock" });
 
     for (const viewer of [member, friend, dmPartner]) {
@@ -1097,13 +1114,15 @@ describe("activity privacy", () => {
       expect(seen.status).toBe(200);
       expect(seen.body.events.map((event) => event.kind)).toEqual(["game"]);
     }
-    const strangers = await activity(owner, stranger);
-    expect(strangers.status).toBe(200);
-    expect(strangers.body).toEqual({
-      events: [],
-      next_cursor: null,
-      is_owner: false,
-    });
+    for (const outsider of [stranger, opener]) {
+      const seen = await activity(owner, outsider);
+      expect(seen.status).toBe(200);
+      expect(seen.body).toEqual({
+        events: [],
+        next_cursor: null,
+        is_owner: false,
+      });
+    }
   });
 
   it("keeps calls outside a server to the owner", async () => {

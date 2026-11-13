@@ -446,7 +446,9 @@ export function decodeActivityCursor(
 /**
  * Whether `viewerId` is in `ownerId`'s presence audience: they share a
  * server, a friendship or a DM, as for game activity on presence
- * (realtime/meeting-room/game-activity.ts AUDIENCE_QUERIES).
+ * (realtime/meeting-room/game-activity.ts AUDIENCE_QUERIES). A DM counts
+ * only once the owner has written in it: anyone can open a DM with anyone,
+ * so an empty one would let a stranger in.
  */
 export async function inPresenceAudience(
   db: D1Database,
@@ -464,7 +466,10 @@ export async function inPresenceAudience(
                      WHERE user_id = ? AND target_user_id = ? AND type = 0)
          OR EXISTS (SELECT 1 FROM dm_recipients mine
                       JOIN dm_recipients other ON other.channel_id = mine.channel_id
-                     WHERE mine.user_id = ? AND other.user_id = ?)`,
+                     WHERE mine.user_id = ? AND other.user_id = ?
+                       AND EXISTS (SELECT 1 FROM messages m
+                                    WHERE m.channel_id = mine.channel_id
+                                      AND m.author_id = mine.user_id))`,
     )
     .bind(ownerId, viewerId, ownerId, viewerId, ownerId, viewerId)
     .first<{ shared: number }>();
