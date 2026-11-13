@@ -4,7 +4,8 @@ import { mediaSource } from "@/lib/api";
 
 // TikTok and Instagram sign their CDN links for minutes and TikTok checks
 // the Referer, so their media goes through the server's /api/proxy-media
-// (as on the web), which also re-resolves an expired link from the post.
+// with the post (as on the web), which re-resolves an expired link from it.
+// Every other third-party URL is proxied too, by mediaSource (lib/api).
 const PROXIED_HOST = /(^|\.)(tiktokcdn(-[a-z0-9-]+)?\.com|cdninstagram\.com)$/i;
 
 function hostOf(url: string): string | null {

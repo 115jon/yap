@@ -1,4 +1,7 @@
+import { useMemo } from "react";
 import { Image, View } from "react-native";
+
+import { mediaSource } from "@/lib/api";
 
 import { RADIUS, useTheme } from "@/theme";
 
@@ -27,6 +30,8 @@ export function Avatar({
   presenceGround,
 }: AvatarProps) {
   const theme = useTheme();
+  // Through mediaSource: a provider's avatar loads via the media proxy.
+  const source = useMemo(() => (uri ? mediaSource(uri) : null), [uri]);
   return (
     <View
       style={{
@@ -49,9 +54,9 @@ export function Avatar({
       >
         {name.slice(0, 1).toUpperCase()}
       </Text>
-      {uri ? (
+      {source ? (
         <Image
-          source={{ uri }}
+          source={source}
           accessibilityIgnoresInvertColors
           style={{
             position: "absolute",
