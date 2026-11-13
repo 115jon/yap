@@ -836,3 +836,43 @@ describe("container brands", () => {
     expect(scan.patches).toEqual([]);
   });
 });
+
+describe("timed metadata tracks", () => {
+  const withTrack = (entry: string) =>
+    concat(
+      box("ftyp", text("mp41"), [0, 0, 0, 0], text("mp41")),
+      box(
+        "moov",
+        box(
+          "trak",
+          box(
+            "mdia",
+            box(
+              "minf",
+              box(
+                "stbl",
+                box("stsd", u32(0), u32(1), box(entry, new Uint8Array(16))),
+              ),
+            ),
+          ),
+        ),
+        box("udta", box([0xa9, 0x78, 0x79, 0x7a], text(FAKE_ISO6709))),
+      ),
+    );
+
+  it("flags a GoPro gpmd or camm track and still cleans the rest", async () => {
+    for (const entry of ["gpmd", "camm"]) {
+      const { out, scan } = await strip(withTrack(entry));
+      expect(scan.format).toBe("video");
+      expect(scan.unchecked).toBe("timed-metadata");
+      expect(scan.stripped).toEqual(["gps"]);
+      expect(contains(out, text(FAKE_ISO6709))).toBe(false);
+    }
+  });
+
+  it("leaves an ordinary video track alone", async () => {
+    const { scan } = await strip(withTrack("avc1"));
+    expect(scan.unchecked).toBeNull();
+    expect(scan.stripped).toEqual(["gps"]);
+  });
+});

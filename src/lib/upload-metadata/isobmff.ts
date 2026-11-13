@@ -10,6 +10,10 @@
 // tables still point at the same bytes. The moov box is read whole, up to
 // MAX_MOOV bytes; mdat is only stepped over.
 //
+// A track whose samples are themselves metadata (GoPro's GPMF `gpmd`, the
+// `camm` camera motion track) can carry a GPS fix per frame; it isn't
+// rewritten, and the file is reported as unchecked.
+//
 // HEIF/HEIC and AVIF stills share the container but keep their EXIF in an
 // item; they are reported as unchecked, not cleaned. So is any other brand
 // that isn't a known video one (Canon CR3 raw photos, for one): only MP4,
@@ -79,7 +83,17 @@ const MAX_DEPTH = 8;
 
 const LOCATION_ATOMS = new Set(["\xa9xyz", "loci"]);
 const CAMERA_ATOMS = new Set(["\xa9mak", "\xa9mod"]);
-const CONTAINERS = new Set(["moov", "trak", "udta", "meta"]);
+const CONTAINERS = new Set([
+  "moov",
+  "trak",
+  "udta",
+  "meta",
+  "mdia",
+  "minf",
+  "stbl",
+]);
+/** Sample entries of timed metadata that may hold location. */
+const TIMED_METADATA_ENTRIES = new Set(["gpmd", "camm"]);
 
 /** Which kind a QuickTime metadata key holds, or null to leave it. */
 function keyKind(name: string): MetadataKind | null {
@@ -240,11 +254,27 @@ function walk(
         ? payload
         : payload + 4;
       walkMeta(b, children, boxEnd, base, state, depth + 1);
+    } else if (box.type === "stsd") {
+      if (hasTimedMetadata(b, payload, boxEnd))
+        state.unchecked = "timed-metadata";
     } else if (CONTAINERS.has(box.type)) {
       walk(b, payload, boxEnd, base, state, depth + 1);
     }
     i = boxEnd;
   }
+}
+
+/** Whether an stsd (payload b[start, end)) lists a gpmd or camm entry. */
+function hasTimedMetadata(b: Uint8Array, start: number, end: number): boolean {
+  // version and flags (4), entry count (4), then the sample entries
+  let i = start + 8;
+  while (i + 8 <= end) {
+    const entry = boxAt(b, i, end);
+    if (!entry) return false;
+    if (TIMED_METADATA_ENTRIES.has(entry.type)) return true;
+    i += entry.size;
+  }
+  return false;
 }
 
 /** A meta box's children: `keys` names what `ilst` items hold. */

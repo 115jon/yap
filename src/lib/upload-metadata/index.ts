@@ -26,7 +26,7 @@ import { isGif, scanGif } from "./gif";
 import { isoBrand, MoovTooLarge, scanIsoVideo } from "./isobmff";
 import { isJpeg, scanJpeg } from "./jpeg";
 import { isPng, scanPng } from "./png";
-import type { ScanState } from "./scan-state";
+import type { ScanState, UncheckedReason } from "./scan-state";
 import { isWebp, scanWebp } from "./webp";
 
 export {
@@ -39,6 +39,7 @@ export {
   r2Source,
 } from "./bytes";
 export type { MetadataKind } from "./exif";
+export type { UncheckedReason } from "./scan-state";
 
 export type MetadataFormat =
   | "jpeg"
@@ -53,9 +54,6 @@ export type MetadataFormat =
   /** ISO BMFF with a brand that is neither a known video nor HEIF/AVIF. */
   | "isobmff"
   | "other";
-
-/** Why a file that may carry metadata was not (fully) cleaned. */
-export type UncheckedReason = "unsupported-format" | "too-large" | "malformed";
 
 export interface MetadataScan {
   format: MetadataFormat;
@@ -120,6 +118,7 @@ export async function scanUploadMetadata(
   } else if (scanner) {
     try {
       await scanner(new Reader(source, options), state);
+      unchecked = state.unchecked ?? null;
     } catch (error) {
       // Whatever was found before the scan stopped is still stripped.
       unchecked =

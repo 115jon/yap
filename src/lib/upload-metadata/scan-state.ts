@@ -9,10 +9,20 @@ import type { MetadataKind } from "./exif";
  */
 export const MAX_PATCHES = 4096;
 
+/** Why a file that may carry metadata was not (fully) cleaned. */
+export type UncheckedReason =
+  | "unsupported-format"
+  | "too-large"
+  | "malformed"
+  /** A video track of samples that may hold location (GoPro GPMF, camm). */
+  | "timed-metadata";
+
 /** What a format scanner collects as it walks a file. */
 export interface ScanState {
   kinds: Set<MetadataKind>;
   patches: Patch[];
+  /** Set by a scanner that finished but left something it can't clean. */
+  unchecked?: UncheckedReason;
 }
 
 export function addKinds(state: ScanState, kinds: Iterable<MetadataKind>) {
