@@ -3,6 +3,12 @@ import { ServiceError } from "@/lib/service-error";
 import { isPlayableVideo } from "@/lib/media";
 import type { Attachment, EmbedInfo } from "@/lib/types";
 import type { D1Database } from "@cloudflare/workers-types";
+import {
+  getMediaRewriteContext,
+  proxiedMediaUrl,
+  proxyAttachmentUrlForDelivery,
+  proxyEmbedsForDelivery,
+} from "@/server/media-proxy/rewrite";
 
 const DEFAULT_SHARE_DAYS = 30;
 const SHARE_TOKEN_BYTES = 24;
@@ -463,4 +469,35 @@ export async function markSharesDeletedForMessage(
     )
     .bind(now.toISOString(), messageId)
     .run();
+}
+
+/**
+ * A share as a payload: embed media, external attachments (sent GIFs) and
+ * an OAuth avatar go through the media proxy. Stored snapshots keep the
+ * original URLs (share metadata and the Instagram refresh read those).
+ */
+export function proxyShareForDelivery(share: MessageShare): MessageShare {
+  const ctx = getMediaRewriteContext();
+  const { snapshot } = share;
+  return {
+    ...share,
+    snapshot: {
+      ...snapshot,
+      author: {
+        ...snapshot.author,
+        avatar_url: snapshot.author.avatar_url
+          ? proxiedMediaUrl(snapshot.author.avatar_url, ctx)
+          : snapshot.author.avatar_url,
+      },
+      attachments: snapshot.attachments.map((attachment) =>
+        attachment.file_key
+          ? {
+              ...attachment,
+              url: proxyAttachmentUrlForDelivery(attachment.file_key, ctx),
+            }
+          : attachment,
+      ),
+      embeds: proxyEmbedsForDelivery(snapshot.embeds),
+    },
+  };
 }

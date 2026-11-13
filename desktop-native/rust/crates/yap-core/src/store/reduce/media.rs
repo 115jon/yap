@@ -786,7 +786,12 @@ impl State {
 
     fn sync_gifs(&mut self, fx: &mut Effects) {
         let favorite = self.favorite_gifs(&self.gifs.media_type).into_iter().next();
-        let (rows, status) = media::gif_rows(&self.gifs, &self.view.favorites, favorite.as_ref());
+        let (rows, status) = media::gif_rows(
+            &self.gifs,
+            &self.view.favorites,
+            favorite.as_ref(),
+            &self.api_base,
+        );
         for diff in view::ordered_diff(&self.view.gifs, &rows) {
             fx.view(ViewUpdate::Gifs(diff));
         }

@@ -106,7 +106,11 @@ function TrackArt({ src, alt = "" }: { src?: string | null; alt?: string }) {
   return (
     <div className="size-8 shrink-0 overflow-hidden rounded-sm bg-tint-1">
       {src ? (
-        <img src={src} alt={alt} className="h-full w-full object-cover" />
+        <img
+          src={getAuthAssetUrl(src)}
+          alt={alt}
+          className="h-full w-full object-cover"
+        />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-ink-3">
           <Icon name="music" size="sm" />
@@ -1062,11 +1066,11 @@ export function ListenTogetherPanel({
                   {resolvedPreview.collection?.artworkUrl ||
                   resolvedPreview.tracks[0]?.artworkUrl ? (
                     <img
-                      src={
+                      src={getAuthAssetUrl(
                         resolvedPreview.collection?.artworkUrl ??
-                        resolvedPreview.tracks[0]?.artworkUrl ??
-                        ""
-                      }
+                          resolvedPreview.tracks[0]?.artworkUrl ??
+                          "",
+                      )}
                       alt=""
                       className="h-full w-full object-cover"
                     />
@@ -1228,7 +1232,7 @@ export function ListenTogetherPanel({
                       <div className="size-10 shrink-0 overflow-hidden rounded-sm bg-tint-1">
                         {result.artworkUrl ? (
                           <img
-                            src={result.artworkUrl}
+                            src={getAuthAssetUrl(result.artworkUrl)}
                             alt=""
                             className="h-full w-full object-cover"
                           />

@@ -50,17 +50,105 @@ pub fn media_kind(content_type: &str) -> &'static str {
     }
 }
 
+/// `url` as an http(s) URL with its host after `//`, the way URL libraries
+/// (QUrl, the server's WHATWG parser) read it, or None when it names no web
+/// host. Cleaned first of what they ignore: tab and newline anywhere, C0
+/// controls and spaces at the ends. Lenient like them about the slashes and
+/// the scheme's case: `//host/x`, `\\host/x` and `HTTPS:host/x` all name
+/// `host`. A check on the raw text would read those as local and hand them
+/// to the image loader, which then fetches the host directly.
+pub(crate) fn web_url(url: &str) -> Option<String> {
+    let cleaned: String = url
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    let value = cleaned.trim_matches(|c: char| c <= ' ');
+    let (scheme, rest) = if value.starts_with("//")
+        || value.starts_with("\\\\")
+        || value.starts_with("/\\")
+        || value.starts_with("\\/")
+    {
+        ("https", value)
+    } else {
+        let (scheme, rest) = value.split_once(':')?;
+        let scheme = scheme.to_ascii_lowercase();
+        if scheme != "https" && scheme != "http" {
+            return None;
+        }
+        (if scheme == "https" { "https" } else { "http" }, rest)
+    };
+    let rest = rest.trim_start_matches(['/', '\\']);
+    if rest.is_empty() || rest.starts_with(['?', '#']) {
+        return None;
+    }
+    Some(format!("{scheme}://{rest}"))
+}
+
 fn host_of(url: &str) -> Option<String> {
+    let url = web_url(url)?;
     let rest = url
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))?;
-    let host = rest.split(['/', '?', '#']).next()?;
+    let host = rest.split(['/', '\\', '?', '#']).next()?;
     let host = host.rsplit('@').next()?.split(':').next()?;
     Some(host.to_ascii_lowercase())
 }
 
 fn is_web_url(url: &str) -> bool {
     host_of(url).is_some_and(|host| !host.is_empty())
+}
+
+/// One of the server's `/api/proxy-media` URLs, on any host.
+fn is_proxy_url(url: &str) -> bool {
+    let Some(rest) = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let path = rest
+        .find('/')
+        .map_or("", |slash| &rest[slash..])
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default();
+    path == "/api/proxy-media"
+}
+
+/// A third-party picture or video through the server's media proxy, so its
+/// host never sees this device's address (a posted link could otherwise
+/// collect every viewer's). The API's own files and proxy URLs the server
+/// built (signed, or the social form with its post) load as they are; an
+/// unsigned one carries the session (`api::media_needs_auth`).
+///
+/// A value that names no web host loads nothing (empty). These values come
+/// from the server or from other users, and Qt opens `file://host/x` as the
+/// UNC path `\\host\x` (SMB or WebDAV, which hands that host this device's
+/// address and possibly an NTLM hash); `ftp:`, `smb:` and the like reach a
+/// host directly.
+pub(crate) fn via_media_proxy(url: &str, api_base: &str) -> String {
+    let Some(web) = web_url(url) else {
+        return String::new();
+    };
+    let url = web.as_str();
+    if !is_web_url(url) {
+        return String::new();
+    }
+    if crate::api::is_api_url(api_base, url) {
+        return url.to_owned();
+    }
+    // A proxy path on another host goes to our API with its query: never
+    // to that host, which only has to name a path like ours.
+    if is_proxy_url(url) {
+        let query = url.split_once('?').map_or("", |(_, q)| q);
+        let query = query.split('#').next().unwrap_or_default();
+        return if query.is_empty() {
+            format!("{api_base}/api/proxy-media")
+        } else {
+            format!("{api_base}/api/proxy-media?{query}")
+        };
+    }
+    format!("{api_base}/api/proxy-media?url={}", query_value(url))
 }
 
 /// A GIF provider's CDN (gif-picker.ts `getGifAttachmentProvider`).
@@ -88,8 +176,19 @@ fn encode_path(path: &str) -> String {
     out
 }
 
+/// A `file:` URL on this device (`file:///C:/…`, `file:///data/…`): no host,
+/// and a path that cannot start a UNC name (`file:////host`,
+/// `file:///\\host`, `file:///%2F%2Fhost`), which Qt would open over the
+/// network.
+pub(crate) fn is_local_file_url(url: &str) -> bool {
+    url.strip_prefix("file:///")
+        .and_then(|path| path.chars().next())
+        .is_some_and(|first| first.is_ascii_alphanumeric())
+}
+
 /// Where an attachment loads from: `url`, else `getAttachmentUrl(file_key)`,
-/// made absolute against the API. A local `file:` preview passes through.
+/// made absolute against the API. A local `file:` preview (an upload in
+/// flight) passes through; any other `file:` URL loads nothing.
 pub fn attachment_url(attachment: &Attachment, api_base: &str) -> String {
     let raw = attachment
         .url
@@ -98,8 +197,18 @@ pub fn attachment_url(attachment: &Attachment, api_base: &str) -> String {
         .or(attachment.file_key.as_deref())
         .unwrap_or_default();
     // `qrc:` is the offline fixture's picture.
-    if raw.starts_with("file:") || raw.starts_with("qrc:") || is_web_url(raw) {
+    if is_local_file_url(raw) || raw.starts_with("qrc:") {
         return raw.to_owned();
+    }
+    if raw
+        .get(..5)
+        .is_some_and(|s| s.eq_ignore_ascii_case("file:"))
+    {
+        return String::new();
+    }
+    // A sent GIF keeps its provider's URL: load it through the proxy.
+    if is_web_url(raw) {
+        return via_media_proxy(raw, api_base);
     }
     if raw.is_empty() {
         return String::new();
@@ -310,8 +419,13 @@ pub(crate) fn needs_proxy(url: &str) -> bool {
     })
 }
 
-/// An embed picture's URL: http(s) only, proxied where the web proxies it.
+/// An embed picture's URL: http(s) only, always through the media proxy
+/// (X, TikTok and Instagram with their post, so the server can refresh them).
 pub(super) fn embed_image_url(url: &str, page: &str, api_base: &str) -> String {
+    let Some(web) = web_url(url) else {
+        return String::new();
+    };
+    let url = web.as_str();
     if !is_web_url(url) {
         return String::new();
     }
@@ -322,7 +436,7 @@ pub(super) fn embed_image_url(url: &str, page: &str, api_base: &str) -> String {
             query_value(page)
         );
     }
-    url.to_owned()
+    via_media_proxy(url, api_base)
 }
 
 fn provider_is(embed: &Embed, names: &[&str], hosts: &[&str]) -> bool {
@@ -516,15 +630,66 @@ pub fn embeds_json(
 ) -> String {
     let items: Vec<Value> = embeds
         .iter()
+        .map(|e| unwrap_social_embed(e, api_base))
         .filter_map(|e| {
-            super::embeds::embed_value(e, api_base, hydrations, message_id)
-                .or_else(|| embed_json(e, api_base))
+            super::embeds::embed_value(&e, api_base, hydrations, message_id)
+                .or_else(|| embed_json(&e, api_base))
         })
         .collect();
     if items.is_empty() {
         return String::new();
     }
     Value::Array(items).to_string()
+}
+
+/// The original inside the server's social proxy form (our API, `url` and
+/// `sourceUrl`, no signature): the X, TikTok and Instagram views read hosts
+/// and file names, and build that same form again when they load the URL.
+/// Signed generic URLs stay as delivered (they load without the session).
+fn unwrap_social(url: &str, api_base: &str) -> String {
+    let ours = url
+        .strip_prefix(api_base.trim_end_matches('/'))
+        .is_some_and(|rest| rest.starts_with("/api/proxy-media?"));
+    if ours && url.contains("sourceUrl=") && !url.contains("&sig=") {
+        return crate::gif_favorite::unwrap_proxy_media_url(url);
+    }
+    url.to_owned()
+}
+
+fn unwrap_social_embed(embed: &Embed, api_base: &str) -> Embed {
+    let fix = |url: &str| unwrap_social(url, api_base);
+    let fix_opt = |url: &Option<String>| url.as_deref().map(fix);
+    let mut out = embed.clone();
+    if let Some(author) = out.author.as_mut() {
+        author.icon_url = fix_opt(&author.icon_url);
+    }
+    if let Some(thumbnail) = out.thumbnail.as_mut() {
+        thumbnail.url = fix(&thumbnail.url);
+    }
+    for media in out.media.iter_mut() {
+        media.url = fix(&media.url);
+        media.thumbnail_url = fix_opt(&media.thumbnail_url);
+    }
+    if let Some(video) = out.video.as_mut() {
+        video.url = fix(&video.url);
+    }
+    if let Some(audio) = out.audio.as_mut() {
+        audio.url = fix_opt(&audio.url);
+        audio.artwork_url = fix_opt(&audio.artwork_url);
+    }
+    if let Some(quoted) = out.referenced_tweet.as_mut() {
+        if let Some(author) = quoted.author.as_mut() {
+            author.icon_url = fix_opt(&author.icon_url);
+        }
+        for media in quoted.media.iter_mut() {
+            media.url = fix(&media.url);
+            media.thumbnail_url = fix_opt(&media.thumbnail_url);
+        }
+    }
+    if let Some(footer) = out.footer.as_mut() {
+        footer.icon_url = fix_opt(&footer.icon_url);
+    }
+    out
 }
 
 /// A local path as a `file:` URL QML can load.
@@ -673,13 +838,15 @@ pub fn gif_duration(seconds: Option<f64>) -> String {
 
 /// A shortcut tile's media (`GifShortcutCardMedia`): a picture, or a
 /// muted loop when the item has only video.
-fn shortcut_media(item: Option<&GifItem>) -> Value {
+fn shortcut_media(item: Option<&GifItem>, api_base: &str) -> Value {
     let Some(item) = item else {
         return json!({ "image": "", "video": "" });
     };
-    let image = gif_preview(item).unwrap_or_default();
+    let image = gif_preview(item)
+        .map(|url| via_media_proxy(url, api_base))
+        .unwrap_or_default();
     let video = gif_video(item, false)
-        .map(|a| a.url.as_str())
+        .map(|a| via_media_proxy(&a.url, api_base))
         .unwrap_or_default();
     json!({ "image": image, "video": video })
 }
@@ -688,11 +855,15 @@ fn shortcut_media(item: Option<&GifItem>) -> Value {
 /// the rest of the picker: its start screen (categories, the Favorites and
 /// Trending tiles' media), the provider and the search terms, as JSON.
 /// `saved` is every favourite's `provider:id` (the tiles' stars) and
-/// `favorite` the newest favourite of the media type.
+/// `favorite` the newest favourite of the media type. Every picture and
+/// clip loads through [`via_media_proxy`]: the server sends them proxied,
+/// favourites keep the provider's URL, and a value that is not http(s)
+/// loads nothing.
 pub(in crate::store) fn gif_rows(
     browse: &GifBrowse,
     saved: &[String],
     favorite: Option<&GifItem>,
+    api_base: &str,
 ) -> (Vec<GifRow>, GifStatusView) {
     let mut units = [0i64; 2];
     let mut counts = [0i64; 2];
@@ -722,8 +893,12 @@ pub(in crate::store) fn gif_rows(
                 .filter(|t| !t.is_empty())
                 .unwrap_or(&item.title)
                 .to_owned(),
-            preview: image.map(|a| a.url.clone()).unwrap_or_default(),
-            video: video.map(|a| a.url.clone()).unwrap_or_default(),
+            preview: image
+                .map(|a| via_media_proxy(&a.url, api_base))
+                .unwrap_or_default(),
+            video: video
+                .map(|a| via_media_proxy(&a.url, api_base))
+                .unwrap_or_default(),
             clip: clips && video.is_some(),
             duration: gif_duration(item.duration),
             aspect,
@@ -741,11 +916,7 @@ pub(in crate::store) fn gif_rows(
             list.iter()
                 .filter(|c| !c.label.is_empty())
                 .map(|c| {
-                    let image = if is_web_url(&c.image_url) {
-                        c.image_url.as_str()
-                    } else {
-                        ""
-                    };
+                    let image = via_media_proxy(&c.image_url, api_base);
                     json!({ "id": c.id, "label": c.label, "query": c.query, "image": image })
                 })
                 .collect()
@@ -768,8 +939,8 @@ pub(in crate::store) fn gif_rows(
         "rateLimited": browse.rate_limited,
         "categoriesLoading": browse.categories_loading,
         "categories": categories,
-        "trending": shortcut_media(trending),
-        "favorite": shortcut_media(favorite),
+        "trending": shortcut_media(trending, api_base),
+        "favorite": shortcut_media(favorite, api_base),
         "terms": terms,
     });
     let status = GifStatusView {
@@ -838,6 +1009,41 @@ mod tests {
     }
 
     #[test]
+    fn only_a_local_file_attachment_should_load_from_disk() {
+        let at = |url: &str| {
+            attachment_url(
+                &Attachment {
+                    url: Some(url.into()),
+                    ..Attachment::default()
+                },
+                "https://yap.test",
+            )
+        };
+        // An upload in flight previews from disk.
+        assert_eq!(at("file:///C:/Users/me/x.png"), "file:///C:/Users/me/x.png");
+        assert_eq!(at("file:///data/user/0/x.png"), "file:///data/user/0/x.png");
+        assert_eq!(at("qrc:/fixture/a.png"), "qrc:/fixture/a.png");
+        // A file URL that names a host (a UNC path on Windows) loads nothing.
+        for url in [
+            "file://attacker.example/x.png",
+            "FILE://attacker.example/x.png",
+            "file:////attacker.example/x.png",
+            r"file:///\\attacker.example\x.png",
+            "file:///%2F%2Fattacker.example/x.png",
+            "file:/x.png",
+        ] {
+            assert_eq!(at(url), "", "{url}");
+        }
+        // Other schemes are read as a file key: a path on our own API.
+        for url in [
+            "smb://attacker.example/x.png",
+            "ftp://attacker.example/x.png",
+        ] {
+            assert!(at(url).starts_with("https://yap.test/api/"), "{url}");
+        }
+    }
+
+    #[test]
     fn video_kinds_should_follow_the_playable_allowlist() {
         let kinds = [
             "video/mp4; codecs=x",
@@ -879,6 +1085,124 @@ mod tests {
             "https://y",
         );
         assert!(url.starts_with("https://y/api/proxy-media?url=https%3A%2F%2Fpbs.twimg.com"));
+    }
+
+    #[test]
+    fn third_party_media_should_go_through_the_proxy() {
+        assert_eq!(
+            embed_image_url(
+                "https://cdn.example/og.png?a=1",
+                "https://news.example/s",
+                "https://y"
+            ),
+            "https://y/api/proxy-media?url=https%3A%2F%2Fcdn.example%2Fog.png%3Fa%3D1"
+        );
+        assert_eq!(
+            via_media_proxy("http://plain.example/a.gif", "https://y"),
+            "https://y/api/proxy-media?url=http%3A%2F%2Fplain.example%2Fa.gif"
+        );
+    }
+
+    #[test]
+    fn our_own_and_server_built_proxy_urls_should_load_as_they_are() {
+        for url in [
+            "https://y/api/attachments/c/a/b.png",
+            "https://y/api/proxy-media?url=https%3A%2F%2Fcdn.example%2Fa.png&sig=s",
+        ] {
+            assert_eq!(via_media_proxy(url, "https://y"), url, "{url}");
+        }
+        // Another host's "proxy" path is never loaded from that host.
+        assert_eq!(
+            via_media_proxy(
+                "https://evil.example/api/proxy-media?url=https%3A%2F%2Fcdn.example%2Fa.png&sig=s",
+                "https://y"
+            ),
+            "https://y/api/proxy-media?url=https%3A%2F%2Fcdn.example%2Fa.png&sig=s"
+        );
+        assert_eq!(
+            via_media_proxy("https://evil.example/api/proxy-media?id=1#x", "https://y"),
+            "https://y/api/proxy-media?id=1"
+        );
+        assert!(is_proxy_url("https://y/api/proxy-media"));
+        assert!(!is_proxy_url("https://y/api/proxy-media-not"));
+        assert!(!is_proxy_url("https://evil.example/x?u=/api/proxy-media"));
+    }
+
+    #[test]
+    fn a_host_hidden_behind_ignored_characters_should_still_go_through_the_proxy() {
+        let want = "https://y/api/proxy-media?url=https%3A%2F%2Fevil.example%2Fa.png";
+        for url in [
+            " https://evil.example/a.png",
+            "\thttps://evil.example/a.png",
+            "https://evil.example/a.png\r\n",
+            "ht\ttps://evil.example/a.png",
+            "\u{0}https://evil.example/a.png",
+            "HTTPS://evil.example/a.png",
+            "https:evil.example/a.png",
+            "https:/evil.example/a.png",
+            "https:\\\\evil.example/a.png",
+            "//evil.example/a.png",
+            "/\t/evil.example/a.png",
+            "\\\\evil.example/a.png",
+        ] {
+            assert_eq!(via_media_proxy(url, "https://y"), want, "{url:?}");
+            assert_eq!(
+                embed_image_url(url, "https://news.example/s", "https://y"),
+                want,
+                "{url:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn values_without_a_web_host_should_load_nothing() {
+        for url in [
+            "file:///c:/x.png",
+            // Qt opens these as \\attacker.example\x.png: SMB or WebDAV to
+            // that host, with this device's address and maybe an NTLM hash.
+            "file://attacker.example/x.png",
+            "FILE://attacker.example/x.png",
+            "file:////attacker.example/x.png",
+            r"file:///\\attacker.example\x.png",
+            "smb://attacker.example/share/x.png",
+            "ftp://attacker.example/x.png",
+            "javascript:alert(1)",
+            "data:image/png;base64,AA",
+            "qrc:/a.png",
+            "https:",
+            "https://",
+            "a.png",
+            "",
+        ] {
+            assert_eq!(web_url(url), None, "{url:?}");
+            assert_eq!(via_media_proxy(url, "https://y"), "", "{url:?}");
+            assert_eq!(
+                embed_image_url(url, "https://a", "https://y"),
+                "",
+                "{url:?}"
+            );
+        }
+        assert_eq!(
+            web_url(" https://y/api/a.png\n").as_deref(),
+            Some("https://y/api/a.png")
+        );
+        assert_eq!(
+            via_media_proxy(" https://y/api/a.png", "https://y"),
+            "https://y/api/a.png"
+        );
+    }
+
+    #[test]
+    fn the_social_proxy_form_should_unwrap_and_signed_urls_stay() {
+        let social = "https://y/api/proxy-media?url=https%3A%2F%2Fvideo.twimg.com%2Ftweet_video%2Fa.mp4&sourceUrl=https%3A%2F%2Fx.com%2Fu%2Fstatus%2F1";
+        assert_eq!(
+            unwrap_social(social, "https://y"),
+            "https://video.twimg.com/tweet_video/a.mp4"
+        );
+        let signed = "https://y/api/proxy-media?url=https%3A%2F%2Fcdn.example%2Fa.png&sig=s";
+        assert_eq!(unwrap_social(signed, "https://y"), signed);
+        let foreign = "https://evil.example/api/proxy-media?url=https%3A%2F%2Fa&sourceUrl=b";
+        assert_eq!(unwrap_social(foreign, "https://y"), foreign);
     }
 
     #[test]

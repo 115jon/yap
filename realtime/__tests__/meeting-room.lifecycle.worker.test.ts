@@ -537,7 +537,7 @@ describe("MeetingRoom lifecycle", () => {
       name: "Capable Name",
       username: "capable-user",
       display_name: "Capable Display",
-      avatar_url: "https://example.com/capable.png",
+      avatar_url: "/api/avatars/capable.png",
       avatar_display: "frame:capable",
       supports_voice_state_deltas: true,
     });
@@ -549,7 +549,7 @@ describe("MeetingRoom lifecycle", () => {
       name: "Legacy Name",
       username: "legacy-user",
       display_name: "Legacy Display",
-      avatar_url: "https://example.com/legacy.png",
+      avatar_url: "/api/avatars/legacy.png",
       avatar_display: "frame:legacy",
     });
     const sender = await openMeetingSocket(roomName, "profile-sender");
@@ -557,7 +557,7 @@ describe("MeetingRoom lifecycle", () => {
       name: "Sender Name",
       username: "sender-user",
       display_name: "Sender Display",
-      avatar_url: "https://example.com/sender.png",
+      avatar_url: "/api/avatars/sender.png",
       avatar_display: "frame:sender",
     });
     await capableJoin;
@@ -605,7 +605,7 @@ describe("MeetingRoom lifecycle", () => {
         name: "Sender Name",
         username: "sender-user",
         display_name: "Sender Display",
-        avatar_url: "https://example.com/sender.png",
+        avatar_url: "/api/avatars/sender.png",
         avatar_display: "frame:sender",
         platform: "web",
         stream_preview_url: null,
@@ -642,7 +642,7 @@ describe("MeetingRoom lifecycle", () => {
       name: "Replay Sender",
       username: "replay-sender",
       display_name: "Replay Display",
-      avatar_url: "https://example.com/replay.png",
+      avatar_url: "/api/avatars/replay.png",
       avatar_display: "frame:replay",
     });
     await capableSenderJoin;
@@ -714,7 +714,7 @@ describe("MeetingRoom lifecycle", () => {
         name: "Replay Sender",
         username: "replay-sender",
         display_name: "Replay Display",
-        avatar_url: "https://example.com/replay.png",
+        avatar_url: "/api/avatars/replay.png",
         avatar_display: "frame:replay",
         platform: "web",
         stream_preview_url: null,
@@ -831,7 +831,7 @@ describe("MeetingRoom lifecycle", () => {
       name: "Resume Name",
       username: "resume-user",
       display_name: "Resume Display",
-      avatar_url: "https://example.com/resume.png",
+      avatar_url: "/api/avatars/resume.png",
       avatar_display: "frame:resume",
     });
     original.close();
@@ -854,7 +854,7 @@ describe("MeetingRoom lifecycle", () => {
             name: "Resume Name",
             username: "resume-user",
             display_name: "Resume Display",
-            avatar_url: "https://example.com/resume.png",
+            avatar_url: "/api/avatars/resume.png",
             avatar_display: "frame:resume",
           }),
         ],
@@ -884,7 +884,7 @@ describe("MeetingRoom lifecycle", () => {
         userId,
         "old-user",
         "Old Display",
-        "https://example.com/old.png",
+        "/api/avatars/old.png",
         "frame:old",
       )
       .run();
@@ -913,7 +913,7 @@ describe("MeetingRoom lifecycle", () => {
       name: "Old Display",
       username: "old-user",
       display_name: "Old Display",
-      avatar_url: "https://example.com/old.png",
+      avatar_url: "/api/avatars/old.png",
       avatar_display: "frame:old",
     };
     const staleJoin = nextDispatchEvent(fresh, "VOICE_CHANNEL_STATE_UPDATE");
@@ -928,7 +928,7 @@ describe("MeetingRoom lifecycle", () => {
       .bind(
         "new-user",
         "New Display",
-        "https://example.com/new.png",
+        "/api/avatars/new.png",
         "frame:new",
         userId,
       )
@@ -960,7 +960,7 @@ describe("MeetingRoom lifecycle", () => {
               name: "New Display",
               username: "new-user",
               display_name: "New Display",
-              avatar_url: "https://example.com/new.png",
+              avatar_url: "/api/avatars/new.png",
               avatar_display: "frame:new",
             }),
           ],
@@ -973,7 +973,7 @@ describe("MeetingRoom lifecycle", () => {
         name: "New Display",
         username: "new-user",
         display_name: "New Display",
-        avatar_url: "https://example.com/new.png",
+        avatar_url: "/api/avatars/new.png",
         avatar_display: "frame:new",
       },
     });
@@ -1041,7 +1041,7 @@ describe("MeetingRoom lifecycle", () => {
       name: "New Display",
       username: "new-user",
       display_name: "New Display",
-      avatar_url: "https://example.com/new.png",
+      avatar_url: "/api/avatars/new.png",
       avatar_display: "frame:new",
     });
     await expect(resumedSidebar).resolves.toMatchObject({
@@ -1054,7 +1054,7 @@ describe("MeetingRoom lifecycle", () => {
               name: "New Display",
               username: "new-user",
               display_name: "New Display",
-              avatar_url: "https://example.com/new.png",
+              avatar_url: "/api/avatars/new.png",
               avatar_display: "frame:new",
             }),
           ],
@@ -1089,7 +1089,7 @@ describe("MeetingRoom lifecycle", () => {
           name: "New Display",
           username: "new-user",
           display_name: "New Display",
-          avatar_url: "https://example.com/new.png",
+          avatar_url: "/api/avatars/new.png",
           avatar_display: "frame:new",
           self_mute: false,
         },
@@ -1103,7 +1103,7 @@ describe("MeetingRoom lifecycle", () => {
               name: "New Display",
               username: "new-user",
               display_name: "New Display",
-              avatar_url: "https://example.com/new.png",
+              avatar_url: "/api/avatars/new.png",
               avatar_display: "frame:new",
               self_mute: false,
             }),
@@ -1137,7 +1137,7 @@ describe("MeetingRoom lifecycle", () => {
         userId,
         "old-user",
         "Old Display",
-        "https://example.com/old.png",
+        "/api/avatars/old.png",
         "frame:old",
       )
       .run();
@@ -1166,7 +1166,7 @@ describe("MeetingRoom lifecycle", () => {
       name: "Old Display",
       username: "old-user",
       display_name: "Old Display",
-      avatar_url: "https://example.com/old.png",
+      avatar_url: "/api/avatars/old.png",
       avatar_display: "frame:old",
     };
     await pushRoster(roomName, firstChannelId, [
@@ -1194,7 +1194,7 @@ describe("MeetingRoom lifecycle", () => {
       .bind(
         "new-user",
         "New Display",
-        "https://example.com/new.png",
+        "/api/avatars/new.png",
         "frame:new",
         userId,
       )
@@ -1249,7 +1249,7 @@ describe("MeetingRoom lifecycle", () => {
             expect.objectContaining({
               name: "New Display",
               username: "new-user",
-              avatar_url: "https://example.com/new.png",
+              avatar_url: "/api/avatars/new.png",
               avatar_display: "frame:new",
             }),
           ],
@@ -1264,7 +1264,7 @@ describe("MeetingRoom lifecycle", () => {
             expect.objectContaining({
               name: "New Display",
               username: "new-user",
-              avatar_url: "https://example.com/new.png",
+              avatar_url: "/api/avatars/new.png",
               avatar_display: "frame:new",
             }),
           ],
@@ -1296,7 +1296,7 @@ describe("MeetingRoom lifecycle", () => {
             expect.objectContaining({
               name: "New Display",
               username: "new-user",
-              avatar_url: "https://example.com/new.png",
+              avatar_url: "/api/avatars/new.png",
               avatar_display: "frame:new",
               self_mute: false,
             }),
@@ -1442,14 +1442,14 @@ describe("MeetingRoom lifecycle", () => {
       name: "Sidebar First",
       username: "sidebar-first",
       display_name: "Sidebar First Display",
-      avatar_url: "https://example.com/sidebar-first.png",
+      avatar_url: "/api/avatars/sidebar-first.png",
       avatar_display: "frame:sidebar-first",
     };
     const secondIdentity = {
       name: "Sidebar Second",
       username: "sidebar-second",
       display_name: "Sidebar Second Display",
-      avatar_url: "https://example.com/sidebar-second.png",
+      avatar_url: "/api/avatars/sidebar-second.png",
       avatar_display: "frame:sidebar-second",
     };
     const first = await openGlobalSocket(roomName, firstUserId);
@@ -1467,7 +1467,7 @@ describe("MeetingRoom lifecycle", () => {
       name: "Sidebar Second",
       username: "sidebar-second",
       display_name: "Sidebar Second Display",
-      avatar_url: "https://example.com/sidebar-second.png",
+      avatar_url: "/api/avatars/sidebar-second.png",
       avatar_display: "frame:sidebar-second",
     });
     await expect(fullSnapshot).resolves.toMatchObject({
@@ -1479,7 +1479,7 @@ describe("MeetingRoom lifecycle", () => {
                 name: "Sidebar First",
                 username: "sidebar-first",
                 display_name: "Sidebar First Display",
-                avatar_url: "https://example.com/sidebar-first.png",
+                avatar_url: "/api/avatars/sidebar-first.png",
                 avatar_display: "frame:sidebar-first",
               }),
             ],
@@ -1504,7 +1504,7 @@ describe("MeetingRoom lifecycle", () => {
             expect.objectContaining({
               username: "sidebar-second",
               display_name: "Sidebar Second Display",
-              avatar_url: "https://example.com/sidebar-second.png",
+              avatar_url: "/api/avatars/sidebar-second.png",
               avatar_display: "frame:sidebar-second",
             }),
           ]),
@@ -1542,7 +1542,7 @@ describe("MeetingRoom lifecycle", () => {
       name: "Sidebar First",
       username: "sidebar-first",
       display_name: "Sidebar First Display",
-      avatar_url: "https://example.com/sidebar-first.png",
+      avatar_url: "/api/avatars/sidebar-first.png",
       avatar_display: "frame:sidebar-first",
     });
 
@@ -1595,7 +1595,7 @@ describe("MeetingRoom lifecycle", () => {
       name: "Call Caller",
       username: "call-caller",
       display_name: "Call Caller Display",
-      avatar_url: "https://example.com/call-caller.png",
+      avatar_url: "/api/avatars/call-caller.png",
       avatar_display: "frame:call-caller",
     };
     const caller = await openGlobalSocket(roomName, callerId);
@@ -1648,7 +1648,7 @@ describe("MeetingRoom lifecycle", () => {
               name: "Call Caller",
               username: "call-caller",
               display_name: "Call Caller Display",
-              avatar_url: "https://example.com/call-caller.png",
+              avatar_url: "/api/avatars/call-caller.png",
               avatar_display: "frame:call-caller",
             }),
           ],
@@ -2522,7 +2522,7 @@ describe("MeetingRoom lifecycle", () => {
       name: "Old Name",
       username: "old-user",
       display_name: "Old Name",
-      avatar_url: "https://example.com/old.png",
+      avatar_url: "/api/avatars/old.png",
       avatar_display: "frame:old",
     };
     const owner = await openGlobalSocket(roomName, "user-test");
@@ -2566,7 +2566,7 @@ describe("MeetingRoom lifecycle", () => {
         ).data?.members?.some(
           (member) =>
             member.user_id === "user-test" &&
-            member.avatar_url === "https://example.com/new.png" &&
+            member.avatar_url === "/api/avatars/new.png" &&
             member.avatar_display === "frame:new",
         ) ?? false,
     );
@@ -2591,7 +2591,7 @@ describe("MeetingRoom lifecycle", () => {
           user_id: "user-test",
           username: "new-user",
           display_name: "New Name",
-          avatar_url: "https://example.com/new.png",
+          avatar_url: "/api/avatars/new.png",
           avatar_display: "frame:new",
           updated_at: new Date().toISOString(),
         },
@@ -2607,7 +2607,7 @@ describe("MeetingRoom lifecycle", () => {
               name: "New Name",
               username: "new-user",
               display_name: "New Name",
-              avatar_url: "https://example.com/new.png",
+              avatar_url: "/api/avatars/new.png",
               avatar_display: "frame:new",
             }),
           ],
@@ -2619,7 +2619,7 @@ describe("MeetingRoom lifecycle", () => {
         event: "USER_PROFILE_UPDATE",
         data: {
           user_id: "user-test",
-          avatar_url: "https://example.com/new.png",
+          avatar_url: "/api/avatars/new.png",
         },
       },
     });
@@ -2648,7 +2648,7 @@ describe("MeetingRoom lifecycle", () => {
         ).data?.members?.some(
           (member) =>
             member.user_id === "user-test" &&
-            member.avatar_url === "https://example.com/new.png",
+            member.avatar_url === "/api/avatars/new.png",
         ) ?? false,
     );
     // The room still has the identity from the owner's join.
@@ -2661,7 +2661,7 @@ describe("MeetingRoom lifecycle", () => {
           members: [
             expect.objectContaining({
               user_id: "user-test",
-              avatar_url: "https://example.com/new.png",
+              avatar_url: "/api/avatars/new.png",
               avatar_display: "frame:new",
             }),
           ],
@@ -3481,6 +3481,77 @@ describe("MeetingRoom lifecycle", () => {
       op: 15,
       d: { participant: { self_mute: true } },
     });
+    socket.close();
+    observer.close();
+  });
+
+  it("never relays a profile-less client's avatar URL as sent", async () => {
+    const roomName = crypto.randomUUID();
+    const socket = await openMeetingSocket(roomName);
+    const observer = await openMeetingSocket(roomName, "observer-user");
+    await identifyMeetingSocket(observer);
+    await identifyMeetingSocket(socket, {
+      avatar_url: "https://attacker.example/x.png",
+    });
+    const joined = nextMessageWithOpcodeWithin(observer, 15);
+    socket.send(JSON.stringify({ op: 15, d: { self_deaf: false } }));
+    const message = await joined;
+    const avatar = (message as { d: { participant: { avatar_url: string } } }).d
+      .participant.avatar_url;
+    const url = new URL(avatar);
+    expect(url.pathname).toBe("/api/proxy-media");
+    expect(url.searchParams.get("url")).toBe("https://attacker.example/x.png");
+    expect(url.searchParams.get("exp")).toMatch(/^\d+$/);
+    expect(url.searchParams.get("sig")).toBeTruthy();
+    socket.close();
+    observer.close();
+  });
+
+  it("drops a profile-less client's avatar that is not http(s)", async () => {
+    const roomName = crypto.randomUUID();
+    const socket = await openMeetingSocket(roomName);
+    const observer = await openMeetingSocket(roomName, "observer-user");
+    await identifyMeetingSocket(observer);
+    await identifyMeetingSocket(socket, {
+      avatar_url: "file://attacker.example/x.png",
+    });
+    const joined = nextMessageWithOpcodeWithin(observer, 15);
+    socket.send(JSON.stringify({ op: 15, d: { self_deaf: false } }));
+    const message = await joined;
+    expect(JSON.stringify(message)).not.toContain("attacker.example");
+    socket.close();
+    observer.close();
+  });
+
+  it("keeps a share's inline still and clears a preview URL on another host", async () => {
+    const roomName = crypto.randomUUID();
+    const socket = await openMeetingSocket(roomName);
+    await identifyMeetingSocket(socket);
+    const observer = await openMeetingSocket(roomName, "observer-user");
+    await identifyMeetingSocket(observer);
+
+    const still = "data:image/jpeg;base64,/9j/AAAA";
+    const kept = nextMessageWithOpcodeWithin(observer, 15);
+    socket.send(JSON.stringify({ op: 15, d: { stream_preview_url: still } }));
+    await expect(kept).resolves.toMatchObject({
+      op: 15,
+      d: { participant: { stream_preview_url: still } },
+    });
+
+    for (const value of [
+      "https://evil.example/x.png",
+      "file://evil.example/x.png",
+      "//evil.example/x.png",
+    ]) {
+      const cleared = nextMessageWithOpcodeWithin(observer, 15);
+      socket.send(JSON.stringify({ op: 15, d: { stream_preview_url: value } }));
+      const message = await cleared;
+      expect(message, value).toMatchObject({
+        op: 15,
+        d: { participant: { stream_preview_url: null } },
+      });
+      expect(JSON.stringify(message)).not.toContain("evil.example");
+    }
     socket.close();
     observer.close();
   });

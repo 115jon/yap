@@ -448,6 +448,14 @@ protected:
   {
     if (op != GetOperation)
       return QNetworkAccessManager::createRequest(op, request, data);
+    // Image URLs come from the server and other users: another scheme (or a
+    // `file://host` URL through AnimatedPicture) is answered with an error.
+    // QML's Image opens `file:` itself, never here: yap-core guards those.
+    if (!yap_ui_media_url_allowed(request.url())) {
+      QNetworkRequest blocked(request);
+      blocked.setUrl(QUrl());
+      return QNetworkAccessManager::createRequest(op, blocked, data);
+    }
     // HTTP/1.1 only. Qt 6.6's HTTP/2 can leave a reply that never finishes,
     // and QML's image reader runs at most 8 network loads at once
     // (IMAGEREQUEST_MAX_NETWORK_REQUEST_COUNT), so a few stalled replies

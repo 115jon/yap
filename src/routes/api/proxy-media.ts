@@ -1,4 +1,14 @@
+import * as nodeCrypto from "node:crypto";
 import { createFileRoute } from "@tanstack/react-router";
+import * as cloudflareWorkers from "cloudflare:workers";
+import {
+  apiError,
+  apiSuccess,
+  getEnv,
+  isDesktopOrigin,
+  requireAuth,
+} from "@/lib/api-helpers";
+import { checkRateLimitDO } from "@/lib/rate-limit";
 import { cacheFetch, cacheGet, cacheSet } from "@/lib/cache";
 import { clog } from "@/lib/console-logger";
 import { resolveInstagramVideoMetadata } from "@/lib/instagram-video-resolver";
@@ -8,6 +18,18 @@ import {
 } from "@/lib/share-preview-proxy";
 import { isTikTokMediaHostname } from "@/lib/tiktok-hosts";
 import type { EmbedInfo } from "@/lib/types";
+import { serveGenericMedia } from "@/server/media-proxy/generic";
+import { isSocialRefreshMediaUrl } from "@/server/media-proxy/rewrite";
+import {
+  issueMediaPass,
+  MEDIA_PASS_TTL_SECONDS,
+  mediaPassCookie,
+  mediaProxyKey,
+  readMediaPassCookie,
+  verifyMediaPass,
+  verifyMediaUrlSignature,
+} from "@/server/media-proxy/signing";
+import { createDohResolver, MEDIA_PORTS } from "@/server/media-proxy/ssrf";
 import { extractAndProcessEmbeds } from "@/services/embed-fetcher";
 
 const log = clog("proxy-media");
@@ -1113,16 +1135,299 @@ export async function proxyMedia(
   });
 }
 
+type WaitUntil = (promise: Promise<unknown>) => void;
+
+/** workerd exports waitUntil from cloudflare:workers; absent in tests. */
+function getWaitUntil(): WaitUntil | undefined {
+  const candidate = (cloudflareWorkers as { waitUntil?: unknown }).waitUntil;
+  return typeof candidate === "function" ? (candidate as WaitUntil) : undefined;
+}
+
+function getDefaultCache(): Cache | null {
+  try {
+    return (
+      (globalThis.caches as { default?: Cache } | undefined)?.default ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Short, so a signed-out or suspended session stops working quickly. */
+export const BEARER_MEMO_TTL_MS = 30_000;
+const BEARER_MEMO_MAX = 2_000;
+const bearerMemo = new Map<string, { userId: string; until: number }>();
+
+/**
+ * Expo and the native apps send their session bearer to the API's own URLs.
+ * A valid session is remembered per isolate for BEARER_MEMO_TTL_MS, keyed
+ * by a hash of the token, so a screen of images costs one session lookup.
+ * Returns the session's user, or null.
+ */
+async function bearerUserId(request: Request): Promise<string | null> {
+  const authorization = request.headers.get("authorization");
+  if (!authorization?.startsWith("Bearer ")) return null;
+  const memoKey = nodeCrypto
+    .createHash("sha256")
+    .update(authorization)
+    .digest("base64url");
+  const now = Date.now();
+  const memo = bearerMemo.get(memoKey);
+  if (memo && memo.until > now) return memo.userId;
+  bearerMemo.delete(memoKey);
+
+  const result = await requireAuth(request);
+  if (result instanceof Response) return null;
+  if (bearerMemo.size >= BEARER_MEMO_MAX) {
+    const oldest = bearerMemo.keys().next().value;
+    if (oldest !== undefined) bearerMemo.delete(oldest);
+  }
+  bearerMemo.set(memoKey, {
+    userId: result.userId,
+    until: now + BEARER_MEMO_TTL_MS,
+  });
+  return result.userId;
+}
+
+export type GenericMediaAuthorization =
+  | { via: "signature" }
+  | { via: "pass" | "bearer"; userId: string }
+  | null;
+
+/** How (if at all) a generic-mode request is allowed to use the proxy. */
+export async function authorizeGenericMediaRequest(
+  request: Request,
+  targetUrl: string,
+  key: Buffer,
+  checkBearer: (request: Request) => Promise<string | null> = bearerUserId,
+): Promise<GenericMediaAuthorization> {
+  const params = new URL(request.url).searchParams;
+  const signature = params.get("sig");
+  // A bad or expired signature (a rotated key) still lets a pass or
+  // session through.
+  if (
+    signature &&
+    verifyMediaUrlSignature(targetUrl, signature, key, params.get("exp"))
+  ) {
+    return { via: "signature" };
+  }
+  const pass = verifyMediaPass(
+    readMediaPassCookie(request.headers.get("cookie")),
+    key,
+  );
+  if (pass) return { via: "pass", userId: pass.userId };
+  const userId = await checkBearer(request);
+  return userId ? { via: "bearer", userId } : null;
+}
+
+/**
+ * Per-user limit for URLs a client chose (pass or bearer), on top of the
+ * per-IP one: global, through the RATE_LIMITER Durable Object. Fails open,
+ * like the other users of the limiter.
+ */
+export const PROXY_MEDIA_USER_RATE_LIMIT = { limit: 600, windowMs: 60_000 };
+
+/**
+ * Signed requests carry no user, so they get a per-IP bucket of their own
+ * (global, through the same Durable Object), counted only when the request
+ * reaches upstream: edge cache hits cost nothing. Without it a signature
+ * anyone can get (a link whose preview names the URL) would make the proxy
+ * fetch for them limited only by the per-isolate IP limit.
+ */
+export const PROXY_MEDIA_SIGNED_IP_RATE_LIMIT = {
+  limit: 600,
+  windowMs: 60_000,
+};
+
+export type UserRateCheck = (userId: string) => Promise<Response | null>;
+export type SignedIpRateCheck = (clientIp: string) => Promise<Response | null>;
+
+const checkProxyUserRate: UserRateCheck = async (userId) => {
+  try {
+    return await checkRateLimitDO(
+      userId,
+      "proxy-media",
+      PROXY_MEDIA_USER_RATE_LIMIT,
+    );
+  } catch {
+    return null;
+  }
+};
+
+const checkProxySignedIpRate: SignedIpRateCheck = async (clientIp) => {
+  try {
+    return await checkRateLimitDO(
+      `ip:${clientIp}`,
+      "proxy-media-signed",
+      PROXY_MEDIA_SIGNED_IP_RATE_LIMIT,
+    );
+  } catch {
+    return null;
+  }
+};
+
+export interface ProxyMediaRateChecks {
+  user?: UserRateCheck;
+  signedIp?: SignedIpRateCheck;
+}
+
+function hostKey(url: URL): string {
+  return `${url.hostname.replace(/\.+$/, "")}:${url.port}`;
+}
+
+/**
+ * The route: social CDN links (X, TikTok, Instagram) keep the allowlisted
+ * path with its link refresh; any other http(s) media goes through the
+ * generic mode when the request is signed, carries the media pass or a
+ * signed-in bearer (a `sourceUrl` is then ignored). Unsigned requests for the remaining allowlisted hosts
+ * (KLIPY, Tenor, Google and Steam avatars) still work as before.
+ */
+export async function handleProxyMedia(
+  request: Request,
+  includeBody: boolean,
+  nested = false,
+  rateChecks: ProxyMediaRateChecks = {},
+): Promise<Response> {
+  const checkUserRate = rateChecks.user ?? checkProxyUserRate;
+  const checkSignedIpRate = rateChecks.signedIp ?? checkProxySignedIpRate;
+  const requestUrl = new URL(request.url);
+  const target = requestUrl.searchParams.get("url");
+  if (!target) return new Response("Missing media URL", { status: 400 });
+  let targetUrl: URL;
+  try {
+    targetUrl = new URL(target);
+  } catch {
+    return new Response("Invalid media URL", { status: 400 });
+  }
+
+  // A proxy URL inside a proxy URL: clients deployed before the server
+  // rewrote payloads wrap the delivered form again. Serve the inner one
+  // (its own `url`, `sig` and `sourceUrl`), one level deep.
+  if (!nested && targetUrl.pathname === "/api/proxy-media") {
+    const inner = new URL(requestUrl);
+    inner.search = targetUrl.search;
+    return handleProxyMedia(
+      new Request(inner, { method: request.method, headers: request.headers }),
+      includeBody,
+      true,
+      rateChecks,
+    );
+  }
+
+  if (isSocialRefreshMediaUrl(targetUrl)) {
+    return proxyMedia(request, includeBody);
+  }
+
+  const key = mediaProxyKey(
+    getEnv() as unknown as {
+      MEDIA_PROXY_SECRET?: string;
+      REALTIME_TICKET_SECRET?: string;
+    },
+  );
+  const authorization = key
+    ? await authorizeGenericMediaRequest(request, target, key)
+    : null;
+
+  if (!authorization) {
+    if (isAllowedMediaUrl(targetUrl)) return proxyMedia(request, includeBody);
+    return new Response("Media proxy request is not authorized", {
+      status: 401,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+
+  // Never proxy ourselves (a loop that would only cost requests).
+  if (hostKey(targetUrl) === hostKey(requestUrl)) {
+    return new Response("Unsupported media URL", { status: 400 });
+  }
+
+  // The default http(s) ports only, signed or not; redirect hops are held
+  // to the same rule (allowedPorts below).
+  if (!MEDIA_PORTS.has(targetUrl.port)) {
+    return new Response("Unsupported media port", {
+      status: 400,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+
+  let beforeUpstream: (() => Promise<Response | null>) | undefined;
+  if (authorization.via === "signature") {
+    const clientIp = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    beforeUpstream = () => checkSignedIpRate(clientIp);
+  } else {
+    const limited = await checkUserRate(authorization.userId);
+    if (limited) return limited;
+  }
+
+  return serveGenericMedia(request, targetUrl, includeBody, {
+    resolve: dohResolver,
+    ownHost: requestUrl.host,
+    cache: getDefaultCache(),
+    waitUntil: getWaitUntil(),
+    allowedPorts: MEDIA_PORTS,
+    beforeUpstream,
+  });
+}
+
+const dohResolver = createDohResolver();
+
 const GET = async ({ request }: { request: Request }) =>
-  proxyMedia(request, true);
+  handleProxyMedia(request, true);
 const HEAD = async ({ request }: { request: Request }) =>
-  proxyMedia(request, false);
+  handleProxyMedia(request, false);
+
+/**
+ * POST: the media pass for a signed-in web session, as an HttpOnly cookie
+ * scoped to this path (the web app's own <img> requests then carry it).
+ * DELETE: clears it on sign-out.
+ */
+const POST = async ({ request }: { request: Request }) => {
+  const auth = await requireAuth(request);
+  if (auth instanceof Response) return auth;
+  const key = mediaProxyKey(
+    getEnv() as unknown as {
+      MEDIA_PROXY_SECRET?: string;
+      REALTIME_TICKET_SECRET?: string;
+    },
+  );
+  if (!key) return apiError("Media proxy is not configured", 503);
+  const pass = issueMediaPass(key, auth.userId);
+  // `expiresIn` (seconds) lets the client time its renewal on its own
+  // clock; `expiresAt` stays for clients that read it.
+  const response = apiSuccess(
+    { expiresAt: pass.expiresAt, expiresIn: MEDIA_PASS_TTL_SECONDS },
+    200,
+    request,
+  );
+  response.headers.set(
+    "Set-Cookie",
+    mediaPassCookie(pass.value, MEDIA_PASS_TTL_SECONDS, {
+      crossSite: isDesktopOrigin(request.headers.get("origin")),
+    }),
+  );
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+};
+
+const DELETE = async ({ request }: { request: Request }) => {
+  const response = apiSuccess({ ok: true }, 200, request);
+  response.headers.set(
+    "Set-Cookie",
+    mediaPassCookie("", 0, {
+      crossSite: isDesktopOrigin(request.headers.get("origin")),
+    }),
+  );
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+};
 
 export const Route = createFileRoute("/api/proxy-media")({
   server: {
     handlers: {
       GET,
       HEAD,
+      POST,
+      DELETE,
     },
   },
 });

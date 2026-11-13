@@ -13,6 +13,8 @@
  * so the next card tries again.
  */
 
+import { unwrapProxyMediaUrl } from "@/lib/proxy-media-url";
+
 const SAMPLE = 24;
 /** The wash: a 16:9 thumbnail the card stretches (that is the blur). */
 export const WASH_W = 32;
@@ -170,7 +172,9 @@ export function readAmbientPicture(
  * photo's `=s96-c` and a Discord CDN `?size=` are raised to 512. Everything
  * else (our own /api/avatars uploads) is already the original.
  */
-export function fullSizeAvatarUrl(url: string): string {
+export function fullSizeAvatarUrl(deliveredUrl: string): string {
+  // A server-proxied avatar: resize the original (it loads proxied again).
+  const url = unwrapProxyMediaUrl(deliveredUrl);
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.toLowerCase();

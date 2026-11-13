@@ -391,6 +391,30 @@ describe("spotify", () => {
     ).toBe("https://open.spotify.com/embed/album/abc");
   });
 
+  it("loads Spotify's player only on a click", () => {
+    render(
+      <LinkEmbed
+        embed={{
+          id: "sp-click",
+          url: "https://open.spotify.com/track/abc",
+          type: "link",
+          provider: { name: "Spotify" },
+          rawTitle: "A song",
+          fields: [],
+        }}
+      />,
+    );
+    expect(document.querySelector("iframe")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Load the Spotify player for A song",
+      }),
+    );
+    expect(document.querySelector("iframe")?.getAttribute("src")).toBe(
+      "https://open.spotify.com/embed/track/abc?utm_source=generator",
+    );
+  });
+
   it("gives albums the taller player and tracks the compact one", () => {
     const { rerender } = render(
       <LinkEmbed
@@ -403,6 +427,7 @@ describe("spotify", () => {
         }}
       />,
     );
+    fireEvent.click(screen.getByTestId("spotify-click-to-load"));
     expect(
       (document.querySelector("iframe") as HTMLIFrameElement).style.height,
     ).toBe("152px");

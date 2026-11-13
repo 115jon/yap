@@ -1,3 +1,4 @@
+import { proxyArtworkUrlsForDelivery } from "@/server/media-proxy/rewrite";
 import { createFileRoute } from "@tanstack/react-router";
 import { requireActiveVoiceRoomSession, requireAuth } from "@/lib/api-helpers";
 import { clog } from "@/lib/console-logger";
@@ -75,7 +76,7 @@ const GET = async ({ request }: any) => {
     colo: cf?.colo ?? null,
     durationMs: Date.now() - startedAt,
   });
-  return Response.json(response, {
+  return Response.json(proxyArtworkUrlsForDelivery(response), {
     headers: {
       "Cache-Control": "private, max-age=30",
     },
