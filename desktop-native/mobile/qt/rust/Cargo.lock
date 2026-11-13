@@ -2887,7 +2887,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "yap-anim"
-version = "4.0.3"
+version = "4.1.0"
 dependencies = [
  "gif",
  "image",
@@ -2896,7 +2896,7 @@ dependencies = [
 
 [[package]]
 name = "yap-cache"
-version = "4.0.3"
+version = "4.1.0"
 dependencies = [
  "rusqlite",
  "serde",
@@ -2907,7 +2907,7 @@ dependencies = [
 
 [[package]]
 name = "yap-core"
-version = "4.0.3"
+version = "4.1.0"
 dependencies = [
  "futures-util",
  "keyring",
@@ -2926,7 +2926,7 @@ version = "0.1.0"
 
 [[package]]
 name = "yap-protocol"
-version = "4.0.3"
+version = "4.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2935,7 +2935,7 @@ dependencies = [
 
 [[package]]
 name = "yap-realtime"
-version = "4.0.3"
+version = "4.1.0"
 dependencies = [
  "futures-util",
  "serde_json",
@@ -2947,7 +2947,7 @@ dependencies = [
 
 [[package]]
 name = "yap-speaker"
-version = "4.0.3"
+version = "4.1.0"
 dependencies = [
  "windows",
  "windows-core",
@@ -2955,7 +2955,7 @@ dependencies = [
 
 [[package]]
 name = "yap-ui"
-version = "4.0.3"
+version = "4.1.0"
 dependencies = [
  "cxx",
  "cxx-qt",
@@ -2976,7 +2976,7 @@ dependencies = [
 
 [[package]]
 name = "yap-voice"
-version = "4.0.3"
+version = "4.1.0"
 dependencies = [
  "anyhow",
  "cc",
