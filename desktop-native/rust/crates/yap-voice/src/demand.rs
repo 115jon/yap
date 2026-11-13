@@ -38,6 +38,38 @@ pub struct Limits {
     pub paused: bool,
 }
 
+/// A phone's thermal status, as Android's `PowerManager` numbers it
+/// (`THERMAL_STATUS_MODERATE`, `_SEVERE`); below 0 is unknown.
+pub const THERMAL_MODERATE: i32 = 2;
+pub const THERMAL_SEVERE: i32 = 3;
+
+/// At most this many remote videos at once on a phone: the stage's, then
+/// shares, then the largest tiles.
+pub const PHONE_MAX_SHOWN: usize = 4;
+
+impl Limits {
+    /// A phone's receive policy: warm (`thermal` at
+    /// [`THERMAL_MODERATE`]) or on a metered network it pulls the middle
+    /// layer at most, hot ([`THERMAL_SEVERE`]) the lowest; otherwise only
+    /// the stage gets the full layer. At most [`PHONE_MAX_SHOWN`] videos;
+    /// in the background none.
+    pub fn phone(thermal: i32, metered: bool, background: bool) -> Self {
+        let cap = if thermal >= THERMAL_SEVERE {
+            Some(Quality::Low)
+        } else if thermal >= THERMAL_MODERATE || metered {
+            Some(Quality::Medium)
+        } else {
+            None
+        };
+        Self {
+            cap,
+            full_on_stage_only: true,
+            max_shown: Some(PHONE_MAX_SHOWN),
+            paused: background,
+        }
+    }
+}
+
 /// The participant a video key belongs to.
 fn owner(key: &str) -> &str {
     key.strip_prefix("cam-video-")
@@ -226,6 +258,37 @@ mod tests {
         let intent = s.intent();
         assert_eq!(quality(&intent, "cam-video-a"), Quality::Low);
         assert_eq!(quality(&intent, "cam-video-b"), Quality::Low);
+    }
+
+    #[test]
+    fn phone_heat_and_metering_should_cap_the_layer() {
+        assert_eq!(Limits::phone(0, false, false).cap, None);
+        assert_eq!(Limits::phone(1, false, false).cap, None);
+        assert_eq!(Limits::phone(-1, false, false).cap, None);
+        assert_eq!(Limits::phone(0, true, false).cap, Some(Quality::Medium));
+        assert_eq!(Limits::phone(2, false, false).cap, Some(Quality::Medium));
+        assert_eq!(Limits::phone(3, false, false).cap, Some(Quality::Low));
+        assert_eq!(Limits::phone(5, true, false).cap, Some(Quality::Low));
+    }
+
+    #[test]
+    fn phone_should_bound_tiles_and_pause_in_the_background() {
+        let calm = Limits::phone(0, false, false);
+        assert!(!calm.paused);
+        assert!(calm.full_on_stage_only);
+        assert_eq!(calm.max_shown, Some(PHONE_MAX_SHOWN));
+        assert!(Limits::phone(0, false, true).paused);
+    }
+
+    #[test]
+    fn a_metered_phone_should_pull_the_stage_at_the_middle_layer() {
+        let mut s = Surfaces::default();
+        s.shown.insert(1, ("cam-video-a".into(), size(1280, 720)));
+        s.stage = Some("a".into());
+        s.limits = Limits::phone(0, true, false);
+        assert_eq!(quality(&s.intent(), "cam-video-a"), Quality::Medium);
+        s.limits = Limits::phone(0, false, false);
+        assert_eq!(quality(&s.intent(), "cam-video-a"), Quality::High);
     }
 
     #[test]
