@@ -11,7 +11,8 @@ import Yap.Ui
 // count at most 2 device pixels per point: a phone's 3x screen would
 // otherwise ask for the full layer on a thumbnail. What the phone allows on
 // top (its heat, a metered network, at most four videos, nothing in the
-// background) is Limits::phone, fed by the hub.
+// background) is Limits::phone, fed by the hub. A watched share is pulled
+// only while one of these shows it, so leaving the call page releases it.
 VideoView {
     id: root
 
