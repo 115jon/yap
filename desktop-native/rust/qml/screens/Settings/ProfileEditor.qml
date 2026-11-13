@@ -18,116 +18,15 @@ import Yap.Ui
 T.Popup {
     id: editor
 
-    // The draft.
-    property string pronouns
-    property string bio
-    property string customStatus
-    property string accentColor
-    property string backgroundColor
-    property string bannerColor
-    property string avatarPath
-    property bool removeAvatar: false
-    // A recent avatar picked again (AvatarPickerModal.tsx): the stored URL
-    // the save sends, and its picture.
-    property string avatarUrl
-    property string avatarUrlShown
-    property string bannerPath
-    property bool removeBanner: false
-    // The frame editor's crop (`{x, y, width, height}` in percent, or
-    // null), when it changed (a recent avatar starts without one).
-    property var crop: null
-    property bool cropChanged: false
-    // The display-name style as the views carry it, or empty.
-    property string nameStyle
-    // A picture or video for the nameplate, or the upload to delete.
-    property string nameplatePath
-    property bool removeNameplate: false
-    property string localError
-    // A banner over its limit (the too-big card under the banner row).
-    property string bannerTooBig
-    property bool saved: false
+    // The draft, its checks and its saves (Yap.Ui's ProfileDraft); the
+    // editor keeps the pickers and the layout.
+    ProfileDraft {
+        id: draft
+        active: editor.visible
+    }
 
-    readonly property bool dirty: pronouns !== Settings.pronouns
-        || bio !== Settings.bio
-        || customStatus.trim() !== Settings.customStatus
-        || accentColor !== Settings.accentColor
-        || backgroundColor !== Settings.backgroundColor
-        || bannerColor !== Settings.bannerColor
-        || avatarPath.length > 0 || removeAvatar || avatarUrl.length > 0
-        || bannerPath.length > 0 || removeBanner
-        || cropChanged || nameStyle !== Session.meNameStyle
-        || nameplatePath.length > 0 || removeNameplate
-    readonly property string error: localError.length > 0 ? localError : Settings.profileError
-    // What the profile wears (collectibles apply at once, not on Save; a
-    // removed nameplate waits for Save, removePlate).
-    readonly property var worn: Session.meDisplay.length > 0 ? (JSON.parse(Session.meDisplay).collectibles ?? {}) : ({})
-    readonly property string shownAvatar: removeAvatar ? "" : avatarPath.length > 0 ? "file:///" + avatarPath
-        : avatarUrlShown.length > 0 ? avatarUrlShown : Settings.avatar
-    readonly property string shownBanner: removeBanner ? "" : bannerPath.length > 0 ? "file:///" + bannerPath : Settings.banner
-    // The stored crop, then the draft's (avatarDisplayToImageStyle).
-    readonly property var storedCrop: {
-        if (Session.meDisplay.length === 0)
-            return null
-        const display = JSON.parse(Session.meDisplay)
-        return display && display.crop ? display.crop : null
-    }
-    readonly property var shownCrop: removeAvatar ? null : cropChanged ? crop : storedCrop
-    readonly property string nameplateType: nameplatePath.length > 0 ? Settings.nameplateType(nameplatePath) : ""
-    // The plate the preview wears: the picked file, else the saved one.
-    readonly property string shownPlate: removeNameplate ? ""
-        : nameplatePath.length > 0 ? JSON.stringify({
-            still: nameplateType.startsWith("video/") ? "" : "file:///" + nameplatePath,
-            motion: nameplateType.startsWith("video/") ? "file:///" + nameplatePath : "",
-            border: "", light: false, assist: true
-        })
-        : Session.mePlate
-
-    function reset() {
-        pronouns = Settings.pronouns
-        bio = Settings.bio
-        customStatus = Settings.customStatus
-        accentColor = Settings.accentColor
-        backgroundColor = Settings.backgroundColor
-        bannerColor = Settings.bannerColor
-        avatarPath = ""
-        removeAvatar = false
-        avatarUrl = ""
-        avatarUrlShown = ""
-        bannerPath = ""
-        removeBanner = false
-        crop = null
-        cropChanged = false
-        nameStyle = Session.meNameStyle
-        nameplatePath = ""
-        removeNameplate = false
-        localError = ""
-        bannerTooBig = ""
-        saved = false
-    }
-    function save() {
-        localError = ""
-        Settings.saveProfile(JSON.stringify({
-            pronouns: pronouns,
-            bio: bio,
-            customStatus: customStatus,
-            accentColor: accentColor,
-            backgroundColor: backgroundColor,
-            bannerColor: bannerColor,
-            avatarPath: avatarPath,
-            removeAvatar: removeAvatar,
-            avatarUrl: avatarUrl,
-            bannerPath: bannerPath,
-            removeBanner: removeBanner,
-            crop: crop,
-            cropChanged: cropChanged,
-            nameStyle: nameStyle,
-            nameStyleChanged: nameStyle !== Session.meNameStyle,
-            nameplatePath: nameplatePath,
-            removeNameplate: removeNameplate,
-        }))
-    }
     function requestClose() {
-        if (dirty || Settings.profileSaving)
+        if (draft.dirty || draft.saving)
             bar.nudge()
         else
             close()
@@ -135,39 +34,33 @@ T.Popup {
     // The avatar's file comes from Choose an image, which stays open under
     // the system dialog: a file over the limit shows its too-big card there
     // (Pick another asks again); one that fits closes it for the crop. A
-    // banner over the limit shows its card under the banner row. Nothing
-    // over its limit joins the draft, so nothing over it is uploaded.
+    // banner over the limit shows its card under the banner row.
     function pick(kind) {
         const paths = Files.pickFiles(kind === "avatar" ? qsTr("Choose an avatar") : qsTr("Choose a banner"))
         const path = paths.length > 0 ? paths[0] : ""
         if (path.length === 0)
             return
-        if (Settings.imageType(path).length === 0) {
+        const tooBig = draft.check(kind, path)
+        if (tooBig === null) {
             avatarPicker.close()
-            localError = kind === "avatar" ? qsTr("Choose an image file for your avatar.") : qsTr("Choose an image file for your banner.")
             return
         }
-        // The plan sets the limit: 25 MB with bigUploads, else 8 MB.
-        const tooBig = Limits.checkUpTo(kind, path, kind === "avatar" ? Settings.avatarLimit : Settings.bannerLimit)
         if (kind === "avatar") {
             avatarPicker.tooBig = tooBig
             if (tooBig.length > 0)
                 return
             avatarPicker.close()
-        } else {
-            bannerTooBig = tooBig
-            if (tooBig.length > 0)
-                return
+        } else if (tooBig.length > 0) {
+            return
         }
-        localError = ""
+        draft.localError = ""
         if (kind === "avatar") {
             // handleAvatarFile: framed before it joins the draft.
             cropper.filePath = path
             cropper.source = "file:///" + path
             cropper.open()
         } else {
-            bannerPath = path
-            removeBanner = false
+            draft.takeBanner(path)
         }
     }
 
@@ -177,22 +70,7 @@ T.Popup {
         const path = paths.length > 0 ? paths[0] : ""
         if (path.length === 0)
             return
-        if (Settings.nameplateType(path).length === 0) {
-            localError = qsTr("Choose an image or video file for your nameplate.")
-            return
-        }
-        localError = ""
-        removeNameplate = false
-        nameplatePath = path
-    }
-    // handleRemoveNameplate: a picked file is dropped, and the saved plate,
-    // uploaded or collectible, comes off on Save (the draft; the core
-    // deletes the upload and empties the slot).
-    function removePlate() {
-        localError = ""
-        nameplatePath = ""
-        if (Session.mePlate.length > 0 || worn.nameplate !== undefined)
-            removeNameplate = true
+        draft.takeNameplate(path)
     }
 
     parent: T.Overlay.overlay
@@ -207,7 +85,7 @@ T.Popup {
     onVisibleChanged: ShellState.modalCount += visible ? 1 : -1
     focus: true
     closePolicy: T.Popup.NoAutoClose
-    onAboutToShow: reset()
+    onAboutToShow: draft.reset()
     // Opened over Settings, the focus stays in Settings unless the editor
     // takes it: Escape (handled by the content scope) would never reach it.
     onOpened: contentItem.forceActiveFocus()
@@ -224,23 +102,6 @@ T.Popup {
         color: Theme.ply0
         border.width: 1
         border.color: Theme.line
-    }
-
-    // A save that went through: the draft is the profile now.
-    Connections {
-        target: Settings
-        function onProfileSavedChanged() {
-            if (!editor.visible)
-                return
-            editor.reset()
-            editor.saved = true
-            savedTimer.restart()
-        }
-    }
-    Timer {
-        id: savedTimer
-        interval: 2400
-        onTriggered: editor.saved = false
     }
 
     contentItem: FocusScope {
@@ -263,7 +124,7 @@ T.Popup {
                 Accessible.role: Accessible.Heading
             }
             Row {
-                visible: editor.saved && !editor.dirty
+                visible: draft.saved && !draft.dirty
                 anchors.right: closeKey.left
                 anchors.rightMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
@@ -333,28 +194,28 @@ T.Popup {
                 ProfileCard {
                     id: preview
                     width: 340
-                    deco: editor.shownAvatar.length > 0 ? Session.meDeco : ""
+                    deco: draft.shownAvatar.length > 0 ? Session.meDeco : ""
                     effect: Session.meEffect
                     frame: Session.meFrame
-                    nameStyle: editor.nameStyle
+                    nameStyle: draft.nameStyle
                     badges: Settings.badges
                     animate: editor.visible
                     name: Settings.name
                     username: Settings.username
-                    avatar: editor.shownAvatar
-                    crop: editor.shownCrop
+                    avatar: draft.shownAvatar
+                    crop: draft.shownCrop
                     initials: Settings.initials
-                    pronouns: editor.pronouns.trim()
+                    pronouns: draft.pronouns.trim()
                     presence: Settings.status
-                    customStatus: editor.customStatus.trim()
-                    banner: editor.shownBanner
-                    bannerColor: editor.bannerColor
-                    surfaceColor: editor.backgroundColor
-                    accentColor: editor.accentColor
+                    customStatus: draft.customStatus.trim()
+                    banner: draft.shownBanner
+                    bannerColor: draft.bannerColor
+                    surfaceColor: draft.backgroundColor
+                    accentColor: draft.accentColor
                     Accessible.role: Accessible.Graphic
                     Accessible.name: qsTr("Profile preview")
                     Column {
-                        visible: editor.bio.trim().length > 0
+                        visible: draft.bio.trim().length > 0
                         width: parent.width
                         spacing: 8
                         Text {
@@ -365,7 +226,7 @@ T.Popup {
                         Text {
                             width: parent.width
                             textFormat: Text.PlainText
-                            text: editor.bio.trim()
+                            text: draft.bio.trim()
                             wrapMode: Text.Wrap
                             color: preview.ink
                             font: Theme.type.description
@@ -396,7 +257,7 @@ T.Popup {
                 // Your nameplate behind a 48 px member row: the avatar
                 // (without its decoration) and the name at 15/500.
                 Rectangle {
-                    visible: editor.shownPlate.length > 0
+                    visible: draft.shownPlate.length > 0
                     width: parent.width
                     height: 48
                     radius: 8
@@ -409,7 +270,7 @@ T.Popup {
                     NameplateLayer {
                         anchors.fill: parent
                         anchors.margins: 1
-                        plate: editor.shownPlate
+                        plate: draft.shownPlate
                         playing: editor.visible
                         // A custom plate fades in from the left
                         // (UserNameplateLayer.tsx nameplateIdentity mask).
@@ -422,8 +283,8 @@ T.Popup {
                         anchors.verticalCenter: parent.verticalCenter
                         size: 32
                         initials: Settings.initials
-                        source: editor.shownAvatar
-                        crop: editor.shownCrop
+                        source: draft.shownAvatar
+                        crop: draft.shownCrop
                     }
                     // The name in its style, held to 2.8:1 on the plate.
                     DisplayName {
@@ -432,7 +293,7 @@ T.Popup {
                         anchors.verticalCenter: parent.verticalCenter
                         width: Math.min(implicitWidth, parent.width - plateAvatar.width - 36)
                         text: Settings.name
-                        nameStyle: editor.nameStyle
+                        nameStyle: draft.nameStyle
                         color: Theme.ink1
                         font: Theme.type.setting
                         ground: Theme.ply2
@@ -455,27 +316,23 @@ T.Popup {
                             custom: true
                             rowId: "profile-avatar"
                             label: qsTr("Avatar")
-                            description: editor.removeAvatar ? qsTr("Removed when you save")
-                                : editor.avatarPath.length > 0 ? qsTr("New image, uploads when you save")
-                                : editor.avatarUrl.length > 0 ? qsTr("Recent image, applies when you save")
-                                : Settings.customAvatar ? qsTr("Your current avatar")
-                                : qsTr("Using your sign-in picture")
+                            description: draft.avatarNote
                             // Thumb round: the picture cropped round, or the
                             // name's initial at 15/600 on the tint.
                             leading: Component {
                                 Thumb {
                                     round: true
                                     Avatar {
-                                        visible: editor.shownAvatar.length > 0
+                                        visible: draft.shownAvatar.length > 0
                                         anchors.centerIn: parent
                                         size: 42
                                         round: true
                                         initials: Settings.name
-                                        source: editor.shownAvatar
-                                        crop: editor.shownCrop
+                                        source: draft.shownAvatar
+                                        crop: draft.shownCrop
                                     }
                                     Text {
-                                        visible: editor.shownAvatar.length === 0
+                                        visible: draft.shownAvatar.length === 0
                                         anchors.centerIn: parent
                                         textFormat: Text.PlainText
                                         text: Settings.name.trim().charAt(0).toUpperCase()
@@ -498,31 +355,19 @@ T.Popup {
                                     variant: "ghost"
                                     text: qsTr("Crop")
                                     Accessible.name: qsTr("Crop avatar")
-                                    enabled: editor.shownAvatar.length > 0
+                                    enabled: draft.shownAvatar.length > 0
                                     onClicked: {
                                         cropper.filePath = ""
-                                        cropper.source = editor.shownAvatar
+                                        cropper.source = draft.shownAvatar
                                         cropper.open()
                                     }
                                 }
                                 KitButton {
-                                    visible: editor.avatarPath.length > 0 || editor.avatarUrl.length > 0
-                                        || (!editor.removeAvatar && (Settings.customAvatar || editor.shownCrop !== null))
+                                    visible: draft.canRemoveAvatar
                                     variant: "ghost"
                                     text: qsTr("Remove")
                                     Accessible.name: qsTr("Remove avatar")
-                                    onClicked: {
-                                        editor.localError = ""
-                                        editor.crop = null
-                                        editor.cropChanged = false
-                                        if (editor.avatarPath.length > 0 || editor.avatarUrl.length > 0) {
-                                            editor.avatarPath = ""
-                                            editor.avatarUrl = ""
-                                            editor.avatarUrlShown = ""
-                                        } else {
-                                            editor.removeAvatar = true
-                                        }
-                                    }
+                                    onClicked: draft.dropAvatar()
                                 }
                             }
                         }
@@ -530,19 +375,16 @@ T.Popup {
                             custom: true
                             rowId: "profile-banner"
                             label: qsTr("Banner")
-                            description: editor.removeBanner ? qsTr("Removed when you save")
-                                : editor.bannerPath.length > 0 ? qsTr("New image, uploads when you save")
-                                : Settings.banner.length > 0 ? qsTr("Your current banner")
-                                : qsTr("No banner. Your banner color shows instead.")
+                            description: draft.bannerNote
                             leading: Component {
                                 Thumb {
                                     wide: true
-                                    color: editor.bannerColor.length > 0 ? editor.bannerColor
-                                        : editor.accentColor.length > 0 ? editor.accentColor : Theme.accentTint
+                                    color: draft.bannerColor.length > 0 ? draft.bannerColor
+                                        : draft.accentColor.length > 0 ? draft.accentColor : Theme.accentTint
                                     Image {
                                         anchors.fill: parent
-                                        visible: editor.shownBanner.length > 0
-                                        source: editor.shownBanner
+                                        visible: draft.shownBanner.length > 0
+                                        source: draft.shownBanner
                                         fillMode: Image.PreserveAspectCrop
                                         asynchronous: true
                                         sourceSize.width: 160
@@ -557,28 +399,23 @@ T.Popup {
                                     onClicked: editor.pick("banner")
                                 }
                                 KitButton {
-                                    visible: editor.shownBanner.length > 0
+                                    visible: draft.shownBanner.length > 0
                                     variant: "ghost"
                                     text: qsTr("Remove")
                                     Accessible.name: qsTr("Remove banner")
-                                    onClicked: {
-                                        if (editor.bannerPath.length > 0)
-                                            editor.bannerPath = ""
-                                        else
-                                            editor.removeBanner = true
-                                    }
+                                    onClicked: draft.dropBanner()
                                 }
                             }
                         }
                         Item {
-                            visible: editor.bannerTooBig.length > 0
+                            visible: draft.bannerTooBig.length > 0
                             width: parent.width
                             height: visible ? bannerCard.height + 16 : 0
                             TooBigCard {
                                 id: bannerCard
                                 y: 4
                                 width: parent.width
-                                info: editor.bannerTooBig.length > 0 ? JSON.parse(editor.bannerTooBig) : ({})
+                                info: draft.bannerTooBig.length > 0 ? JSON.parse(draft.bannerTooBig) : ({})
                                 onAction: editor.pick("banner")
                             }
                         }
@@ -591,8 +428,8 @@ T.Popup {
                             ColorControl {
                                 width: parent.width
                                 name: qsTr("banner color")
-                                value: editor.bannerColor
-                                onPicked: value => editor.bannerColor = value
+                                value: draft.bannerColor
+                                onPicked: value => draft.bannerColor = value
                             }
                         }
                     }
@@ -609,8 +446,8 @@ T.Popup {
                             ColorControl {
                                 width: parent.width
                                 name: qsTr("background color")
-                                value: editor.backgroundColor
-                                onPicked: value => editor.backgroundColor = value
+                                value: draft.backgroundColor
+                                onPicked: value => draft.backgroundColor = value
                             }
                         }
                         SettingsRow {
@@ -622,8 +459,8 @@ T.Popup {
                             ColorControl {
                                 width: parent.width
                                 name: qsTr("accent color")
-                                value: editor.accentColor
-                                onPicked: value => editor.accentColor = value
+                                value: draft.accentColor
+                                onPicked: value => draft.accentColor = value
                             }
                         }
                     }
@@ -640,23 +477,23 @@ T.Popup {
                             descriptionItem: Component {
                                 DisplayName {
                                     text: Settings.name
-                                    nameStyle: editor.nameStyle
+                                    nameStyle: draft.nameStyle
                                     color: Theme.ink2
                                     font: Theme.type.menuTitle
                                     ground: Theme.ply2
                                 }
                             }
                             KitButton {
-                                text: editor.nameStyle.length > 0 ? qsTr("Edit") : qsTr("Add")
-                                Accessible.name: editor.nameStyle.length > 0 ? qsTr("Edit display name style") : qsTr("Add display name style")
+                                text: draft.nameStyle.length > 0 ? qsTr("Edit") : qsTr("Add")
+                                Accessible.name: draft.nameStyle.length > 0 ? qsTr("Edit display name style") : qsTr("Add display name style")
                                 onClicked: styleDialog.open()
                             }
                             KitButton {
-                                visible: editor.nameStyle.length > 0
+                                visible: draft.nameStyle.length > 0
                                 variant: "ghost"
                                 text: qsTr("Clear")
                                 Accessible.name: qsTr("Clear display name style")
-                                onClicked: editor.nameStyle = ""
+                                onClicked: draft.nameStyle = ""
                             }
                         }
                         SettingsRow {
@@ -670,8 +507,8 @@ T.Popup {
                                 accessibleName: qsTr("Custom status")
                                 max: 128
                                 placeholder: qsTr("Shipping the release")
-                                value: editor.customStatus
-                                onEdited: value => editor.customStatus = value
+                                value: draft.customStatus
+                                onEdited: value => draft.customStatus = value
                             }
                         }
                         SettingsRow {
@@ -684,8 +521,8 @@ T.Popup {
                                 accessibleName: qsTr("Pronouns")
                                 max: 40
                                 placeholder: qsTr("they/them")
-                                value: editor.pronouns
-                                onEdited: value => editor.pronouns = value
+                                value: draft.pronouns
+                                onEdited: value => draft.pronouns = value
                             }
                         }
                         SettingsRow {
@@ -699,8 +536,8 @@ T.Popup {
                                 max: 190
                                 multiline: true
                                 placeholder: qsTr("Night owl, synth collector, always up for co-op.")
-                                value: editor.bio
-                                onEdited: value => editor.bio = value
+                                value: draft.bio
+                                onEdited: value => draft.bio = value
                             }
                         }
                     }
@@ -711,7 +548,7 @@ T.Popup {
                         description: qsTr("Decorations from your collection.")
                         SettingsRow {
                             custom: true; rowId: "profile-decoration"; label: qsTr("Avatar decoration")
-                            description: editor.worn.avatarDecoration?.name ?? qsTr("None")
+                            description: draft.worn.avatarDecoration?.name ?? qsTr("None")
                             // The worn ring art at 36, or the sparkle.
                             leading: Component {
                                 Thumb {
@@ -733,23 +570,23 @@ T.Popup {
                                     }
                                 }
                             }
-                            CollectibleKeys { kind: "avatar_decoration"; on: editor.worn.avatarDecoration !== undefined }
+                            CollectibleKeys { kind: "avatar_decoration"; on: draft.worn.avatarDecoration !== undefined }
                         }
                         SettingsRow {
                             custom: true; rowId: "profile-effect"; label: qsTr("Profile effect")
-                            description: editor.worn.profileEffect?.name ?? qsTr("None")
-                            CollectibleKeys { kind: "profile_effect"; on: editor.worn.profileEffect !== undefined }
+                            description: draft.worn.profileEffect?.name ?? qsTr("None")
+                            CollectibleKeys { kind: "profile_effect"; on: draft.worn.profileEffect !== undefined }
                         }
                         SettingsRow {
                             custom: true; rowId: "profile-frame"; label: qsTr("Profile frame")
-                            description: editor.worn.profileFrame?.name ?? qsTr("None")
-                            CollectibleKeys { kind: "profile_frame"; on: editor.worn.profileFrame !== undefined }
+                            description: draft.worn.profileFrame?.name ?? qsTr("None")
+                            CollectibleKeys { kind: "profile_frame"; on: draft.worn.profileFrame !== undefined }
                         }
                         SettingsRow {
                             custom: true; rowId: "profile-nameplate"; label: qsTr("Nameplate")
-                            description: editor.removeNameplate ? qsTr("Removed when you save")
-                                : editor.nameplatePath.length > 0 ? qsTr("New file, uploads when you save")
-                                : editor.worn.nameplate?.name ?? (Session.mePlate.length > 0 ? qsTr("Custom nameplate") : qsTr("None"))
+                            description: draft.removeNameplate ? qsTr("Removed when you save")
+                                : draft.nameplatePath.length > 0 ? qsTr("New file, uploads when you save")
+                                : draft.worn.nameplate?.name ?? (Session.mePlate.length > 0 ? qsTr("Custom nameplate") : qsTr("None"))
                             Row {
                                 spacing: 8
                                 KitButton {
@@ -765,12 +602,11 @@ T.Popup {
                                     onClicked: editor.pickNameplate()
                                 }
                                 KitButton {
-                                    visible: editor.nameplatePath.length > 0
-                                        || (!editor.removeNameplate && (Session.mePlate.length > 0 || editor.worn.nameplate !== undefined))
+                                    visible: draft.canRemoveNameplate
                                     variant: "ghost"
                                     text: qsTr("Remove")
                                     Accessible.name: qsTr("Remove nameplate")
-                                    onClicked: editor.removePlate()
+                                    onClicked: draft.removePlate()
                                 }
                             }
                         }
@@ -782,11 +618,11 @@ T.Popup {
         UnsavedBar {
             id: bar
             anchors.bottom: parent.bottom
-            dirty: editor.dirty || editor.error.length > 0
+            dirty: draft.dirty || draft.error.length > 0
             saving: Settings.profileSaving
-            error: editor.error
-            onReset: editor.reset()
-            onSave: editor.save()
+            error: draft.error
+            onReset: draft.reset()
+            onSave: draft.save()
         }
     }
 
@@ -929,35 +765,26 @@ T.Popup {
         id: cropper
         property string filePath
         name: Settings.name
-        initialCrop: editor.shownCrop
+        initialCrop: draft.shownCrop
         round: Session.meDeco.length > 0
-        onApplied: crop => {
-            if (filePath.length > 0) {
-                editor.avatarPath = filePath
-                editor.avatarUrl = ""
-                editor.avatarUrlShown = ""
-            }
-            editor.removeAvatar = false
-            editor.crop = crop
-            editor.cropChanged = true
-        }
+        onApplied: crop => draft.frameAvatar(filePath, crop)
     }
 
     NameStyleDialog {
         id: styleDialog
         displayName: Settings.name
         username: Settings.username
-        avatar: editor.shownAvatar
-        avatarCrop: editor.shownCrop
+        avatar: draft.shownAvatar
+        avatarCrop: draft.shownCrop
         initials: Settings.initials
-        initialStyle: editor.nameStyle
-        surfaceColor: editor.backgroundColor
-        accentColor: editor.accentColor
-        bannerColor: editor.bannerColor
+        initialStyle: draft.nameStyle
+        surfaceColor: draft.backgroundColor
+        accentColor: draft.accentColor
+        bannerColor: draft.bannerColor
         // hasPerk(entitlement, "allNameStyles"), as the web does;
         // update-profile refuses a Yap style without it.
         canUseYapStyles: Settings.allNameStyles
-        onApplied: style => editor.nameStyle = style
+        onApplied: style => draft.nameStyle = style
     }
 
     // Choose an image (AvatarPickerModal.tsx): upload, or one of the last
@@ -966,15 +793,6 @@ T.Popup {
         id: avatarPicker
         name: Settings.name
         onUploadRequested: editor.pick("avatar")
-        onRecentPicked: (stored, url) => {
-            editor.localError = ""
-            editor.avatarPath = ""
-            editor.removeAvatar = false
-            editor.avatarUrl = stored
-            editor.avatarUrlShown = url
-            // withoutCrop: a recent picture starts unframed.
-            editor.crop = null
-            editor.cropChanged = true
-        }
+        onRecentPicked: (stored, url) => draft.takeRecent(stored, url)
     }
 }

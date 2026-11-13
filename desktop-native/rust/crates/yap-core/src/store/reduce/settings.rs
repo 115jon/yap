@@ -295,7 +295,7 @@ impl State {
         }
     }
 
-    fn refresh_me(&mut self, fx: &mut Effects) {
+    pub(super) fn refresh_me(&mut self, fx: &mut Effects) {
         if self.pending.me.is_none() {
             self.pending.me = self.http(fx, ApiRequest::Me);
         }
@@ -402,14 +402,16 @@ impl State {
                 current.clone().unwrap_or(Value::Null),
             );
         }
-        let status = clip(&draft.custom_status, CUSTOM_STATUS_MAX);
-        let saved_status = me.custom_status.as_deref().unwrap_or_default().trim();
-        let custom_status =
-            (status != saved_status).then(|| (!status.is_empty()).then_some(status));
-        let mut steps = vec![ProfileStep::Patch {
-            patch: Value::Object(patch),
-            custom_status,
-        }];
+        let mut steps = vec![ProfileStep::Patch(Value::Object(patch))];
+        // The custom status only when the editor's field was changed: one
+        // left alone never goes out, whatever the account shows by then.
+        if let Some(status) = &draft.custom_status {
+            let status = clip(status, CUSTOM_STATUS_MAX);
+            let saved = me.custom_status.as_deref().unwrap_or_default().trim();
+            if status != saved {
+                steps.push(ProfileStep::Status((!status.is_empty()).then_some(status)));
+            }
+        }
         if let (Some((path, content_type)), false) = (&draft.avatar, draft.remove_avatar) {
             steps.push(ProfileStep::Upload {
                 asset: ProfileAsset::Avatar {
@@ -468,7 +470,20 @@ impl State {
             return;
         };
         let id = match step {
-            ProfileStep::Patch { patch, .. } => self.http(fx, ApiRequest::UpdateProfile(patch)),
+            ProfileStep::Patch(patch) => self.http(fx, ApiRequest::UpdateProfile(patch)),
+            ProfileStep::Status(custom) => {
+                let status = self
+                    .me()
+                    .and_then(|me| me.status.clone())
+                    .unwrap_or_else(|| "online".into());
+                let id = self.set_presence(fx, &status, custom);
+                if id.is_none() {
+                    // Nothing to send (the account has it already).
+                    self.settings.profile_steps.pop_front();
+                    return self.next_profile_step(fx);
+                }
+                id
+            }
             ProfileStep::DeleteBanner => self.http(fx, ApiRequest::DeleteBanner),
             ProfileStep::DeleteNameplate => self.http(fx, ApiRequest::DeleteNameplate),
             ProfileStep::ClearNameplate { body } => {
@@ -628,7 +643,7 @@ impl State {
                 }
             }
             4 => self.on_display_name_saved(fx, result),
-            5 => self.on_profile_step(fx, result),
+            5 => self.on_profile_step(fx, id, result),
             // A theme that did not save: the account says what it is.
             6 => {
                 if result.is_err() {
@@ -668,7 +683,12 @@ impl State {
         }
     }
 
-    fn on_profile_step(&mut self, fx: &mut Effects, result: Result<ApiResponse, ApiError>) {
+    fn on_profile_step(
+        &mut self,
+        fx: &mut Effects,
+        id: RequestId,
+        result: Result<ApiResponse, ApiError>,
+    ) {
         let Some(step) = self.settings.profile_steps.pop_front() else {
             return;
         };
@@ -680,23 +700,14 @@ impl State {
                 return;
             }
         };
-        match (step, response) {
-            (
-                ProfileStep::Patch {
-                    custom_status: Some(custom),
-                    ..
-                },
-                _,
-            ) => {
-                let status = self
-                    .me()
-                    .and_then(|me| me.status.clone())
-                    .unwrap_or_else(|| "online".into());
-                self.set_presence(fx, &status, custom);
-            }
-            (ProfileStep::Refresh, ApiResponse::Me(me)) => self.on_me(fx, Ok(ApiResponse::Me(me))),
-            _ => {}
+        if let (ProfileStep::Refresh, ApiResponse::Me(me)) = (step, response) {
+            self.on_me(fx, id, Ok(ApiResponse::Me(me)));
         }
+        self.next_profile_step(fx);
+    }
+
+    /// The next step of a profile save, or the save landed.
+    fn next_profile_step(&mut self, fx: &mut Effects) {
         if self.settings.profile_steps.is_empty() {
             self.settings.profile_saved += 1;
         } else {

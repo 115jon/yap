@@ -9,8 +9,8 @@ use yap_core::settings::{
     theme_seed, validate_display_name, AvatarCrop,
 };
 use yap_core::store::{
-    reduce, ApiRequest, ApiResponse, Command, Effect, GatewayEvent, Input, Load, ProfileAsset,
-    ProfileDraft, RequestId, SettingsView, State, ViewUpdate,
+    reduce, ApiRequest, ApiResponse, Command, Dispatch, Effect, GatewayEvent, Input, Load,
+    ProfileAsset, ProfileDraft, RequestId, SettingsView, State, ViewUpdate,
 };
 use yap_core::ApiError;
 
@@ -248,6 +248,16 @@ fn a_display_name_over_80_characters_should_be_refused() {
 }
 
 #[test]
+fn a_display_name_should_be_counted_in_utf16_units_as_the_server_counts_it() {
+    // 40 emoji outside the BMP are 80 UTF-16 units: the limit exactly.
+    assert!(validate_display_name(&"\u{1F600}".repeat(40)).is_ok());
+    // 41 are 82 units, though only 41 chars: the server refuses them.
+    assert!(validate_display_name(&"\u{1F600}".repeat(41)).is_err());
+    // A BMP character is one unit, whatever its UTF-8 length.
+    assert!(validate_display_name(&"\u{00E9}".repeat(80)).is_ok());
+}
+
+#[test]
 fn a_display_name_should_be_trimmed() {
     assert_eq!(validate_display_name("  Ada ").as_deref(), Ok("Ada"));
 }
@@ -430,7 +440,7 @@ fn draft() -> ProfileDraft {
     ProfileDraft {
         pronouns: " she/her ".into(),
         bio: "Hi".into(),
-        custom_status: "Shipping".into(),
+        custom_status: None,
         accent_color: Some("#f472b6".into()),
         background_color: None,
         banner_color: None,
@@ -500,7 +510,7 @@ fn a_profile_save_should_end_with_the_profile_read_back() {
 fn a_changed_custom_status_should_go_out_as_presence() {
     let mut client = Client::online();
     let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
-        custom_status: "Away".into(),
+        custom_status: Some("Away".into()),
         ..draft()
     })));
     let (id, _) = patch(&fx);
@@ -513,6 +523,232 @@ fn a_changed_custom_status_should_go_out_as_presence() {
             custom_status: Some("Away".into())
         }
     );
+}
+
+// A status saved from the profile editor, with the profile's re-fetch
+// racing it (the server answers `/api/users/me` before the status lands).
+
+/// Signed in without a custom status.
+fn no_status() -> Value {
+    let mut me = me_json();
+    me["custom_status"] = Value::Null;
+    me
+}
+
+fn me_status(client: &Client) -> Option<String> {
+    client.state.me().and_then(|me| me.custom_status.clone())
+}
+
+/// Our own status as the gateway echoes it (`PRESENCE_UPDATE` to our
+/// servers).
+fn status_echo(client: &mut Client, custom: Option<&str>) -> Vec<Effect> {
+    let session = client.state.session().expect("session").id;
+    let event = Dispatch::decode(
+        "PRESENCE_UPDATE",
+        json!({ "user_id": "user_fixture_me", "status": "online", "custom_status": custom }),
+    )
+    .expect("decodes");
+    client.input(Input::Gateway {
+        session,
+        event: GatewayEvent::Dispatch(event),
+    })
+}
+
+/// Saves `status` from the editor, the server answering the re-fetch with
+/// the profile as it was when it can (before the status lands), and echoing
+/// the status over the gateway after. The settings view the save landed on
+/// (what the editor takes again), and the one after the echo.
+fn save_status_racing_the_re_fetch(
+    client: &mut Client,
+    status: &str,
+) -> (SettingsView, SettingsView) {
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        custom_status: Some(status.into()),
+        ..draft()
+    })));
+    let (id, _) = patch(&fx);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    let (presence, _) = find(&fx, |r| matches!(r, ApiRequest::SetPresence { .. }));
+    let mut saved = None;
+    let mut landed = |fx: &[Effect]| {
+        if let Some(view) = settings(fx).filter(|v| v.profile_saved == 1) {
+            saved.get_or_insert_with(|| view.clone());
+        }
+    };
+    // The re-fetch, if it went out already: read before the status lands.
+    if let Some((id, request)) = requests(&fx)
+        .into_iter()
+        .find(|(_, r)| *r == ApiRequest::Me)
+    {
+        landed(&client.respond(id, &request, no_status()));
+    }
+    let fx = client.answer(presence, Ok(ApiResponse::Done));
+    landed(&fx);
+    // The re-fetch, if it waited: the server has the status by now.
+    if let Some((id, request)) = requests(&fx)
+        .into_iter()
+        .find(|(_, r)| *r == ApiRequest::Me)
+    {
+        let mut body = no_status();
+        body["custom_status"] = json!(status);
+        landed(&client.respond(id, &request, body));
+    }
+    let saved = saved.expect("the save landed");
+    let fx = status_echo(client, Some(status));
+    let after = settings(&fx).cloned().unwrap_or_else(|| saved.clone());
+    (saved, after)
+}
+
+#[test]
+fn a_status_saved_from_the_editor_should_survive_the_profile_re_fetch() {
+    let mut client = Client::online_as(no_status());
+    let (saved, after) = save_status_racing_the_re_fetch(&mut client, "Away");
+    assert_eq!(
+        (saved.custom_status.as_str(), saved.profile_saving),
+        ("Away", false)
+    );
+    assert_eq!(after.custom_status, "Away");
+    assert_eq!(me_status(&client).as_deref(), Some("Away"));
+}
+
+#[test]
+fn a_second_save_that_leaves_the_status_should_not_clear_it() {
+    let mut client = Client::online_as(no_status());
+    let (saved, _) = save_status_racing_the_re_fetch(&mut client, "Away");
+    // The editor takes the account again as the save lands...
+    assert_eq!(saved.custom_status, "Away");
+    // ...then only the pronouns change: the field goes out untouched.
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        pronouns: "he/him".into(),
+        custom_status: None,
+        ..draft()
+    })));
+    let (id, _) = patch(&fx);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    let presence: Vec<_> = requests(&fx)
+        .into_iter()
+        .filter(|(_, r)| matches!(r, ApiRequest::SetPresence { .. }))
+        .collect();
+    assert_eq!(presence, vec![], "the status went out again");
+    assert_eq!(me_status(&client).as_deref(), Some("Away"));
+}
+
+#[test]
+fn a_re_fetch_sent_before_a_status_change_should_not_undo_it() {
+    let mut client = Client::online_as(no_status());
+    // A re-fetch goes out (a display name saved)...
+    let fx = client.command(Command::SaveDisplayName("Ada".into()));
+    let (id, _) = patch(&fx);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    let (refetch, request) = find(&fx, |r| *r == ApiRequest::Me);
+    // ...then the status picker sets a status...
+    let fx = client.command(Command::SetStatus {
+        status: "online".into(),
+        custom_status: Some("Away".into()),
+    });
+    let (presence, _) = find(&fx, |r| matches!(r, ApiRequest::SetPresence { .. }));
+    // ...and the re-fetch comes back from before it.
+    client.respond(refetch, &request, no_status());
+    assert_eq!(me_status(&client).as_deref(), Some("Away"));
+    client.answer(presence, Ok(ApiResponse::Done));
+    assert_eq!(me_status(&client).as_deref(), Some("Away"));
+}
+
+#[test]
+fn a_re_fetch_sent_after_the_status_landed_should_be_believed() {
+    let mut client = Client::online_as(no_status());
+    let fx = client.command(Command::SetStatus {
+        status: "online".into(),
+        custom_status: Some("Away".into()),
+    });
+    let (presence, _) = find(&fx, |r| matches!(r, ApiRequest::SetPresence { .. }));
+    client.answer(presence, Ok(ApiResponse::Done));
+    // Another device cleared it since.
+    let fx = client.command(Command::SaveDisplayName("Ada".into()));
+    let (id, _) = patch(&fx);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    let (refetch, request) = find(&fx, |r| *r == ApiRequest::Me);
+    client.respond(refetch, &request, no_status());
+    assert_eq!(me_status(&client), None);
+}
+
+#[test]
+fn the_profile_re_fetch_should_wait_for_the_status() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        custom_status: Some("Away".into()),
+        ..draft()
+    })));
+    let (id, _) = patch(&fx);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    let (presence, _) = find(&fx, |r| matches!(r, ApiRequest::SetPresence { .. }));
+    assert!(
+        !requests(&fx).iter().any(|(_, r)| *r == ApiRequest::Me),
+        "read back before the status landed"
+    );
+    let fx = client.answer(presence, Ok(ApiResponse::Done));
+    find(&fx, |r| *r == ApiRequest::Me);
+}
+
+#[test]
+fn an_untouched_status_should_not_go_out_whatever_the_account_shows() {
+    // The account says "Shipping"; the editor loaded something else and
+    // left it.
+    let mut client = Client::online();
+    let fx = client.command(Command::SaveProfile(Box::new(draft())));
+    let (id, _) = patch(&fx);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    assert!(
+        !requests(&fx)
+            .iter()
+            .any(|(_, r)| matches!(r, ApiRequest::SetPresence { .. })),
+        "{fx:#?}"
+    );
+    find(&fx, |r| *r == ApiRequest::Me);
+}
+
+#[test]
+fn a_status_emptied_in_the_editor_should_be_cleared() {
+    let mut client = Client::online();
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        custom_status: Some("  ".into()),
+        ..draft()
+    })));
+    let (id, _) = patch(&fx);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    let (_, presence) = find(&fx, |r| matches!(r, ApiRequest::SetPresence { .. }));
+    assert_eq!(
+        presence,
+        ApiRequest::SetPresence {
+            status: "online".into(),
+            custom_status: None
+        }
+    );
+}
+
+#[test]
+fn a_status_that_did_not_save_should_stop_the_save_and_read_the_account_back() {
+    let mut client = Client::online_as(no_status());
+    let fx = client.command(Command::SaveProfile(Box::new(ProfileDraft {
+        custom_status: Some("Away".into()),
+        ..draft()
+    })));
+    let (id, _) = patch(&fx);
+    let fx = client.answer(id, Ok(ApiResponse::Done));
+    let (presence, _) = find(&fx, |r| matches!(r, ApiRequest::SetPresence { .. }));
+    let fx = client.answer(presence, Err(http_error(500)));
+    let view = settings(&fx).expect("view");
+    assert!(!view.profile_saving);
+    assert!(
+        view.profile_error
+            .starts_with("Unable to save your custom status"),
+        "{}",
+        view.profile_error
+    );
+    // The account showed "Away" at once; the server never took it.
+    let (id, request) = find(&fx, |r| *r == ApiRequest::Me);
+    client.respond(id, &request, no_status());
+    assert_eq!(me_status(&client), None);
 }
 
 #[test]
@@ -719,7 +955,8 @@ fn a_yap_name_style_should_go_out_with_wave_only_when_on() {
     let off = r##"{"font":"vt323","effect":"crt","primary":"#FFFFFF","secondary":"#000000","wave":false}"##;
     assert_eq!(name_style_patch(off).get("wave"), None);
     assert_eq!(name_style_patch(off)["effect"], "crt");
-    let unknown = r##"{"font":"vt323","effect":"plasma","primary":"#FFFFFF","secondary":"#000000"}"##;
+    let unknown =
+        r##"{"font":"vt323","effect":"plasma","primary":"#FFFFFF","secondary":"#000000"}"##;
     assert_eq!(name_style_patch(unknown), Value::Null);
 }
 

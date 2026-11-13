@@ -11,10 +11,16 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ProviderInfo;
 import android.content.pm.ResolveInfo;
 import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.ImageDecoder;
 import android.graphics.Insets;
+import android.graphics.Matrix;
 import android.hardware.SensorManager;
+import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -78,7 +84,7 @@ public final class NativeShim {
 
     /** The most files one pick hands to the tray. */
     private static final int PICK_MAX = 10;
-    /** Picked files are copied under the cache, here, until the next start. */
+    /** Picked files are copied under the cache, here, until discardPicked or the next start. */
     private static final String UPLOADS = "uploads";
     /** The camera writes the composer's photo under the cache, here (CaptureProvider). */
     private static final String CAPTURE = "capture";
@@ -106,6 +112,32 @@ public final class NativeShim {
     private static final int NAME_BYTES = 160;
     /** The account's attachment limit for the pick under way (bytes). */
     private static volatile long pickLimit = Long.MAX_VALUE;
+    /** The pick under way is a profile picture (pickImageIntent): normalisePicture. */
+    private static volatile boolean pickPicture;
+    /** A redrawn picture: at most this long side (px), and its JPEG quality. */
+    private static final int PICTURE_SIDE = 4096;
+    private static final int PICTURE_QUALITY = 90;
+    /** Where a picture was taken: every EXIF GPS tag. */
+    private static final String[] GPS_TAGS = {
+        ExifInterface.TAG_GPS_VERSION_ID, ExifInterface.TAG_GPS_LATITUDE_REF,
+        ExifInterface.TAG_GPS_LATITUDE, ExifInterface.TAG_GPS_LONGITUDE_REF,
+        ExifInterface.TAG_GPS_LONGITUDE, ExifInterface.TAG_GPS_ALTITUDE_REF,
+        ExifInterface.TAG_GPS_ALTITUDE, ExifInterface.TAG_GPS_TIMESTAMP,
+        ExifInterface.TAG_GPS_SATELLITES, ExifInterface.TAG_GPS_STATUS,
+        ExifInterface.TAG_GPS_MEASURE_MODE, ExifInterface.TAG_GPS_DOP,
+        ExifInterface.TAG_GPS_SPEED_REF, ExifInterface.TAG_GPS_SPEED,
+        ExifInterface.TAG_GPS_TRACK_REF, ExifInterface.TAG_GPS_TRACK,
+        ExifInterface.TAG_GPS_IMG_DIRECTION_REF, ExifInterface.TAG_GPS_IMG_DIRECTION,
+        ExifInterface.TAG_GPS_MAP_DATUM, ExifInterface.TAG_GPS_DEST_LATITUDE_REF,
+        ExifInterface.TAG_GPS_DEST_LATITUDE, ExifInterface.TAG_GPS_DEST_LONGITUDE_REF,
+        ExifInterface.TAG_GPS_DEST_LONGITUDE, ExifInterface.TAG_GPS_DEST_BEARING_REF,
+        ExifInterface.TAG_GPS_DEST_BEARING, ExifInterface.TAG_GPS_DEST_DISTANCE_REF,
+        ExifInterface.TAG_GPS_DEST_DISTANCE, ExifInterface.TAG_GPS_PROCESSING_METHOD,
+        ExifInterface.TAG_GPS_AREA_INFORMATION, ExifInterface.TAG_GPS_DATESTAMP,
+        ExifInterface.TAG_GPS_DIFFERENTIAL,
+        // TAG_GPS_H_POSITIONING_ERROR (API 30).
+        "GPSHPositioningError",
+    };
 
     private static Activity activity;
     private static OnBackInvokedCallback back;
@@ -505,6 +537,7 @@ public final class NativeShim {
      */
     public static Intent pickMediaIntent(long limitBytes) {
         pickLimit = limitBytes > 0 ? limitBytes : Long.MAX_VALUE;
+        pickPicture = false;
         if (Build.VERSION.SDK_INT >= 33) {
             return new Intent(MediaStore.ACTION_PICK_IMAGES)
                     .putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX,
@@ -515,6 +548,47 @@ public final class NativeShim {
                 .setType("*/*")
                 .putExtra(Intent.EXTRA_MIME_TYPES, new String[] {"image/*", "video/*"})
                 .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+    }
+
+    /**
+     * The photo picker for one picture (an avatar or a banner): images only,
+     * single select (no EXTRA_PICK_IMAGES_MAX, as PickVisualMedia sends it),
+     * so one tap returns the picture; no permission (API 33+), else the
+     * documents UI on images, one item. Its result comes back through
+     * mediaPicked like the composer's, the copy normalised
+     * (normalisePicture).
+     */
+    public static Intent pickImageIntent(long limitBytes) {
+        pickLimit = limitBytes > 0 ? limitBytes : Long.MAX_VALUE;
+        pickPicture = true;
+        if (Build.VERSION.SDK_INT >= 33) {
+            return systemPhotoPicker(new Intent(MediaStore.ACTION_PICK_IMAGES)
+                    .setType("image/*")
+                    .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false));
+        }
+        return new Intent(Intent.ACTION_GET_CONTENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("image/*")
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false);
+    }
+
+    /**
+     * The photo picker itself: the intent pinned to the media provider's
+     * package, where the system picker lives, so another app taking the
+     * action (a gallery with its own multi-select view) does not answer it.
+     * Unchanged when that package cannot be seen or does not take it.
+     */
+    private static Intent systemPhotoPicker(Intent intent) {
+        if (activity == null) return intent;
+        try {
+            PackageManager pm = activity.getPackageManager();
+            ProviderInfo media = pm.resolveContentProvider(MediaStore.AUTHORITY, 0);
+            if (media == null) return intent;
+            Intent pinned = new Intent(intent).setPackage(media.packageName);
+            return pm.resolveActivity(pinned, 0) != null ? pinned : intent;
+        } catch (RuntimeException e) {
+            return intent;
+        }
     }
 
     /**
@@ -546,11 +620,12 @@ public final class NativeShim {
         nativeMediaCopying();
         final File batch = new File(new File(activity.getCacheDir(), UPLOADS),
                 Long.toString(System.nanoTime()));
+        final boolean picture = pickPicture;
         new Thread(() -> {
             List<String> paths = new ArrayList<>();
             for (int i = 0; i < uris.size(); i++) {
                 // One folder per item: two picks may share a display name.
-                File copy = copyIn(uris.get(i), new File(batch, Integer.toString(i)));
+                File copy = copyIn(uris.get(i), new File(batch, Integer.toString(i)), picture);
                 if (copy != null) paths.add(copy.getAbsolutePath());
             }
             nativeMediaPicked(paths.toArray(new String[0]), uris.size() - paths.size());
@@ -558,22 +633,37 @@ public final class NativeShim {
     }
 
     private static File copyIn(Uri uri, File dir) {
-        return copyIn(uri, dir, null);
+        return copyIn(uri, dir, null, false);
     }
 
-    /** `mime`: the type the sender named, for a provider that names none. */
     private static File copyIn(Uri uri, File dir, String mime) {
+        return copyIn(uri, dir, mime, false);
+    }
+
+    private static File copyIn(Uri uri, File dir, boolean picture) {
+        return copyIn(uri, dir, null, picture);
+    }
+
+    /**
+     * `mime`: the type the sender named, for a provider that names none.
+     * `picture`: an avatar or banner, normalised once copied
+     * (normalisePicture).
+     */
+    private static File copyIn(Uri uri, File dir, String mime, boolean picture) {
         ContentResolver resolver = activity.getContentResolver();
         if (!dir.mkdirs() && !dir.isDirectory()) return null;
-        String type = null;
         try {
-            type = resolver.getType(uri);
+            String type = resolver.getType(uri);
+            if (type != null) mime = type;
         } catch (RuntimeException e) {
             // A provider that cannot say: the sender's type.
         }
-        if (type == null) type = mime;
-        File out = new File(dir, fileName(resolver, uri, type));
+        String name = fileName(resolver, uri, mime);
         long size = size(resolver, uri);
+        // A picture to convert stands in as the JPEG it would become, so the
+        // core's too-big card shows rather than its "not an image".
+        if (picture && size > pickLimit && converts(mime, name)) name = jpegName(name, false);
+        File out = new File(dir, name);
         if (size > pickLimit) {
             try (RandomAccessFile stand = new RandomAccessFile(out, "rw")) {
                 stand.setLength(size);
@@ -591,12 +681,199 @@ public final class NativeShim {
                 int n;
                 while ((n = in.read(buffer)) > 0) to.write(buffer, 0, n);
             }
-            return out;
         } catch (IOException | RuntimeException e) {
             Log.w("yap-native", "could not copy a picked file", e);
             out.delete();
             return null;
         }
+        return picture ? normalisePicture(out, mime) : out;
+    }
+
+    /** A HEIC/HEIF or AVIF: the core does not take it, the shim converts it. */
+    private static boolean converts(String mime, String name) {
+        String type = mime == null ? "" : mime.toLowerCase(Locale.ROOT);
+        String lower = name.toLowerCase(Locale.ROOT);
+        return type.startsWith("image/heic") || type.startsWith("image/heif")
+                || type.equals("image/avif") || lower.endsWith(".heic")
+                || lower.endsWith(".heif") || lower.endsWith(".avif");
+    }
+
+    /**
+     * A picked avatar or banner as the web shows it. Browsers turn a JPEG
+     * by its EXIF orientation and the crop is stored in percent of the
+     * picture as shown, so a turned or mirrored JPEG is redrawn upright; a
+     * HEIC/HEIF or AVIF, which the core does not take, becomes a JPEG. A
+     * redrawn picture is at most PICTURE_SIDE on its long side and carries
+     * no metadata. An upright JPEG keeps its bytes but loses where it was
+     * taken (the picture is public). Anything else stays as it is. Returns
+     * the file to upload, or null when a picture to convert could not be.
+     */
+    private static File normalisePicture(File file, String mime) {
+        String type = mime == null ? "" : mime.toLowerCase(Locale.ROOT);
+        String lower = file.getName().toLowerCase(Locale.ROOT);
+        boolean jpeg = type.equals("image/jpeg") || type.equals("image/jpg")
+                || (type.isEmpty() && (lower.endsWith(".jpg") || lower.endsWith(".jpeg")));
+        if (!jpeg && !converts(mime, file.getName())) return file;
+        if (!jpeg) {
+            File out = redraw(file, -1);
+            if (out == null) file.delete();
+            return out;
+        }
+        int orientation = ExifInterface.ORIENTATION_NORMAL;
+        try {
+            orientation = new ExifInterface(file.getPath()).getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+        } catch (IOException | RuntimeException e) {
+            Log.w("yap-native", "could not read a picked picture's orientation", e);
+        }
+        if (orientation != ExifInterface.ORIENTATION_NORMAL
+                && orientation != ExifInterface.ORIENTATION_UNDEFINED) {
+            File out = redraw(file, orientation);
+            if (out != null) return out;
+        }
+        // Upright, or it could not be redrawn: sideways beats nothing.
+        stripLocation(file);
+        return file;
+    }
+
+    /**
+     * Decodes `file` (at most PICTURE_SIDE on its long side), turns it by
+     * the EXIF `orientation` (-1: ImageDecoder turns it as its container
+     * says, for HEIF and AVIF) and writes it next to the original as a JPEG
+     * (a PNG when it has transparency), which replaces the original.
+     * Returns the new file, or null (the original kept).
+     */
+    private static File redraw(File file, int orientation) {
+        Bitmap bitmap = null;
+        File part = null;
+        try {
+            if (orientation < 0) {
+                bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(file),
+                        (decoder, info, source) -> {
+                            decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
+                            decoder.setTargetSampleSize(sampleFor(
+                                    info.getSize().getWidth(), info.getSize().getHeight()));
+                        });
+            } else {
+                // BitmapFactory ignores EXIF: the turn below is the only one.
+                BitmapFactory.Options bounds = new BitmapFactory.Options();
+                bounds.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(file.getPath(), bounds);
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inSampleSize = sampleFor(bounds.outWidth, bounds.outHeight);
+                Bitmap raw = BitmapFactory.decodeFile(file.getPath(), options);
+                if (raw == null) return null;
+                bitmap = orient(raw, orientation);
+            }
+            boolean png = bitmap.hasAlpha();
+            File out = new File(file.getParentFile(), jpegName(file.getName(), png));
+            part = new File(file.getParentFile(), out.getName() + ".part");
+            try (OutputStream to = new FileOutputStream(part)) {
+                boolean written = png
+                        ? bitmap.compress(Bitmap.CompressFormat.PNG, 100, to)
+                        : bitmap.compress(Bitmap.CompressFormat.JPEG, PICTURE_QUALITY, to);
+                if (!written) return null;
+            }
+            if (!part.renameTo(out)) return null;
+            part = null;
+            if (!out.equals(file)) file.delete();
+            return out;
+        } catch (IOException | RuntimeException | OutOfMemoryError e) {
+            Log.w("yap-native", "could not redraw a picked picture", e);
+            return null;
+        } finally {
+            if (part != null) part.delete();
+            if (bitmap != null) bitmap.recycle();
+        }
+    }
+
+    /** The power of two that brings the long side to PICTURE_SIDE or under. */
+    private static int sampleFor(int width, int height) {
+        int sample = 1;
+        while (Math.max(width, height) / sample > PICTURE_SIDE) sample *= 2;
+        return sample;
+    }
+
+    /** `raw` turned and mirrored as EXIF `orientation` says (raw recycled). */
+    private static Bitmap orient(Bitmap raw, int orientation) {
+        Matrix matrix = new Matrix();
+        switch (orientation) {
+            case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                matrix.setScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_180:
+                matrix.setRotate(180);
+                break;
+            case ExifInterface.ORIENTATION_FLIP_VERTICAL:
+                matrix.setScale(1, -1);
+                break;
+            case ExifInterface.ORIENTATION_TRANSPOSE:
+                matrix.setRotate(90);
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_90:
+                matrix.setRotate(90);
+                break;
+            case ExifInterface.ORIENTATION_TRANSVERSE:
+                matrix.setRotate(-90);
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_270:
+                matrix.setRotate(-90);
+                break;
+            default:
+                return raw;
+        }
+        Bitmap turned = Bitmap.createBitmap(raw, 0, 0, raw.getWidth(), raw.getHeight(), matrix, true);
+        if (turned != raw) raw.recycle();
+        return turned;
+    }
+
+    /** `name` with a .jpg (or .png) extension in place of its own. */
+    private static String jpegName(String name, boolean png) {
+        int dot = name.lastIndexOf('.');
+        String stem = dot > 0 ? name.substring(0, dot) : name;
+        return stem + (png ? ".png" : ".jpg");
+    }
+
+    /** Drops a JPEG's EXIF location in place (its pixels untouched). */
+    private static void stripLocation(File file) {
+        try {
+            ExifInterface exif = new ExifInterface(file.getPath());
+            boolean found = false;
+            for (String tag : GPS_TAGS) {
+                if (exif.getAttribute(tag) != null) {
+                    exif.setAttribute(tag, null);
+                    found = true;
+                }
+            }
+            if (found) exif.saveAttributes();
+        } catch (IOException | RuntimeException e) {
+            Log.w("yap-native", "could not drop a picked picture's location", e);
+        }
+    }
+
+    /**
+     * Deletes one picked copy (a path mediaPicked gave: uploads/<pick>/<item>/
+     * <name> under the cache) with its item's folder, and the pick's folder
+     * once empty, off the UI thread. Any other path is left alone.
+     */
+    public static void discardPicked(String path) {
+        if (activity == null || path == null || path.isEmpty()) return;
+        final File uploads = new File(activity.getCacheDir(), UPLOADS);
+        new Thread(() -> {
+            try {
+                File root = uploads.getCanonicalFile();
+                File item = new File(path).getCanonicalFile().getParentFile();
+                File pick = item == null ? null : item.getParentFile();
+                if (pick == null || !root.equals(pick.getParentFile())) return;
+                deleteTree(item);
+                pick.delete();
+            } catch (IOException | RuntimeException e) {
+                Log.w("yap-native", "could not delete a picked file", e);
+            }
+        }, "yap-pick-discard").start();
     }
 
     // ---- Files, the camera, the clipboard, the keyboard ---------------------
@@ -607,6 +884,7 @@ public final class NativeShim {
      */
     public static Intent pickFilesIntent(long limitBytes) {
         pickLimit = limitBytes > 0 ? limitBytes : Long.MAX_VALUE;
+        pickPicture = false;
         return new Intent(Intent.ACTION_OPEN_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
                 .setType("*/*")

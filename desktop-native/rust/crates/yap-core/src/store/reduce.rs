@@ -1573,7 +1573,9 @@ impl State {
             Command::SetStatus {
                 status,
                 custom_status,
-            } => self.set_presence(fx, &status, custom_status),
+            } => {
+                self.set_presence(fx, &status, custom_status);
+            }
             Command::ShowProfile(user_id) => self.show_profile(fx, user_id),
             Command::PrefetchProfile(user_id) => self.prefetch_profile(fx, user_id),
             Command::HideProfile(user_id) => {
@@ -2210,6 +2212,10 @@ impl State {
         id: RequestId,
         result: Result<ApiResponse, ApiError>,
     ) {
+        if self.pending.presence.contains(&id) {
+            // Not consumed: a profile save waits on it too.
+            self.on_presence_saved(fx, id, result.is_ok());
+        }
         let mut answer = Some(result);
         if self.route_push_http(id, &mut answer)
             || self.route_prefetch(fx, id, &mut answer)
@@ -2236,7 +2242,7 @@ impl State {
         let pending = &mut self.pending;
         if pending.me == Some(id) {
             pending.me = None;
-            return self.on_me(fx, result);
+            return self.on_me(fx, id, result);
         }
         if pending.servers == Some(id) {
             pending.servers = None;
@@ -2316,12 +2322,14 @@ impl State {
         // session ended) or fire-and-forget (typing).
     }
 
-    fn on_me(&mut self, fx: &mut Effects, result: Result<ApiResponse, ApiError>) {
-        let me = match result {
+    /// The account as `/api/users/me` (asked for as `id`) read it.
+    fn on_me(&mut self, fx: &mut Effects, id: RequestId, result: Result<ApiResponse, ApiError>) {
+        let mut me = match result {
             Ok(ApiResponse::Me(me)) => *me,
             Ok(other) => return self.me_failed(fx, &unexpected(&other)),
             Err(error) => return self.me_failed(fx, &error),
         };
+        self.keep_own_status(id, &mut me);
         self.apps_on_me(&me);
         let Some(session) = &mut self.session else {
             return;

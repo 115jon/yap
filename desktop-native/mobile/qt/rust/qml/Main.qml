@@ -179,6 +179,14 @@ Window {
         stack.sheet = false
         stack.push(settingsPage)
     }
+    // Edit profile, over Settings or your own profile.
+    function openProfileEditor() {
+        if (stack.busy || stack.currentItem?.isProfileEditor === true)
+            return
+        Qt.inputMethod.hide()
+        stack.sheet = false
+        stack.push(profileEditPage)
+    }
     // A message's thread, over the chat.
     function openThread(messageId) {
         if (messageId.length === 0 || stack.busy || stack.currentItem?.rootId === messageId)
@@ -635,6 +643,7 @@ Window {
             id: profilePage
             ProfilePage {
                 onCloseRequested: window.closeTop(false)
+                onEditRequested: window.openProfileEditor()
                 onMessageRequested: userId => {
                     // Back to the pager; the chat slides in once the DM
                     // (made now if they never talked) is the open one.
@@ -659,6 +668,13 @@ Window {
         Component {
             id: settingsPage
             SettingsPage {
+                onCloseRequested: window.closeTop(false)
+                onProfileEditRequested: window.openProfileEditor()
+            }
+        }
+        Component {
+            id: profileEditPage
+            ProfileEditPage {
                 onCloseRequested: window.closeTop(false)
             }
         }

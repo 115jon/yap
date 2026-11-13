@@ -14,7 +14,7 @@ use super::{frame, Effects};
 use crate::api::ApiError;
 use crate::store::state::{live_status, Presence, State};
 use crate::store::view::{self, DmBadge, DmView, MemberContext, ProfileView, ViewUpdate};
-use crate::store::{ApiRequest, ApiResponse, CacheWrite};
+use crate::store::{ApiRequest, ApiResponse, CacheWrite, RequestId};
 
 /// What `/api/presence` and op 26 accept; `offline` is Invisible.
 const STATUSES: [&str; 4] = ["online", "idle", "dnd", "offline"];
@@ -443,20 +443,24 @@ impl State {
     // Status and presence
 
     /// The status picker: stored over REST (and broadcast to the servers),
-    /// and on the gateway so this session's presence follows at once.
-    pub(super) fn set_presence(&mut self, fx: &mut Effects, status: &str, custom: Option<String>) {
+    /// and on the gateway so this session's presence follows at once. The
+    /// write, or `None` when nothing changed.
+    pub(super) fn set_presence(
+        &mut self,
+        fx: &mut Effects,
+        status: &str,
+        custom: Option<String>,
+    ) -> Option<RequestId> {
         if !STATUSES.contains(&status) {
-            return;
+            return None;
         }
         let custom = custom
             .map(|c| c.trim().to_owned())
             .filter(|c| !c.is_empty());
-        let Some(me) = self.session.as_mut().and_then(|s| s.me.as_mut()) else {
-            return;
-        };
+        let me = self.session.as_mut().and_then(|s| s.me.as_mut())?;
         let status_changed = me.status.as_deref() != Some(status);
         if !status_changed && me.custom_status == custom {
-            return;
+            return None;
         }
         me.status = Some(status.to_owned());
         me.custom_status.clone_from(&custom);
@@ -468,11 +472,40 @@ impl State {
             status: status.to_owned(),
             custom_status: custom,
         };
-        let _ = self.http(fx, request);
+        let id = self.http(fx, request);
+        // Until it lands, a `/me` can come back from before it.
+        self.pending.presence.extend(id);
         if status_changed {
             self.gateway_send(fx, status_frame(status));
         }
         self.sync_social(fx);
+        id
+    }
+
+    /// A status write landed. One that failed leaves the account showing a
+    /// status the server does not have: read it back.
+    pub(super) fn on_presence_saved(&mut self, fx: &mut Effects, id: RequestId, ok: bool) {
+        if !self.pending.presence.remove(&id) {
+            return;
+        }
+        self.pending.presence_settled = self.next_id;
+        if !ok {
+            // A `/me` already out predates it: ask again.
+            self.pending.me = None;
+            self.refresh_me(fx);
+        }
+    }
+
+    /// A `/me` asked for as `id` that may predate our own status write
+    /// keeps the status we set (`on_me`); one asked after they all landed
+    /// is the account as it is.
+    pub(super) fn keep_own_status(&self, id: RequestId, me: &mut User) {
+        let predates = !self.pending.presence.is_empty() || id.0 <= self.pending.presence_settled;
+        let own = self.me().filter(|own| own.id == me.id);
+        if let (true, Some(own)) = (predates, own) {
+            me.status.clone_from(&own.status);
+            me.custom_status.clone_from(&own.custom_status);
+        }
     }
 
     /// After Ready: a status other than online goes to the new session

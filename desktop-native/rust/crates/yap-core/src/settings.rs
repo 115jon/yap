@@ -1148,10 +1148,12 @@ pub fn editor_colors(
 }
 
 /// A display name as the server stores it, or why it cannot be saved
-/// (`DisplayNameSchema`: trimmed, at most 80 characters).
+/// (`DisplayNameSchema`: trimmed, at most 80 characters). Characters are
+/// counted as JavaScript counts a string's length, in UTF-16 units (an
+/// emoji outside the BMP is two), as the server and the Qt fields count.
 pub fn validate_display_name(value: &str) -> Result<String, &'static str> {
     let trimmed = value.trim();
-    if trimmed.chars().count() > DISPLAY_NAME_MAX {
+    if trimmed.encode_utf16().count() > DISPLAY_NAME_MAX {
         return Err("Display name must be at most 80 characters");
     }
     Ok(trimmed.to_owned())

@@ -5,8 +5,9 @@ import com.yap.mobile
 import Yap.Ui
 
 // Settings, one scrolling page (the desktop's Settings dialog, phone
-// layout): who you are, then numbered sections under 2 px ink rules (the
-// desktop's rule cards). Status and its custom line (Session.setStatus);
+// layout): who you are and Edit profile (ProfileEditPage), then numbered
+// sections under 2 px ink rules (the desktop's rule cards). Status and its
+// custom line (Session.setStatus);
 // Appearance (the core's themes, kept on this device in appearance.json
 // and synced to the account when asked); Text size (a factor over the
 // system's, this phone's own); Notifications (the push shim's permission
@@ -22,6 +23,8 @@ Rectangle {
     property real backProgress: 0
 
     signal closeRequested()
+    // Edit profile, from the account at the top.
+    signal profileEditRequested()
 
     // The window's insets where this page meets its edges, read once here:
     // a child that asks for its own would feed its position back in.
@@ -132,40 +135,51 @@ Rectangle {
             bottomPadding: 32 + root.bottomInset
             spacing: 32
 
-            // Who is signed in.
-            Row {
+            // Who is signed in, and Edit profile.
+            Column {
                 width: parent.width
                 spacing: 16
-                PresenceAvatar {
-                    id: face
-                    anchors.verticalCenter: parent.verticalCenter
-                    size: 64
-                    initials: Session.meInitials.length > 0 ? Session.meInitials : "?"
-                    source: Session.meAvatar
-                    deco: Session.meDeco
-                    presence: root.status
-                    ground: root.color
-                }
-                Column {
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - face.width - parent.spacing
-                    spacing: 2
-                    DisplayName {
-                        width: parent.width
-                        text: Session.meName
-                        nameStyle: Session.meNameStyle
-                        color: Theme.ink1
-                        font: Theme.type.pageTitle
+                Row {
+                    width: parent.width
+                    spacing: 16
+                    PresenceAvatar {
+                        id: face
+                        anchors.verticalCenter: parent.verticalCenter
+                        size: 64
+                        initials: Session.meInitials.length > 0 ? Session.meInitials : "?"
+                        source: Session.meAvatar
+                        deco: Session.meDeco
+                        presence: root.status
                         ground: root.color
                     }
-                    Text {
-                        width: parent.width
-                        textFormat: Text.PlainText
-                        text: "@" + Session.meUsername
-                        elide: Text.ElideRight
-                        color: Theme.ink2
-                        font: Theme.type.description
+                    Column {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width - face.width - parent.spacing
+                        spacing: 2
+                        DisplayName {
+                            width: parent.width
+                            text: Session.meName
+                            nameStyle: Session.meNameStyle
+                            color: Theme.ink1
+                            font: Theme.type.pageTitle
+                            ground: root.color
+                        }
+                        Text {
+                            width: parent.width
+                            textFormat: Text.PlainText
+                            text: "@" + Session.meUsername
+                            elide: Text.ElideRight
+                            color: Theme.ink2
+                            font: Theme.type.description
+                        }
                     }
+                }
+                KitButton {
+                    width: parent.width
+                    variant: "secondary"
+                    iconName: "edit"
+                    text: qsTr("Edit profile")
+                    onClicked: root.profileEditRequested()
                 }
             }
 

@@ -707,12 +707,12 @@ pub(super) struct Projection {
 /// One step of a profile save, run in order; a failure stops the rest.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProfileStep {
-    /// `PATCH /api/update-profile`, then the custom status when it changed
-    /// (`Some(None)` clears it).
-    Patch {
-        patch: serde_json::Value,
-        custom_status: Option<Option<String>>,
-    },
+    /// `PATCH /api/update-profile`.
+    Patch(serde_json::Value),
+    /// The custom status as the status picker sets it (`POST
+    /// /api/presence`; `None` clears it), awaited so the profile read back
+    /// after it has it.
+    Status(Option<String>),
     Upload {
         asset: ProfileAsset,
         path: String,
@@ -734,7 +734,8 @@ impl ProfileStep {
     /// Completes "Unable to …" when the step fails (SettingsAccountTab.tsx).
     pub fn action(&self) -> &'static str {
         match self {
-            Self::Patch { .. } => "save your profile",
+            Self::Patch(_) => "save your profile",
+            Self::Status(_) => "save your custom status",
             Self::Upload {
                 asset: ProfileAsset::Avatar { .. },
                 ..
@@ -802,6 +803,11 @@ pub(super) struct Pending {
     /// Voice moves in flight.
     pub moves: std::collections::HashSet<RequestId>,
     pub me: Option<RequestId>,
+    /// Our status writes (`POST /api/presence`) in flight.
+    pub presence: std::collections::HashSet<RequestId>,
+    /// The last request id when the last of them landed: a `/me` asked at
+    /// or before it (or while one is in flight) can predate our status.
+    pub presence_settled: u64,
     pub servers: Option<RequestId>,
     /// (request, server id)
     pub channels: Option<(RequestId, String)>,
