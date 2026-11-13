@@ -162,7 +162,7 @@ QtObject {
         ],
         // The phone's sheet, after its preview and quick reactions.
         sheet: [
-            { id: "reply" }, { id: "edit" }, { id: "reactions" }, "|",
+            { id: "reply" }, { id: "edit" }, { id: "thread" }, { id: "reactions" }, "|",
             { id: "copyText", needsText: true }, { id: "select" }, { id: "share" },
             { id: "copyMessageLink" }, { id: "markUnread" }, { id: "profile" },
             { id: "removeEmbeds", last: true }, { id: "delete", last: true }
