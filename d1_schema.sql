@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TEXT,
     suspended_at TEXT,                 -- site admin suspension; NULL = active
     suspended_reason TEXT,
-    deleted_at TEXT                    -- set only on "Deleted user" rows (migration 045)
+    deleted_at TEXT                    -- set only on "Deleted user" rows (migration 046)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower
@@ -738,7 +738,7 @@ CREATE INDEX IF NOT EXISTS idx_deadlock_fetch_state_due
 CREATE INDEX IF NOT EXISTS idx_deadlock_fetch_state_user
     ON deadlock_fetch_state(user_id);
 
--- Account deletion with a 30-day grace period (migration 045).
+-- Account deletion with a 30-day grace period (migration 046).
 CREATE TABLE IF NOT EXISTS account_deletions (
     user_id TEXT PRIMARY KEY,
     requested_at TEXT NOT NULL,

@@ -1,5 +1,5 @@
 // ── Account deletion ────────────────────────────────────────────────────────
-// Self-service deletion with a 30-day grace period (migration 045,
+// Self-service deletion with a 30-day grace period (migration 046,
 // lib/account-deletion.ts for the gate).
 //
 // Request: the account must own no server (as on Discord; Yap has no

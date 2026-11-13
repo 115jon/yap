@@ -366,7 +366,7 @@ export async function requireAuth(
   options: { allowPendingDeletion?: boolean } = {},
 ): Promise<{ userId: string } | Response> {
   const { requestCredentials } = await import("@/lib/kova-auth-server");
-  return requireCredentials(req, requestCredentials(req));
+  return requireCredentials(req, requestCredentials(req), options);
 }
 
 /**
@@ -376,6 +376,7 @@ export async function requireAuth(
 export async function requireCredentials(
   req: Request | undefined,
   credentials: Credentials,
+  options: { allowPendingDeletion?: boolean } = {},
 ): Promise<{ userId: string } | Response> {
   const { checkCredentials } = await import("@/lib/kova-auth-server");
   const requestContext = getRequestLogContext(req);

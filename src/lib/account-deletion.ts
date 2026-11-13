@@ -1,5 +1,5 @@
 // ── Account deletion: the grace period gate ─────────────────────────────────
-// An account that asked to be deleted (account_deletions, migration 045)
+// An account that asked to be deleted (account_deletions, migration 046)
 // keeps its Kova identity but can do nothing on Yap until it is restored or
 // purged: the auth path (requireAuth and the edge's signedInIdentity) answers
 // every request with 403 ACCOUNT_PENDING_DELETION and the date, except the
