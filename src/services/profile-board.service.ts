@@ -395,8 +395,10 @@ async function voiceHours(
     showLongest
       ? db
           .prepare(
+            // Calls outside a server (DMs) never count: the board is public.
             `SELECT MAX(seconds) AS longest FROM profile_activity
-             WHERE user_id = ? AND kind = 'voice' AND hidden = 0 AND started_at >= ?`,
+             WHERE user_id = ? AND kind = 'voice' AND hidden = 0 AND started_at >= ?
+               AND json_extract(data, '$.server_id') IS NOT NULL`,
           )
           .bind(ownerId, start.toISOString())
           .first<{ longest: number | null }>()
@@ -620,7 +622,7 @@ export async function boardData(
         const row = await db
           .prepare(
             `SELECT data, ended_at FROM profile_activity
-             WHERE user_id = ? AND kind = 'listen' AND started_at >= ?${isOwner ? "" : " AND hidden = 0"}
+             WHERE user_id = ? AND kind = 'listen' AND started_at >= ?${isOwner ? "" : " AND hidden = 0 AND json_extract(data, '$.server_id') IS NOT NULL"}
              ORDER BY started_at DESC LIMIT 1`,
           )
           .bind(ownerId, cutoff)

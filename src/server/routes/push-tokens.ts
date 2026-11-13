@@ -8,7 +8,7 @@ import { genId } from "@/lib/id";
 import { validateBody } from "@/lib/validate-body";
 import { Database } from "@/server/bindings";
 import { runRoute, type RouteServices } from "@/server/edge";
-import { signedInUserId } from "@/server/kova-auth";
+import { appSessionCredentials, signedInIdentity } from "@/server/kova-auth";
 import { deletePushToken, upsertPushToken } from "@/services/push.service";
 
 // FCM registration tokens are ~150-200 characters; the cap only stops abuse.
@@ -28,11 +28,18 @@ const registerSchema = Schema.Struct({
 
 const unregisterSchema = Schema.Struct({ token: PushToken });
 
-/** POST /api/push-tokens — register or refresh this device's token. */
+/**
+ * POST /api/push-tokens — register or refresh this device's token, bound to
+ * the session registering it: signing that session out deletes it.
+ */
 const registerToken = Effect.fn("pushTokens.register")(function* (
   request: Request,
 ) {
-  const userId = yield* signedInUserId(request);
+  // The session the device's own credential names, as /api/sessions lists it.
+  const { user, session } = yield* signedInIdentity(
+    request,
+    appSessionCredentials(request),
+  );
   const body = yield* Effect.promise(() =>
     validateBody(request, registerSchema, request),
   );
@@ -40,29 +47,39 @@ const registerToken = Effect.fn("pushTokens.register")(function* (
 
   const db = yield* Database;
   yield* Effect.promise(() =>
-    upsertPushToken(db, userId, genId(), {
+    upsertPushToken(db, user.id, genId(), {
       token: body.token,
       platform: body.platform,
       appVariant: body.app_variant ?? null,
       pushFormat: body.push_format ?? null,
+      sessionId: session.id || null,
     }),
   );
 
   return apiSuccess({ registered: true });
 });
 
-/** DELETE /api/push-tokens — forget this device's token (sign-out). */
+/**
+ * DELETE /api/push-tokens — forget this device's token (sign-out), and any
+ * other token the signing-out session registered.
+ */
 const unregisterToken = Effect.fn("pushTokens.unregister")(function* (
   request: Request,
 ) {
-  const userId = yield* signedInUserId(request);
+  // The session the device's own credential names, as /api/sessions lists it.
+  const { user, session } = yield* signedInIdentity(
+    request,
+    appSessionCredentials(request),
+  );
   const body = yield* Effect.promise(() =>
     validateBody(request, unregisterSchema, request),
   );
   if (body instanceof Response) return body;
 
   const db = yield* Database;
-  yield* Effect.promise(() => deletePushToken(db, userId, body.token));
+  yield* Effect.promise(() =>
+    deletePushToken(db, user.id, body.token, session.id || null),
+  );
 
   return apiSuccess({ unregistered: true });
 });

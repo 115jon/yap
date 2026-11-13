@@ -8,7 +8,7 @@ namespace Installer.Tests
 {
     public sealed class LauncherMigrationTests : IDisposable
     {
-        private static readonly InstallRootLayout Layout = new InstallRootLayout("C:\\Users\\jon\\AppData\\Local\\Yap");
+        private static readonly InstallRootLayout Layout = new InstallRootLayout("C:\\Users\\someone\\AppData\\Local\\Yap");
 
         private readonly string _temp = Path.Combine(Path.GetTempPath(), "installer-tests-" + Guid.NewGuid().ToString("N"));
         private readonly string _registryPath = @"Software\115jon\YapTests\" + Guid.NewGuid().ToString("N");
@@ -31,11 +31,11 @@ namespace Installer.Tests
         }
 
         [Theory]
-        [InlineData("\"C:\\Users\\jon\\AppData\\Local\\Yap\\Update.exe\" --processStart Yap.exe", "")]
-        [InlineData("\"C:\\Users\\jon\\AppData\\Local\\Yap\\Update.exe\" --processStart \"Yap.exe\" --minimized", "--minimized")]
-        [InlineData("\"C:\\Users\\jon\\AppData\\Local\\Yap\\app-3.4.0\\Yap.exe\"", "")]
-        [InlineData("C:\\Users\\jon\\AppData\\Local\\Yap\\app-3.4.0\\Yap.exe --autostart", "--autostart")]
-        [InlineData("\"c:\\users\\jon\\appdata\\local\\yap\\yap.exe\"", "")]
+        [InlineData("\"C:\\Users\\someone\\AppData\\Local\\Yap\\Update.exe\" --processStart Yap.exe", "")]
+        [InlineData("\"C:\\Users\\someone\\AppData\\Local\\Yap\\Update.exe\" --processStart \"Yap.exe\" --minimized", "--minimized")]
+        [InlineData("\"C:\\Users\\someone\\AppData\\Local\\Yap\\app-3.4.0\\Yap.exe\"", "")]
+        [InlineData("C:\\Users\\someone\\AppData\\Local\\Yap\\app-3.4.0\\Yap.exe --autostart", "--autostart")]
+        [InlineData("\"c:\\users\\someone\\appdata\\local\\yap\\yap.exe\"", "")]
         public void TryParseOwnedCommand_Accepts_This_Installs_Launchers(string command, string expectedArguments)
         {
             Assert.True(LauncherMigration.TryParseOwnedCommand(command, Layout, out string arguments));
@@ -44,9 +44,9 @@ namespace Installer.Tests
 
         [Theory]
         [InlineData("\"C:\\Program Files\\Other\\Update.exe\" --processStart Yap.exe")]
-        [InlineData("\"C:\\Users\\jon\\AppData\\Local\\Yap\\staging\\x\\Yap.exe\"")]
-        [InlineData("\"C:\\Users\\jon\\AppData\\Local\\Yap\\app-3.4.0\\inject-helper64.exe\"")]
-        [InlineData("\"C:\\Users\\jon\\AppData\\Local\\Discord\\Update.exe\" --processStart Discord.exe")]
+        [InlineData("\"C:\\Users\\someone\\AppData\\Local\\Yap\\staging\\x\\Yap.exe\"")]
+        [InlineData("\"C:\\Users\\someone\\AppData\\Local\\Yap\\app-3.4.0\\inject-helper64.exe\"")]
+        [InlineData("\"C:\\Users\\someone\\AppData\\Local\\Discord\\Update.exe\" --processStart Discord.exe")]
         [InlineData("")]
         public void TryParseOwnedCommand_Rejects_Other_Commands(string command)
         {
@@ -56,9 +56,9 @@ namespace Installer.Tests
         [Fact]
         public void BuildStubCommand_Quotes_The_Stub()
         {
-            Assert.Equal("\"C:\\Users\\jon\\AppData\\Local\\Yap\\Yap.exe\"", LauncherMigration.BuildStubCommand(Layout, ""));
+            Assert.Equal("\"C:\\Users\\someone\\AppData\\Local\\Yap\\Yap.exe\"", LauncherMigration.BuildStubCommand(Layout, ""));
             Assert.Equal(
-                "\"C:\\Users\\jon\\AppData\\Local\\Yap\\Yap.exe\" --minimized",
+                "\"C:\\Users\\someone\\AppData\\Local\\Yap\\Yap.exe\" --minimized",
                 LauncherMigration.BuildStubCommand(Layout, "--minimized"));
         }
 
@@ -70,20 +70,20 @@ namespace Installer.Tests
             {
                 Assert.False(LauncherMigration.MigrateRunValue(userRoot, Layout));
 
-                run.SetValue("Yap", "\"C:\\Users\\jon\\AppData\\Local\\Yap\\Update.exe\" --processStart Yap.exe");
-                run.SetValue("Other", "\"C:\\Users\\jon\\AppData\\Local\\Yap\\Update.exe\" --processStart Yap.exe");
+                run.SetValue("Yap", "\"C:\\Users\\someone\\AppData\\Local\\Yap\\Update.exe\" --processStart Yap.exe");
+                run.SetValue("Other", "\"C:\\Users\\someone\\AppData\\Local\\Yap\\Update.exe\" --processStart Yap.exe");
 
                 Assert.True(LauncherMigration.MigrateRunValue(userRoot, Layout));
-                Assert.Equal("\"C:\\Users\\jon\\AppData\\Local\\Yap\\Yap.exe\"", run.GetValue("Yap"));
+                Assert.Equal("\"C:\\Users\\someone\\AppData\\Local\\Yap\\Yap.exe\"", run.GetValue("Yap"));
                 Assert.False(LauncherMigration.MigrateRunValue(userRoot, Layout));
-                Assert.Equal("\"C:\\Users\\jon\\AppData\\Local\\Yap\\Update.exe\" --processStart Yap.exe", run.GetValue("Other"));
+                Assert.Equal("\"C:\\Users\\someone\\AppData\\Local\\Yap\\Update.exe\" --processStart Yap.exe", run.GetValue("Other"));
 
                 run.SetValue("Yap", "\"C:\\Elsewhere\\Yap.exe\"");
                 Assert.False(LauncherMigration.MigrateRunValue(userRoot, Layout));
                 Assert.False(LauncherMigration.RemoveRunValueIfOwned(userRoot, Layout));
                 Assert.Equal("\"C:\\Elsewhere\\Yap.exe\"", run.GetValue("Yap"));
 
-                run.SetValue("Yap", "\"C:\\Users\\jon\\AppData\\Local\\Yap\\Yap.exe\"");
+                run.SetValue("Yap", "\"C:\\Users\\someone\\AppData\\Local\\Yap\\Yap.exe\"");
                 Assert.True(LauncherMigration.RemoveRunValueIfOwned(userRoot, Layout));
                 Assert.Null(run.GetValue("Yap"));
             }

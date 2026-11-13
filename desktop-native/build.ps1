@@ -8,12 +8,9 @@ param(
     # 0001-0004, and
     # qt-custom-6.11 0001-0003. The stock static Qt 6.6.3 no longer builds the
     # app (QML needs 6.9+).
-    [string]$QtDir = $(if ($env:YAP_QT_DIR) { $env:YAP_QT_DIR }
-                       elseif (Test-Path "F:/ct/qt-custom-6.11p8/6.11.3-yap/bin/qmake.exe") { "F:/ct/qt-custom-6.11p8/6.11.3-yap" }
-                       elseif (Test-Path "F:/ct/qt-custom-6.11p7/6.11.3-yap/bin/qmake.exe") { "F:/ct/qt-custom-6.11p7/6.11.3-yap" }
-                       elseif (Test-Path "F:/ct/qt-custom-6.11p6/6.11.3-yap/bin/qmake.exe") { "F:/ct/qt-custom-6.11p6/6.11.3-yap" }
-                       elseif (Test-Path "F:/ct/qt-custom-6.11/6.11.3-yap/bin/qmake.exe") { "F:/ct/qt-custom-6.11/6.11.3-yap" }
-                       else { throw "No Qt 6.11.3: build it with patches/qt/build-qt.ps1, or pass -QtDir / set YAP_QT_DIR." }),
+    # Default: YAP_QT_DIR, else the newest of these under the dependency
+    # root (below).
+    [string]$QtDir = $env:YAP_QT_DIR,
     [ValidateSet("Release", "RelWithDebInfo", "Debug")]
     [string]$Config = "Release",
     [string]$BuildDir = $(if ($env:YAP_NATIVE_BUILD_DIR) { $env:YAP_NATIVE_BUILD_DIR } else { "$PSScriptRoot/build/$Config" }),
@@ -21,14 +18,38 @@ param(
     # (docs/LIBRARIES.md). Copied with the model into <BuildDir>/segmentation,
     # where the app looks; without it the background row says it cannot
     # apply one. DirectML itself is the system's (System32).
-    [string]$OrtDir = $(if ($env:YAP_ORT_DIR) { $env:YAP_ORT_DIR } else { "F:/ct/onnxruntime/dml-1.24.4" })
+    # Default: YAP_ORT_DIR, else onnxruntime/dml-1.24.4 under the dependency
+    # root.
+    [string]$OrtDir = $env:YAP_ORT_DIR
 )
 $ErrorActionPreference = "Stop"
 
+# The dependency root: where the custom Qt, libwebrtc and ONNX Runtime live
+# side by side. YAP_DEPS_ROOT, else a `ct` folder at the root of any drive
+# that holds a custom Qt. Paths passed in (-QtDir, YAP_*_DIR) win over it.
+$deps = if ($env:YAP_DEPS_ROOT) { $env:YAP_DEPS_ROOT } else {
+    Get-PSDrive -PSProvider FileSystem |
+        ForEach-Object { Join-Path $_.Root "ct" } |
+        Where-Object { Test-Path (Join-Path $_ "qt-custom-6.11*") } |
+        Select-Object -First 1
+}
+# Forward slashes, as the paths below and CMake use them.
+if ($deps) { $deps = $deps.Replace("\", "/").TrimEnd("/") }
+
+if (-not $QtDir) {
+    $QtDir = @("qt-custom-6.11p8", "qt-custom-6.11p7", "qt-custom-6.11p6", "qt-custom-6.11") |
+        Where-Object { $deps } |
+        ForEach-Object { "$deps/$_/6.11.3-yap" } |
+        Where-Object { Test-Path "$_/bin/qmake.exe" } |
+        Select-Object -First 1
+    if (-not $QtDir) { throw "No Qt 6.11.3: build it with patches/qt/build-qt.ps1, or pass -QtDir / set YAP_QT_DIR or YAP_DEPS_ROOT." }
+}
+if (-not $OrtDir -and $deps) { $OrtDir = "$deps/onnxruntime/dml-1.24.4" }
+
 # LiveKit's prebuilt libwebrtc (static, /MT). Reuse an extracted copy instead
 # of the ~430 MB download webrtc-sys does per target dir.
-$webrtc = if ($env:YAP_LIBWEBRTC_DIR) { $env:YAP_LIBWEBRTC_DIR } else { "F:/ct/libwebrtc/win-x64-release-webrtc-a545de4/win-x64-release" }
-if (-not $env:LK_CUSTOM_WEBRTC -and (Test-Path "$webrtc/lib")) { $env:LK_CUSTOM_WEBRTC = $webrtc }
+$webrtc = if ($env:YAP_LIBWEBRTC_DIR) { $env:YAP_LIBWEBRTC_DIR } elseif ($deps) { "$deps/libwebrtc/win-x64-release-webrtc-a545de4/win-x64-release" } else { "" }
+if (-not $env:LK_CUSTOM_WEBRTC -and $webrtc -and (Test-Path "$webrtc/lib")) { $env:LK_CUSTOM_WEBRTC = $webrtc }
 
 # The patched crates rust/Cargo.toml builds (patches/vendor.ps1; a no-op
 # when they are up to date).

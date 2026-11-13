@@ -36,6 +36,7 @@ import {
   DEFAULT_MEDIA_CONTENT_FILTER,
   parseMediaContentFilter,
 } from "@/lib/media-content-filter";
+import { klipyCustomerId } from "@/lib/klipy-customer";
 import { looseStruct } from "@/lib/schema";
 import { validateBody } from "@/lib/validate-body";
 
@@ -639,8 +640,6 @@ const GET = async ({ request }: any) => {
     url.searchParams.get("contentFilter"),
     DEFAULT_MEDIA_CONTENT_FILTER,
   );
-  const requestedCustomerId =
-    nullableString(url.searchParams.get("customerId"), 128) || undefined;
   let userId: string | null = null;
 
   if (isDemoRequest) {
@@ -803,7 +802,16 @@ const GET = async ({ request }: any) => {
         ?.trim()
         .slice(0, isDemoRequest ? DEMO_MAX_QUERY_LENGTH : 80) || undefined;
     const mediaType = getGifPickerMediaType(url.searchParams.get("mediaType"));
-    const customerId = userId ?? requestedCustomerId;
+    // A pseudonym of the signed-in user, never the user id; none for the
+    // public demo. A client's own `customerId` parameter is ignored.
+    const customerId =
+      provider === "klipy" && userId
+        ? await klipyCustomerId(
+            userId,
+            (getEnv() as unknown as { REALTIME_TICKET_SECRET?: string })
+              .REALTIME_TICKET_SECRET,
+          )
+        : undefined;
 
     if (
       provider === "tenor" &&

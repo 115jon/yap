@@ -39,4 +39,43 @@ describe("buildVoiceDiagnosticsBundle", () => {
       nested: { authorization: "[redacted]" },
     });
   });
+
+  it("redacts ICE addresses and IPs inside candidate strings", () => {
+    const bundle = buildVoiceDiagnosticsBundle({
+      detailedStats: {
+        local: {
+          address: "192.168.1.20",
+          ip: "203.0.113.7",
+          relatedAddress: "10.0.0.2",
+          url: "stun:stun.example:3478",
+          port: 50000,
+          candidateType: "srflx",
+        },
+        candidate:
+          "candidate:1 1 udp 2122260223 198.51.100.4 54321 typ srflx raddr 10.0.0.2 rport 9",
+        v6: "candidate:2 1 udp 1 2001:db8:85a3::8a2e:370:7334 9 typ host",
+        v6full: "fe80:0:0:0:200:f8ff:fe21:67cf",
+        codec: "audio/opus",
+        note: "decode::failed in std::string",
+      },
+      connectionStats: null,
+    });
+
+    expect(bundle.detailedStats).toEqual({
+      local: {
+        address: "[redacted]",
+        ip: "[redacted]",
+        relatedAddress: "[redacted]",
+        url: "[redacted]",
+        port: 50000,
+        candidateType: "srflx",
+      },
+      candidate:
+        "candidate:1 1 udp 2122260223 [ip] 54321 typ srflx raddr [ip] rport 9",
+      v6: "candidate:2 1 udp 1 [ip] 9 typ host",
+      v6full: "[ip]",
+      codec: "audio/opus",
+      note: "decode::failed in std::string",
+    });
+  });
 });
