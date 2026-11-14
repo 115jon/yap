@@ -20,7 +20,6 @@ scripts then hydrate it. What differs per page is the chunks it asks for.
 | `/chat`, on demand                  | Settings, the profile editor, the server settings, the voice dashboard, soundboard, the activity stages (`WarpRushActivityStage` is three.js, `WordleActivityStage`), the shop tab | Opened by the person, not on the first screen                                                          |
 | Any page, after the first idle      | The Toaster (`sonner` and the card). On `/chat` it mounts as soon as the chat store loads                                                                                          | No public page raises a toast; the signed-in app does, at once                                         |
 | Any page, once the chat store loads | The theme bootstrap (applies or seeds the synced theme)                                                                                                                            | It reads the signed-in user from the chat store, so before the store there is nothing for it to do     |
-| Desktop (Tauri) only                | `DesktopLogin`, `DesktopThumbnailToolbarSync`                                                                                                                                      | The web build never draws them                                                                         |
 
 Four seams keep the public pages free of the chat app:
 
