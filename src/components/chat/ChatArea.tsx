@@ -44,6 +44,8 @@ import { ChatJumpToPresent } from "./ChatJumpToPresent";
 import { ChatTypingIndicator } from "./ChatTypingIndicator";
 import { ChatWelcomeContent } from "./ChatWelcomeContent";
 import { DMCallRegion } from "./DMCallRegion";
+import { DmBlockedComposer } from "./DmBlockedComposer";
+import { useDmComposerBlock } from "./useDmComposerBlock";
 import { BanMemberDialog } from "./BanMemberDialog";
 import { DragDropOverlay } from "./DragDropOverlay";
 import { EmptyChatArea } from "./EmptyChatArea";
@@ -128,6 +130,7 @@ export default function ChatArea({
     handleInitialScrollSettled,
     handleMessageVisible,
   } = useChatArea({ channelId, jumpToMessageId, onJumped });
+  const dmBlock = useDmComposerBlock(channelId, !!isDM);
   const [renderedPinMessage, setRenderedPinMessage] = useState(
     pinModal.message ?? null,
   );
@@ -292,7 +295,8 @@ export default function ChatArea({
         onOpenSearch={() => setLocalState({ showSearch: !showSearch })}
         showSearch={showSearch}
         onClose={onClose}
-        onCall={onCall}
+        // No call button in a DM closed by a block (the server refuses rings).
+        onCall={dmBlock.block ? undefined : onCall}
         dmUsername={dmUsername}
       />
       {/* The connection strip sits in the flow under the header, so a drop
@@ -386,7 +390,13 @@ export default function ChatArea({
             <div className="flex h-6 items-center px-4">
               <ChatTypingIndicator typingUsers={typingUsers} />
             </div>
-            {canSendMessages || isDM ? (
+            {isDM && channelId && dmBlock.block ? (
+              <DmBlockedComposer
+                block={dmBlock.block}
+                channelId={channelId}
+                recipientId={dmBlock.recipientId}
+              />
+            ) : canSendMessages || isDM ? (
               <MessageInput
                 channelId={channelId}
                 channelName={channelName}

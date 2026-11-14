@@ -18,6 +18,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { getDisplayInitial } from "@/lib/display-name";
+import { hasBlocked } from "@/lib/blocks";
 import { useContextMenu } from "@/hooks/useContextMenu";
 import { useCustomEmojiLookup } from "@/hooks/useCustomEmojiLookup";
 import { useEmojiDataReady } from "@/hooks/useEmojiDataReady";
@@ -1961,4 +1962,65 @@ function MessageHeaderTime({
   );
 }
 
-export default MessageItem;
+/** Blocked messages shown this session (they stay open as the list scrolls). */
+const revealedBlockedMessages = new Set<string>();
+
+/**
+ * A message from someone the viewer blocked, collapsed (Discord-style):
+ * "Blocked message" and Show. Show opens it for the rest of the session.
+ * Pending rows, the viewer's own messages and previews never collapse.
+ */
+function BlockableMessageItem(props: Props) {
+  const { message, currentUserId, previewOnly, onHeightChange, onVisible } =
+    props;
+  const blocked = useChatStore(
+    (state) =>
+      !previewOnly &&
+      message.author_id !== currentUserId &&
+      hasBlocked(state.relationships, message.author_id),
+  );
+  const [revealed, setRevealed] = useState(() =>
+    revealedBlockedMessages.has(message.id),
+  );
+  const collapsed = blocked && !revealed;
+  const wasCollapsed = useRef(collapsed);
+  useEffect(() => {
+    // The row changed height: the list re-measures it.
+    if (wasCollapsed.current !== collapsed) onHeightChange?.();
+    wasCollapsed.current = collapsed;
+  }, [collapsed, onHeightChange]);
+  const seenReported = useRef(false);
+  useEffect(() => {
+    // A collapsed row in the list counts as seen (read position), once.
+    if (!collapsed || !onVisible || seenReported.current) return;
+    seenReported.current = true;
+    onVisible();
+  }, [collapsed, onVisible]);
+
+  if (!collapsed) return <MessageItem {...props} />;
+  return (
+    <div
+      id={props.id}
+      data-message-row=""
+      data-blocked-message=""
+      className={cn(
+        "flex items-center gap-2 py-1 pr-6 pl-17 text-ui-sm text-ink-3",
+        props.showHeader && "mt-4",
+      )}
+    >
+      <span>Blocked message</span>
+      <Button
+        variant="link"
+        size="sm"
+        onClick={() => {
+          revealedBlockedMessages.add(message.id);
+          setRevealed(true);
+        }}
+      >
+        Show
+      </Button>
+    </div>
+  );
+}
+
+export default memo(BlockableMessageItem);

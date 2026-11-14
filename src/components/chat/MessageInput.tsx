@@ -111,8 +111,11 @@ function ComposerGutter({ children }: { children: ReactNode }) {
  */
 export function ComposerReadOnly({
   message = "You don't have permission to send messages in this channel.",
+  action,
 }: {
   message?: string;
+  /** A way out at the row's end (a DM with someone you blocked: Unblock). */
+  action?: ReactNode;
 }) {
   return (
     <ComposerGutter>
@@ -136,6 +139,11 @@ export function ComposerReadOnly({
           >
             {message}
           </p>
+          {action ? (
+            <div className="flex shrink-0 items-center self-center pr-2">
+              {action}
+            </div>
+          ) : null}
         </div>
       </div>
     </ComposerGutter>

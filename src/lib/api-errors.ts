@@ -1,3 +1,4 @@
+import { blockErrorMessage } from "@/lib/blocks";
 import { formatUploadLimit, parseServerLimitBytes } from "@/lib/upload-limits";
 
 /**
@@ -20,6 +21,9 @@ import { formatUploadLimit, parseServerLimitBytes } from "@/lib/upload-limits";
  * A 415 is shown as the server wrote it: only upload routes send one, and
  * each says which formats it takes or why a file was refused ("This image
  * format can't be checked for location data. Use JPEG, PNG, WebP or GIF.").
+ *
+ * So is a refusal over a block (`USER_BLOCKED`, `BLOCKED_BY_USER`): "You
+ * can't message this user." is written for people.
  */
 export function describeApiError(
   error: unknown,
@@ -32,6 +36,10 @@ export function describeApiError(
   if (paused) return paused;
   const refused = refusedMediaMessage(error);
   if (refused) return refused;
+  // A block: the server's sentence is written for people ("You can't
+  // message this user.").
+  const blocked = blockErrorMessage(error);
+  if (blocked) return blocked;
   if (status === 401) {
     return `Your session has ended. Sign in again to ${action}.`;
   }

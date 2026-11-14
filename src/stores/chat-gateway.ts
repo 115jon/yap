@@ -62,6 +62,8 @@ import type {
   Server,
 } from "@/lib/types";
 import type { ChatRestActions } from "./chat-actions";
+import { toast } from "@/components/ui/toast";
+import { CALL_BLOCKED_COPY, hasBlocked } from "@/lib/blocks";
 import { useCallStore } from "./useCallStore";
 import { useDesktopSettingsStore } from "./useDesktopSettingsStore";
 
@@ -330,6 +332,7 @@ export function createChatGateway(
         if (
           !isDmChannel &&
           msg.author_id !== state.user?.id &&
+          !hasBlocked(state.relationships, msg.author_id) &&
           !messageTargetsCurrentUser(msg) &&
           shouldNativeNotifyForChannelActivity({
             channelId: msg.channel_id,
@@ -404,6 +407,8 @@ export function createChatGateway(
       case "TYPING_START": {
         const { channel_id, user_id: uid } = d.data;
         if (!uid) break;
+        // Someone we blocked types unseen.
+        if (hasBlocked(get().relationships, uid)) break;
 
         dispatch({ type: "SET_TYPING", channelId: channel_id, userId: uid });
         const timerKey = `${channel_id}:${uid}`;
@@ -959,8 +964,11 @@ export function createChatGateway(
           break;
         }
 
-        // A null id is our op 36 being refused (busy, unavailable).
+        // A null id is our op 36 being refused (busy, unavailable, blocked).
         if (call_id === null) initiatingChannelId = null;
+        if (call_id === null && reason === "blocked") {
+          toast.error(CALL_BLOCKED_COPY);
+        }
 
         playRingStop();
         playOutgoingRingStop();
@@ -998,6 +1006,7 @@ export function createChatGateway(
             wasActive &&
             reason !== "busy" &&
             reason !== "unavailable" &&
+            reason !== "blocked" &&
             reason !== "invalid" &&
             reason !== "declined"
           ) {
