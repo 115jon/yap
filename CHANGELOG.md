@@ -1,5 +1,25 @@
 # Changelog
 
+## [4.2.0](https://github.com/115jon/yap/compare/v4.1.5...v4.2.0) (2026-11-14)
+
+
+### Features
+
+* **account:** ✨ delete your account with a 30-day grace period ([1dc660a](https://github.com/115jon/yap/commit/1dc660aaafd62bbcc8cc6819ec25b41c6451752d))
+* **account:** delete your account with a 30-day grace period ([53cc511](https://github.com/115jon/yap/commit/53cc511d3c7ad30c2eaffe185e7ec59f80739328))
+* **native:** ✨ delete your account from settings ([b64b7e4](https://github.com/115jon/yap/commit/b64b7e4282ef1032a4661f9f6a037243b8ce3c91))
+
+
+### Bug Fixes
+
+* **account:** 🐛 keep bans and blocks against a purged account ([046dd7b](https://github.com/115jon/yap/commit/046dd7b6eee2268ca6933f0c2dbbb74da6409943))
+* **account:** 🐛 say delete the server first, not transfer it ([acf4261](https://github.com/115jon/yap/commit/acf4261fbe9c6857378691cb5fbcde570db460a1))
+* **api:** 🐛 refuse media caps while the account awaits deletion ([9442969](https://github.com/115jon/yap/commit/9442969d0ccaf0f542200216b2a108683fdaeba4))
+* **api:** 🐛 refuse the media proxy while the account awaits deletion ([872ec5a](https://github.com/115jon/yap/commit/872ec5a08d1fb428c9ad284645a8fb8e5ce5b3d2))
+* **native:** 🐛 ship third-party licence texts with the apps ([c4118f6](https://github.com/115jon/yap/commit/c4118f66703bd658c8235a63b1f2f1c0df3d6b78))
+* **native:** 🐛 show mark as sensitive only on images and videos ([241f069](https://github.com/115jon/yap/commit/241f0695bf8a2df178d22f548f6c974d6b2455b5))
+* **native:** ship third-party licence texts with the apps ([925573e](https://github.com/115jon/yap/commit/925573e7e964c5afcfe1e21a00c62ee6cb69ab8a))
+
 ## [4.1.5](https://github.com/115jon/yap/compare/v4.1.4...v4.1.5) (2026-11-14)
 
 
