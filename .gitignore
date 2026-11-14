@@ -100,8 +100,6 @@ NUL
 
 # Analysis / handoff / audit notes that are not part of the shipped product.
 /docs/*
-# docs/desktop holds tracked docs on the web app's desktop host.
-!/docs/desktop/
 # docs/readme holds the images README.md shows.
 !/docs/readme/
 
