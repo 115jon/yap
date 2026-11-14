@@ -88,6 +88,17 @@ describe("parsePolicy", () => {
     ).toEqual([{ kind: "text", text: "x) <http://plain.example>" }]);
   });
 
+  it("keeps protocol-relative paths as text", () => {
+    expect(
+      parsePolicyInline(
+        "[a](//evil.example) [b](/\\evil.example) [c](/privacy)",
+      ),
+    ).toEqual([
+      { kind: "text", text: "a b " },
+      { kind: "link", text: "c", href: "/privacy" },
+    ]);
+  });
+
   it("anchors headings by their words", () => {
     expect(policyHeadingId("Deleting your account")).toBe(
       "deleting-your-account",

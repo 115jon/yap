@@ -33,7 +33,8 @@ const INLINE =
 
 /** Only web, mail and same-site links become anchors. */
 function safeHref(href: string): string | null {
-  if (/^(?:https:\/\/|mailto:|\/(?!\/)|#)/i.test(href)) return href;
+  // A path, but not `//host` or `/\host` (another host to a browser).
+  if (/^(?:https:\/\/|mailto:|\/(?![/\\])|#)/i.test(href)) return href;
   return null;
 }
 
