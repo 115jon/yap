@@ -1135,7 +1135,9 @@ SDK. `android/src/dev/yap/qtproto/crash`:
   trigger (`android/crash-test`; other builds, release ones included, get
   an empty `CrashTest` and no trigger code). This crashes the app three
   seconds later (`java`, `rust` for a panic, or `segv`), with made-up
-  secrets in the message for checking the redaction:
+  secrets in the message for checking the redaction (`dump` prints the
+  saved reports to logcat under `yap-crash-dump`, as such a build is not
+  debuggable):
 
   ```sh
   adb shell am start -n <app id>/dev.yap.qtproto.YapActivity --es yap_crash_test rust
