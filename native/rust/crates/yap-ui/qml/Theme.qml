@@ -167,6 +167,56 @@ QtObject {
         return presence === "idle" ? qsTr("Idle") : presence === "dnd" ? qsTr("Do not disturb")
             : presence === "offline" ? qsTr("Offline") : qsTr("Online")
     }
+    // Your own presence in words: `offline` is the Invisible you chose.
+    function ownPresenceWord(presence) {
+        return presence === "offline" ? qsTr("Invisible") : presenceWord(presence)
+    }
+    // The presences you can choose (Session.setStatus's values), in order:
+    // `label` for menus and rows, `short` for the account panel's rail,
+    // `hint` under a choice that does more than show.
+    readonly property var presenceOptions: [
+        { value: "online", label: qsTr("Online"), short: qsTr("Online"), hint: "" },
+        { value: "idle", label: qsTr("Idle"), short: qsTr("Idle"), hint: "" },
+        { value: "dnd", label: qsTr("Do not disturb"), short: qsTr("DND"), hint: qsTr("Mutes notifications") },
+        { value: "offline", label: qsTr("Invisible"), short: qsTr("Invisible"), hint: qsTr("You show as offline") }
+    ]
+
+    // ---------- Theme catalog ----------
+    // The themes you can pick (yap_core::settings::APP_THEMES and
+    // AppearancePanel.tsx THEME_CHOICES): a pair per palette, then Match
+    // system. `stops`: the preview sheet's swatch (ThemePreviewSidebar.tsx).
+    // `mock`: the picker thumbnails' colours, hand-matched to each theme's
+    // tokens (AppearancePanel.tsx SWATCHES); `dim` is the phone's opaque
+    // stand-in for `textDim`. Match system has no mock: its tile is the dark
+    // and light ones split.
+    readonly property var themeCatalog: [
+        { id: "dark", label: qsTr("Midnight"), stops: ["#141417", "#0b0b0d", "#ff8ad8"],
+          mock: { bg: "#0b0b0d", rail: "#000000", sidebar: "#141417", elevated: "#232328", accent: "#ff8ad8", text: "#f2f2f3", textDim: Qt.rgba(0.949, 0.949, 0.953, 0.35), border: Qt.rgba(0.949, 0.949, 0.953, 0.08), dim: "#3a3a40" } },
+        { id: "light", label: qsTr("Light"), stops: ["#ffffff", "#f4f4f5", "#c0127a"],
+          mock: { bg: "#fafafa", rail: "#f4f4f5", sidebar: "#f0f0f2", elevated: "#ffffff", accent: "#c0127a", text: "#0b0b0d", textDim: Qt.rgba(0.043, 0.043, 0.051, 0.3), border: Qt.rgba(0.043, 0.043, 0.051, 0.09), dim: "#c9c9cf" } },
+        { id: "miku-dark", label: qsTr("Miku Dark"), stops: ["#13111f", "#0f0d19", "#f872a5"],
+          mock: { bg: "#0c0b14", rail: "#07060d", sidebar: "#0f0e1a", elevated: "#1b192e", accent: "#39c5bb", text: "#ffffff", textDim: Qt.rgba(0.698, 0.722, 0.816, 0.45), border: "#23213a", dim: "#34324a" } },
+        { id: "miku-light", label: qsTr("Miku Light"), stops: ["#ffffff", "#e8f4fd", "#f872a5"],
+          mock: { bg: "#f3faf9", rail: "#d3ede8", sidebar: "#e1f3f0", elevated: "#ffffff", accent: "#00a399", text: "#1b2240", textDim: Qt.rgba(0.239, 0.278, 0.4, 0.35), border: "#c0e7e1", dim: "#b5d6d1" } },
+        { id: "spiderman-dark", label: qsTr("Spider-Man Dark"), stops: ["#06050a", "#0b0a10", "#e50914"],
+          mock: { bg: "#020208", rail: "#000000", sidebar: "#03030b", elevated: "#0d0d22", accent: "#e50914", text: "#ffffff", textDim: Qt.rgba(0.804, 0.824, 0.878, 0.4), border: Qt.rgba(0.102, 0.451, 0.91, 0.35), dim: "#1d2a52" } },
+        { id: "spiderman-light", label: qsTr("Spider-Man Light"), stops: ["#ffffff", "#eef0f6", "#e50914"],
+          mock: { bg: "#f8f9fc", rail: "#e8ebf3", sidebar: "#f1f3f9", elevated: "#ffffff", accent: "#e50914", text: "#0f172a", textDim: Qt.rgba(0.278, 0.333, 0.412, 0.35), border: Qt.rgba(0.059, 0.09, 0.165, 0.08), dim: "#c7cddd" } },
+        { id: "system", label: qsTr("Match system"), stops: ["#0b0b0d", "#80808a", "#f4f4f5"] }
+    ]
+    // The palettes alone (the catalog less Match system).
+    readonly property var themePalettes: themeCatalog.filter(entry => entry.id !== "system")
+    function themeEntry(id) {
+        return themeCatalog.find(entry => entry.id === id) ?? null
+    }
+    // A theme's name, "" for an id that is not one.
+    function themeLabel(id) {
+        return themeEntry(id)?.label ?? ""
+    }
+    // A palette's thumbnail colours (`mock` above).
+    function themeMock(id) {
+        return themeEntry(id)?.mock ?? null
+    }
     // Role colours are server data. OKLab helpers for the two CSS recipes.
     function toOklab(c) {
         const lin = v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)

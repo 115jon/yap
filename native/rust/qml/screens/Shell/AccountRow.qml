@@ -18,7 +18,7 @@ Rectangle {
     readonly property string presence: Session.meStatus.length > 0 ? Session.meStatus : "online"
     readonly property color presenceLed: Theme.presenceLed(presence)
     readonly property color presenceInk: Theme.presenceInk(presence)
-    readonly property string presenceWord: presence === "offline" ? qsTr("Invisible") : Theme.presenceWord(presence)
+    readonly property string presenceWord: Theme.ownPresenceWord(presence)
 
     // Over a nameplate the keys take its ink, as the web's controls do
     // (UserPanel.tsx nameplateInk/caretStyle): dark over a light accent,
