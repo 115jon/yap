@@ -12,8 +12,8 @@ import Yap.Ui
 // and synced to the account when asked); Text size (a factor over the
 // system's, this phone's own); Notifications (the push shim's permission
 // state); Devices (the account's sessions, others signed out after a
-// confirm); About; Sign out, confirmed in place. Opened from the account
-// row at the drawer's foot.
+// confirm); About (and the open source licences, LicensesPage); Sign out,
+// confirmed in place. Opened from the account row at the drawer's foot.
 Rectangle {
     id: root
 
@@ -419,6 +419,10 @@ Rectangle {
                     text: qsTr("Privacy")
                     url: "https://github.com/115jon/yap/blob/main/PRIVACY.md"
                 }
+                PageRow {
+                    text: qsTr("Open source licences")
+                    onOpened: licensesPage.load().open()
+                }
             }
 
             Column {
@@ -451,6 +455,19 @@ Rectangle {
                     }
                 }
             }
+        }
+    }
+
+    // About > Open source licences, over the page; made on first use.
+    Loader {
+        id: licensesPage
+        anchors.fill: parent
+        z: 2
+        active: false
+        sourceComponent: LicensesPage {}
+        function load() {
+            active = true
+            return item
         }
     }
 
@@ -935,6 +952,47 @@ Rectangle {
             text: info.value
             color: Theme.ink2
             font: Theme.type.num
+        }
+    }
+
+    // A page of the app's own, opened over this one.
+    component PageRow: Item {
+        id: pageRow
+        property string text
+        signal opened()
+        width: parent ? parent.width : 0
+        height: 48
+        Accessible.role: Accessible.Button
+        Accessible.name: text
+        Accessible.onPressAction: pageRow.opened()
+        Rectangle {
+            anchors.fill: parent
+            anchors.leftMargin: -8
+            anchors.rightMargin: -8
+            radius: Theme.radius
+            color: pageTap.pressed ? Theme.tint2 : "transparent"
+            Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+        }
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: pageRow.text
+            color: Theme.ink1
+            font: Theme.type.setting
+        }
+        Icon {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            name: "chevronRight"
+            size: Theme.iconMd
+            color: Theme.ink3
+        }
+        TapHandler {
+            id: pageTap
+            onTapped: {
+                Native.haptic(Native.Tick)
+                pageRow.opened()
+            }
         }
     }
 

@@ -399,6 +399,12 @@ jobs:
           $exe = Get-Item "$env:YAP_NATIVE_BUILD_DIR\Yap.exe"
           Write-Host "==> Yap.exe $([math]::Round($exe.Length / 1MB, 1)) MB"
 
+      # The third-party notices and licence texts the package ships
+      # (tools/gather-licenses.ps1). Here, where cargo's registry holds the
+      # crates the exe was built from; the release job packs them.
+      - name: Gather the licence texts
+        run: ./native/tools/gather-licenses.ps1 -Out "$env:YAP_NATIVE_BUILD_DIR\licenses"
+
       - name: sccache stats
         if: always()
         run: sccache --show-stats
@@ -409,6 +415,7 @@ jobs:
           name: yap-native-build
           path: |
             native/build/ci/Yap.exe
+            native/build/ci/licenses/
             native/build/onnxruntime/
           if-no-files-found: error
           retention-days: 3
@@ -591,6 +598,7 @@ jobs:
             SkipBuild = $true
             BuildDir = "$env:BUILD\ci"
             OrtDir = "$env:BUILD\onnxruntime"
+            LicensesDir = "$env:BUILD\ci\licenses"
             OutDir = $env:OUT
             Version = $env:VERSION
             Channel = $env:CHANNEL

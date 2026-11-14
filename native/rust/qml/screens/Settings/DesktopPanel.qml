@@ -8,7 +8,8 @@ import Yap.Ui
 // the game capture hook, hardware acceleration (GPU safe mode in
 // `gpu-compat.json`, cpp/compat.*) and updates (`Updater`, src/updater.rs:
 // the installed version, Check for updates, the download, Restart now,
-// install on quit and the beta channel, kept in `updates.json`).
+// install on quit and the beta channel, kept in `updates.json`) and the
+// open source licences shipped beside the exe.
 Column {
     spacing: 40
 
@@ -236,6 +237,18 @@ Column {
             disabled: versionRow.off
             checked: Updater.beta
             onToggled: Updater.saveBeta(!Updater.beta)
+        }
+        // The licences folder beside the exe, in Explorer (a build tree has
+        // none: the row hides).
+        SettingsRow {
+            rowId: "open-source-licences"
+            visible: DesktopShell.licensesUrl.toString().length > 0 && SettingsNav.matches(rowId)
+            KitButton {
+                anchors.verticalCenter: parent.verticalCenter
+                variant: "secondary"
+                text: qsTr("Open")
+                onClicked: Qt.openUrlExternally(DesktopShell.licensesUrl)
+            }
         }
     }
 }

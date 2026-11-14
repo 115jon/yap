@@ -6,14 +6,14 @@ import Yap.Ui
 
 // The composer's attachments, phone layout (the desktop's UploadTray on a
 // touch row): 72 px tiles side by side, scrolled sideways. A finished tile
-// shows its picture (or the type glyph), the size chip and the sensitive
-// toggle; one still going is dimmed with its progress; a failed one says
-// so and Retry starts it again. Remove (or cancel) is always shown: touch
-// has no hover. A file over the limit is never uploaded: the core keeps it
-// as a too-big card (Yap.Ui's TooBigCard, the desktop's: Yappy's pose, the
-// name, "31.2 MB · 6.2 MB over the 25 MB limit", Remove and Choose
-// another), and two or more of them fold into one card with "Remove the
-// big ones". The tray grows to the tallest card.
+// shows its picture (or the type glyph), the size chip and (pictures and
+// videos) the sensitive toggle; one still going is dimmed with its
+// progress; a failed one says so and Retry starts it again. Remove (or
+// cancel) is always shown: touch has no hover. A file over the limit is
+// never uploaded: the core keeps it as a too-big card (Yap.Ui's TooBigCard,
+// the desktop's: Yappy's pose, the name, "31.2 MB · 6.2 MB over the 25 MB
+// limit", Remove and Choose another), and two or more of them fold into one
+// card with "Remove the big ones". The tray grows to the tallest card.
 Item {
     id: root
 
@@ -238,11 +238,12 @@ Item {
                 }
             }
 
-            // Mark sensitive, top left of a finished tile: a 32 px target
+            // Mark sensitive, top left of a finished picture or video (a
+            // text file or an archive has nothing to blur): a 32 px target
             // around the 20 px chip.
             Item {
                 id: sensitiveKey
-                visible: tile.done && !tile.isCard
+                visible: tile.done && !tile.isCard && (tile.kind === "image" || tile.kind === "video")
                 anchors.left: parent.left
                 anchors.top: parent.top
                 width: 32

@@ -62,7 +62,11 @@ param(
     # runs on ONNX Runtime's CPU provider. The model comes from assets/models.
     [string]$OrtDir = $(if ($env:YAP_ORT_DIR) { $env:YAP_ORT_DIR } else { "F:/ct/onnxruntime/dml-1.24.4" }),
     # Leave the segmentation runtime out (backgrounds are then unavailable).
-    [switch]$NoSegmentation
+    [switch]$NoSegmentation,
+    # The licence texts gather-licenses.ps1 already put together (CI gathers
+    # them in the build job, where cargo's registry is). Empty gathers them
+    # here.
+    [string]$LicensesDir
 )
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -116,15 +120,28 @@ if (-not $SkipBuild) {
 $exe = Join-Path $BuildDir "Yap.exe"
 if (-not (Test-Path $exe)) { throw "No $exe; build first or drop -SkipBuild." }
 
-# The package is exactly what is staged: the one static exe, the game
-# capture hook's six OBS-signed files with their GPL-2.0 licence and source
-# offer, and the camera background runtime.
+# The package is exactly what is staged: the one static exe, the third-party
+# notices and licence texts, the game capture hook's six OBS-signed files
+# with their GPL-2.0 licence and source offer, and the camera background
+# runtime.
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
 $stage = Join-Path $OutDir "stage-$PackId-$Version"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory $stage | Out-Null
 Copy-Item $exe $stage
+
+# The licences of everything Yap.exe links or embeds (THIRD_PARTY_NOTICES.md):
+# the notices beside the exe and the full texts in licenses\, which
+# Settings > Desktop app > Open source licences opens.
+if ($LicensesDir) {
+    if (-not (Test-Path (Join-Path $LicensesDir "rust-crates.txt"))) { throw "No gathered licences in $LicensesDir" }
+    Copy-Item -Recurse $LicensesDir (Join-Path $stage "licenses")
+} else {
+    & "$PSScriptRoot/gather-licenses.ps1" -Out (Join-Path $stage "licenses")
+    if (-not $?) { throw "gather-licenses.ps1 failed" }
+}
+Copy-Item (Join-Path $stage "licenses\THIRD_PARTY_NOTICES.md") $stage
 
 # The OBS-signed capture hook, byte for byte as OBS released it, next to the
 # exe (the app looks in obs-capture\obs-signed). fetch-obs-signed-hook.ps1

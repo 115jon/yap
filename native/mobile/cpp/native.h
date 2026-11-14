@@ -129,6 +129,11 @@ public:
   // `title` heads the share sheet (empty: the system's own).
   Q_INVOKABLE void share(const QString& text, const QString& title = QString()) const;
   Q_INVOKABLE void copy(const QString& text) const;
+  // The third-party licence texts the APK carries (assets/licenses, put
+  // there by tools/gather-licenses.ps1): their file names, the notices
+  // first, and one file's text ("" for a name not among them).
+  Q_INVOKABLE QStringList licenseFiles() const;
+  Q_INVOKABLE QString readLicense(const QString& name) const;
   // Back at the root: leave as the system would (the task goes back).
   Q_INVOKABLE void leave() const;
   // Commits the core's snapshot cache (the app going to the background).

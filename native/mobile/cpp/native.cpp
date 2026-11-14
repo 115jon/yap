@@ -2,6 +2,8 @@
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
+#include <QtCore/QDir>
+#include <QtCore/QFile>
 #include <QtCore/QMetaObject>
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
@@ -297,6 +299,39 @@ void Native::share(const QString& text, const QString& title) const
 void Native::copy(const QString& text) const
 {
   QGuiApplication::clipboard()->setText(text);
+}
+
+namespace {
+// Android reads the APK's assets through Qt's assets:/ file engine; other
+// builds look beside the executable.
+QString licensesDir()
+{
+#ifdef Q_OS_ANDROID
+  return QStringLiteral("assets:/licenses");
+#else
+  return QCoreApplication::applicationDirPath() + QStringLiteral("/licenses");
+#endif
+}
+} // namespace
+
+QStringList Native::licenseFiles() const
+{
+  QStringList names = QDir(licensesDir()).entryList(QDir::Files, QDir::Name | QDir::IgnoreCase);
+  const QString notices = QStringLiteral("THIRD_PARTY_NOTICES.md");
+  if (names.removeAll(notices) > 0)
+    names.prepend(notices);
+  return names;
+}
+
+QString Native::readLicense(const QString& name) const
+{
+  // Only a plain name from the list, never a path.
+  if (!licenseFiles().contains(name))
+    return {};
+  QFile file(licensesDir() + QLatin1Char('/') + name);
+  if (!file.open(QIODevice::ReadOnly))
+    return {};
+  return QString::fromUtf8(file.readAll());
 }
 
 void Native::leave() const
