@@ -102,8 +102,9 @@ QtObject {
         // Thread rows have none (ThreadSidebar.tsx passes no onThread).
         case "thread":
             return settled && m.threadActions !== false
+        // Not in a DM closed by a block: the server refuses it (#312).
         case "pin":
-            return settled && Panels.canPin
+            return settled && Panels.canPin && Nav.dmBlock.length === 0
         // Ours, or anyone's with MANAGE_MESSAGES (MessageItem.tsx).
         case "delete":
             return settled && (m.mine === true || Chat.canManageMessages)
@@ -162,7 +163,7 @@ QtObject {
         ],
         // The phone's sheet, after its preview and quick reactions.
         sheet: [
-            { id: "reply" }, { id: "edit" }, { id: "thread" }, { id: "reactions" }, "|",
+            { id: "reply" }, { id: "edit" }, { id: "thread" }, { id: "pin" }, { id: "reactions" }, "|",
             { id: "copyText", needsText: true }, { id: "select" }, { id: "share" },
             { id: "copyMessageLink" }, { id: "markUnread" }, { id: "profile" },
             { id: "removeEmbeds", last: true }, { id: "delete", last: true }

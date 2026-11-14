@@ -94,6 +94,19 @@ pub trait Platform: Send + Sync + 'static {
         0.0
     }
 
+    /// This device's soundboard volume setting, 0 to 100, for an app whose
+    /// shell has no settings object of its own (`Apps.soundboardVolume`).
+    /// `None`: the app shows it elsewhere (the desktop's `Desktop`).
+    fn soundboard_volume(&self) -> Option<u8> {
+        None
+    }
+
+    /// Saves the soundboard volume setting (0 to 100) and applies it to
+    /// what plays now (`Apps.setSoundboardVolume`).
+    fn set_soundboard_volume(&self, volume: u8) {
+        let _ = volume;
+    }
+
     /// Whether the system has a network, when the app can ask (`None`:
     /// it cannot). A phone app in the background can have its own network
     /// blocked while the device's is up: a host name that does not resolve
