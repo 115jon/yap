@@ -45,6 +45,11 @@ libc = "0.2"
 # compile and link check without voice.
 yap-voice = { path = "../../rust/crates/yap-voice", default-features = false, features = ["store", "rustls"] }
 
+[features]
+# The debug crash trigger (src/crash.rs; CMake turns it on for
+# YAP_CRASH_TEST=1 builds). Never in a release build.
+crash-test = []
+
 [build-dependencies]
 cxx-qt-build = "0.10"
 

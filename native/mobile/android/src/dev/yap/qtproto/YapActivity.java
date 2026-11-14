@@ -5,6 +5,7 @@ import android.os.Bundle;
 
 import org.qtproject.qt.android.bindings.QtActivity;
 
+import dev.yap.qtproto.crash.CrashReports;
 import dev.yap.qtproto.push.IncomingCalls;
 import dev.yap.qtproto.push.PushShim;
 import dev.yap.qtproto.voice.VoiceShim;
@@ -17,7 +18,8 @@ import dev.yap.qtproto.voice.VoiceShim;
  * call's full-screen intent and its Answer go to IncomingCalls, which
  * keeps them for Qt the same way, and shows the app over the lock screen
  * while the call needs it. And with a
- * call's goodbye on the way out.
+ * call's goodbye on the way out. Crash reports (crash/CrashReports) are
+ * set up before Qt starts, and last run's crash is offered on top.
  */
 public class YapActivity extends QtActivity {
     private static YapActivity shown;
@@ -27,6 +29,7 @@ public class YapActivity extends QtActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         shown = this;
+        CrashReports.install(this);
         applyOverLock();
         // A recreated activity (restored state, or started again from
         // Recents) carries the intent it was first started with: an old tap.
@@ -36,6 +39,7 @@ public class YapActivity extends QtActivity {
             PushShim.offer(getIntent());
             LinkShim.offer(getIntent());
         }
+        if (fresh) CrashReports.test(getIntent());
         super.onCreate(savedInstanceState);
     }
 
@@ -46,6 +50,7 @@ public class YapActivity extends QtActivity {
             PushShim.offer(intent);
             LinkShim.offer(intent);
         }
+        CrashReports.test(intent);
     }
 
     @Override

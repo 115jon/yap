@@ -333,6 +333,7 @@ fn text(ptr: *const c_char) -> Option<String> {
 #[no_mangle]
 pub extern "C" fn yap_mobile_init(data_dir: *const c_char, device_name: *const c_char) {
     crate::platform::stderr_to_logcat();
+    crate::crash::install();
     let data = text(data_dir).map_or_else(|| PathBuf::from("."), PathBuf::from);
     yap_cache::profile::set_base(data.clone());
     seed_theme();

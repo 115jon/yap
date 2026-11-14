@@ -5,6 +5,8 @@
 //! this crate's QML module, `com.yap.mobile`.
 
 mod client;
+// A panic's message for the next launch's crash report (CrashReports.java).
+mod crash;
 // Qt's network loads over the core's rustls (cpp/rustnetwork.cpp).
 mod http;
 mod platform;
