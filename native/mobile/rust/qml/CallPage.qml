@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Templates as T
 import Yap.Mobile
 import com.yap.mobile
 import Yap.Ui
@@ -79,7 +80,8 @@ Rectangle {
     }
     readonly property string quality: inCall && Voice.live && calls.stats ? (calls.stats.quality ?? "") : ""
     readonly property int rttMs: quality.length > 0 && calls.stats.rttMs ? Math.round(calls.stats.rttMs) : 0
-    readonly property bool micStalled: inCall && calls.micStalled === true
+    // A muted mic is silent on purpose.
+    readonly property bool micStalled: inCall && !Voice.muted && calls.micStalled === true
     readonly property bool inboundStalled: inCall && calls.inboundStalled === true
 
     // Reconnecting and the like are amber; a live call is talk green.
@@ -223,31 +225,27 @@ Rectangle {
         }
     }
 
-    // What is wrong, when something is: a failed call's reason, or audio
-    // that stopped flowing one way.
-    Rectangle {
+    // What is wrong, when something is (CallHealth, shared with the
+    // desktop): a failed call's reason or a camera that would not start,
+    // the call reconnecting, audio that stopped flowing one way, a poor
+    // link.
+    CallHealth {
         id: trouble
-        readonly property string line: !root.inCall ? (root.failed ? (root.unreachable.length > 0 ? root.unreachable : Voice.error) : "")
-            : root.micStalled ? qsTr("We can't hear you. Check that nothing else is using the microphone.")
-            : Voice.cameraError.length > 0 ? CameraLink.errorText(Voice.cameraError)
-            : root.inboundStalled ? qsTr("You can't hear anyone right now. Yap is trying to get the audio back.")
-            : ""
         anchors.top: statusRow.bottom
         width: parent.width
-        height: line.length > 0 ? troubleText.implicitHeight + 20 : 0
-        visible: line.length > 0
-        color: root.inCall ? Theme.warningTint : Theme.dangerTint
-        Text {
-            id: troubleText
-            x: 16 + root.leftInset
-            y: 10
-            width: parent.width - 32 - root.leftInset - root.rightInset
-            textFormat: Text.PlainText
-            wrapMode: Text.Wrap
-            text: trouble.line
-            color: Theme.ink1
-            font: Theme.type.description
-        }
+        wrap: true
+        textFont: Theme.type.description
+        leftInset: root.leftInset
+        rightInset: root.rightInset
+        alert: !root.inCall ? (root.failed ? (root.unreachable.length > 0 ? root.unreachable : Voice.error) : "")
+            : Voice.cameraError.length > 0 ? CameraLink.errorText(Voice.cameraError) : ""
+        alertDanger: !root.inCall
+        reconnecting: root.inCall && Voice.status === "Reconnecting"
+        micStalled: root.micStalled
+        inboundStalled: root.inboundStalled
+        poorLink: root.quality === "bad"
+        micText: qsTr("We can't hear you. Check that nothing else is using the microphone.")
+        inboundText: qsTr("You can't hear anyone right now. Yap is trying to get the audio back.")
     }
 
     PlatformList {
@@ -275,6 +273,7 @@ Rectangle {
         delegate: Item {
             id: person
 
+            required property string memberId
             required property string name
             required property string initials
             required property string avatar
@@ -284,12 +283,35 @@ Rectangle {
             required property bool me
 
             readonly property bool talking: speaking && !muted && !deafened
+            // Our local mute for them (the volume sheet's Mute).
+            readonly property bool silenced: !me && root.peersRevision >= 0 && Voice.peerMuted(memberId)
+
+            function openVolume() {
+                Native.haptic(Native.LongPress)
+                peerSheet.show(person.memberId, person.name)
+            }
 
             width: roster.width
             height: 56
-            Accessible.role: Accessible.ListItem
+            Accessible.role: me ? Accessible.ListItem : Accessible.Button
             Accessible.name: [name, me ? qsTr("you") : "", talking ? qsTr("speaking") : "",
-                              muted ? qsTr("muted") : "", deafened ? qsTr("deafened") : ""].filter(s => s.length > 0).join(", ")
+                              muted ? qsTr("muted") : "", deafened ? qsTr("deafened") : "",
+                              silenced ? qsTr("muted for you") : ""].filter(s => s.length > 0).join(", ")
+            Accessible.description: me ? "" : qsTr("Touch and hold for their volume")
+            Accessible.onPressAction: if (!me) openVolume()
+
+            // Someone else: a long press opens their volume and mute (the
+            // desktop's peer menu).
+            Rectangle {
+                anchors.fill: parent
+                color: !person.me && personTap.pressed ? Theme.tint1 : "transparent"
+                Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+            }
+            TapHandler {
+                id: personTap
+                enabled: !person.me
+                onLongPressed: person.openVolume()
+            }
 
             Avatar {
                 id: face
@@ -338,6 +360,13 @@ Rectangle {
                     visible: person.deafened
                     name: "deafen"
                     variant: "off"
+                    size: Theme.iconMd
+                    color: Theme.mutedState
+                }
+                // Muted for us only.
+                Icon {
+                    visible: person.silenced
+                    name: "speakerOff"
                     size: Theme.iconMd
                     color: Theme.mutedState
                 }
@@ -566,6 +595,175 @@ Rectangle {
         z: 100
         active: false
         sourceComponent: SoundboardSheet {}
+    }
+
+    // Bumped by each per-person volume or mute change, so what shows them
+    // reads them again.
+    property int peersRevision: 0
+
+    // Someone's volume (0-200 %, a tick at 100 %) and our local mute for
+    // them, both kept for later calls (the desktop's peer menu: "User
+    // volume", "Mute"). The slider is heard as it moves and saved on
+    // release.
+    BottomSheet {
+        id: peerSheet
+        property string userId: ""
+        property string name: ""
+        readonly property int volume: root.peersRevision >= 0 && userId.length > 0 ? Math.max(0, Voice.peerVolume(userId)) : 100
+        readonly property bool silenced: root.peersRevision >= 0 && userId.length > 0 && Voice.peerMuted(userId)
+        function show(userId, name) {
+            peerSheet.userId = userId
+            peerSheet.name = name
+            peerSheet.open()
+        }
+        anchors.fill: parent
+        title: name
+        contentHeight: peerColumn.implicitHeight
+        onClosed: userId = ""
+
+        Column {
+            id: peerColumn
+            width: parent.width
+            bottomPadding: 8
+
+            Item {
+                width: parent.width
+                height: 32
+                Text {
+                    x: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: qsTr("User volume")
+                    color: Theme.ink2
+                    font: Theme.type.captionStrong
+                }
+                Text {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: qsTr("%1%").arg(Math.round(volumeRange.pressed ? volumeRange.value : peerSheet.volume))
+                    color: peerSheet.silenced ? Theme.ink3 : Theme.ink1
+                    font: Theme.type.num
+                }
+            }
+            T.Slider {
+                id: volumeRange
+                x: 16
+                width: parent.width - 32
+                height: 48
+                from: 0
+                to: 200
+                stepSize: 1
+                snapMode: T.Slider.SnapAlways
+                opacity: peerSheet.silenced ? 0.45 : 1
+                Accessible.role: Accessible.Slider
+                Accessible.name: qsTr("Volume for %1").arg(peerSheet.name)
+                Accessible.description: qsTr("%1%").arg(Math.round(value))
+                Binding on value {
+                    when: !volumeRange.pressed
+                    value: Math.min(200, peerSheet.volume)
+                    restoreMode: Binding.RestoreNone
+                }
+                // Near 100 % a drag lands on it.
+                function snapped(v) {
+                    return Math.abs(v - 100) <= 4 ? 100 : Math.round(v)
+                }
+                onMoved: {
+                    const v = snapped(value)
+                    if (v !== Math.round(value))
+                        value = v
+                    Voice.previewPeerVolume(peerSheet.userId, v)
+                }
+                onPressedChanged: {
+                    if (pressed || peerSheet.userId.length === 0)
+                        return
+                    Native.haptic(Native.Tick)
+                    Voice.setPeerVolume(peerSheet.userId, snapped(value))
+                    root.peersRevision += 1
+                }
+                background: Rectangle {
+                    x: volumeRange.leftPadding
+                    y: (volumeRange.height - height) / 2
+                    width: volumeRange.availableWidth
+                    height: 6
+                    radius: 1
+                    color: Theme.tint3
+                    Rectangle {
+                        width: volumeRange.visualPosition * parent.width
+                        height: parent.height
+                        radius: 1
+                        color: Theme.accentInk
+                    }
+                    // 100 %.
+                    Rectangle {
+                        x: parent.width / 2 - 1
+                        y: -4
+                        width: 2
+                        height: parent.height + 8
+                        color: Theme.ink3
+                    }
+                }
+                handle: Rectangle {
+                    x: volumeRange.leftPadding + volumeRange.visualPosition * (volumeRange.availableWidth - width)
+                    y: (volumeRange.height - height) / 2
+                    width: 14
+                    height: 30
+                    radius: Theme.radius
+                    color: Theme.ink1
+                }
+            }
+            // Mute, for us only.
+            Item {
+                width: parent.width
+                height: Math.max(Theme.controlLg, muteWords.implicitHeight + 16)
+                Accessible.role: Accessible.CheckBox
+                Accessible.name: qsTr("Mute")
+                Accessible.description: muteHint.text
+                Accessible.checkable: true
+                Accessible.checked: peerSheet.silenced
+                Accessible.onPressAction: muteSwitch.clicked()
+                Column {
+                    id: muteWords
+                    anchors.left: parent.left
+                    anchors.leftMargin: 16
+                    anchors.right: muteSwitch.left
+                    anchors.rightMargin: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 2
+                    Text {
+                        width: parent.width
+                        textFormat: Text.PlainText
+                        text: qsTr("Mute")
+                        color: Theme.ink1
+                        font: Theme.type.setting
+                    }
+                    Text {
+                        id: muteHint
+                        width: parent.width
+                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                        text: qsTr("Only you stop hearing them.")
+                        color: Theme.ink3
+                        font: Theme.type.description
+                    }
+                }
+                TapHandler { onTapped: muteSwitch.clicked() }
+                SettingSwitch {
+                    id: muteSwitch
+                    anchors.right: parent.right
+                    anchors.rightMargin: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    checked: peerSheet.silenced
+                    Accessible.ignored: true
+                    onClicked: {
+                        Native.haptic(Native.Tick)
+                        Voice.setPeerMuted(peerSheet.userId, !peerSheet.silenced)
+                        root.peersRevision += 1
+                    }
+                }
+            }
+        }
     }
 
     // Where the call plays (and which mic it uses): the system's routes.

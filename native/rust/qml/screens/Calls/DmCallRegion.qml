@@ -124,51 +124,12 @@ Rectangle {
     Accessible.name: qsTr("Call with %1").arg(calls.dmName ?? "")
 
     // AudioSentinel: nothing goes out of our unmuted mic, or nothing comes
-    // in while someone talks.
-    Column {
+    // in while someone talks (CallHealth, shared with the phone).
+    CallHealth {
         id: banner
         width: parent.width
-        Repeater {
-            model: [
-                {
-                    "shown": root.micStalled,
-                    "icon": "micOff",
-                    "text": qsTr("We can't hear you. Your microphone isn't picking up any sound.")
-                },
-                {
-                    "shown": root.inboundStalled,
-                    "icon": "deafen",
-                    "text": qsTr("You can't hear anyone. Check your output device.")
-                }
-            ]
-            Rectangle {
-                id: line
-                required property var modelData
-                width: banner.width
-                height: modelData.shown ? 32 : 0
-                visible: modelData.shown
-                color: Theme.dangerTint
-                Row {
-                    x: 16
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 8
-                    Icon {
-                        anchors.verticalCenter: parent.verticalCenter
-                        name: line.modelData.icon
-                        size: Theme.iconSm
-                        color: Theme.dangerInk
-                    }
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        textFormat: Text.PlainText
-                        text: line.modelData.text
-                        color: Theme.dangerInk
-                        font: Theme.type.caption
-                        Accessible.role: Accessible.AlertMessage
-                    }
-                }
-            }
-        }
+        micStalled: root.micStalled
+        inboundStalled: root.inboundStalled
     }
 
     Item {
