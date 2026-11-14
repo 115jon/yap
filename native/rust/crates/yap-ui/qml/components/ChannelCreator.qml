@@ -15,6 +15,9 @@ QtObject {
     // The core's finished count when this form started: a higher one is
     // its channel, created.
     property int doneCount: 0
+    // Only a started form hears its creates (a count from before `start`
+    // is another form's).
+    property bool started: false
 
     readonly property var model: JSON.parse(Admin.state)
     readonly property var act: model.acts["create-channel"] ?? { busy: false, error: "", done: 0 }
@@ -35,6 +38,7 @@ QtObject {
         Admin.clear("create-channel")
         Admin.clear("create-channel.name")
         doneCount = act.done
+        started = true
     }
     function create(name) {
         if (!busy)
@@ -50,6 +54,8 @@ QtObject {
     }
 
     onActChanged: {
+        if (!started)
+            return
         if (act.done < doneCount)
             doneCount = act.done
         else if (act.done > doneCount) {
