@@ -20,6 +20,7 @@ pub mod friends;
 pub mod gui;
 pub mod invites;
 pub mod limits;
+pub mod media;
 pub mod models;
 pub mod panels;
 pub mod picker;

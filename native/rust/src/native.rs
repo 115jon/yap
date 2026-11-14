@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use yap_core::{
-    Api, AudioHandle, Command, GatewayEvents, GatewayHandle, Realtime, UploadFile, ViewUpdate,
+    Api, AudioHandle, Command, GatewayEvents, GatewayHandle, Realtime, ViewUpdate,
     VoiceCommand, VoiceEvents,
 };
 
@@ -86,7 +86,7 @@ impl Platform for Desktop {
             ViewUpdate::Sound(sound) => crate::sound::play(sound),
             ViewUpdate::StopSound(sound) => crate::sound::stop(sound),
             ViewUpdate::Badge(badge) => crate::desktop::on_badge(badge),
-            ViewUpdate::MediaAuth(token) => crate::media::set_token(token),
+            ViewUpdate::MediaAuth(token) => yap_ui::media::set_token(token),
             _ => return false,
         }
         true
@@ -95,10 +95,6 @@ impl Platform for Desktop {
     fn in_call(&self, in_call: bool) {
         // The updater's restart waits while a call is up.
         crate::updater::set_in_call(in_call);
-    }
-
-    fn upload_files(&self, paths: &[String]) -> Vec<UploadFile> {
-        crate::media::upload_files(paths)
     }
 
     fn share_sources_json(&self) -> String {
