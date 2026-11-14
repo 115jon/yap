@@ -136,12 +136,19 @@ pub extern "C" fn yap_mobile_voice_mute(muted: bool) {
 }
 
 /// An audio focus loss deafens (which mutes, and remembers the mic);
-/// getting it back undeafens. The speaker (soundboard, UI sounds) is
-/// silent for as long.
+/// getting it back undeafens.
 #[no_mangle]
 pub extern "C" fn yap_mobile_voice_deafen(deafened: bool) {
-    yap_speaker::speaker().set_muted(deafened);
     client::command(Command::SetVoiceDeafened(deafened));
+}
+
+/// The phone's ear is taken (a phone call, an alarm) or given back: the
+/// app's speaker (soundboard, UI sounds) is silent for as long. Follows the
+/// interruption itself, not the deafen it causes, which the user can change
+/// in the meantime.
+#[no_mangle]
+pub extern "C" fn yap_mobile_speaker_muted(muted: bool) {
+    yap_speaker::speaker().set_muted(muted);
 }
 
 /// The notification's Leave.
