@@ -4,19 +4,21 @@
 //! `QNetworkReply` fed by the callbacks in [`YapHttpSink`].
 //!
 //! The session goes only to the API's own private media (attachments,
-//! custom emoji: `yap_core::api::media_needs_auth`, the desktop's
-//! `media.rs` rule). reqwest drops `Authorization` on a redirect to another
+//! custom emoji: `yap_ui::media::bearer_for`, the store and rule the
+//! desktop shares). reqwest drops `Authorization` on a redirect to another
 //! scheme, host or port, so a redirect never carries it off the API.
 
 use std::ffi::{c_char, c_void};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{OnceLock, PoisonError, RwLock};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
 use tokio::runtime::Runtime;
 use tokio::task::AbortHandle;
-use yap_core::Token;
+
+// The session store is shared with the desktop; `client.rs` still reaches
+// it as `crate::http::set_token`.
+pub use yap_ui::media::set_token;
 
 /// Larger than any picture the app shows (`AnimatedPicture` stops at
 /// 24 MiB; attachments are previews of what the server stores).
@@ -30,31 +32,11 @@ const DONE_TOO_LARGE: i32 = 2;
 const DONE_BAD_REQUEST: i32 = 3;
 const DONE_TIMEOUT: i32 = 4;
 
-static MEDIA_TOKEN: RwLock<Option<Token>> = RwLock::new(None);
-/// Bumped with every session change: private media the C++ side keeps in
-/// memory (`RecentPrivate`) belongs to the session it was fetched under.
-static TOKEN_GENERATION: AtomicU64 = AtomicU64::new(0);
-
-/// The session for media requests (`ViewUpdate::MediaAuth`); `None` after
-/// sign-out.
-pub fn set_token(token: Option<Token>) {
-    *MEDIA_TOKEN.write().unwrap_or_else(PoisonError::into_inner) = token;
-    TOKEN_GENERATION.fetch_add(1, Ordering::AcqRel);
-}
-
-/// Which session private media is fetched under now (see `set_token`).
+/// Which session private media is fetched under now (the shared store,
+/// `yap_ui::media`; bumped with every session change).
 #[no_mangle]
 pub extern "C" fn yap_http_session_generation() -> u64 {
-    TOKEN_GENERATION.load(Ordering::Acquire)
-}
-
-/// `Bearer <session>` for `url` when it is the API at `api_base`'s private
-/// media; `None` for anything else, which never gets the session.
-fn bearer(api_base: &str, url: &str, token: Option<&Token>) -> Option<String> {
-    if !yap_core::api::media_needs_auth(api_base, url) {
-        return None;
-    }
-    token.map(|t| format!("Bearer {}", t.as_str()))
+    yap_ui::media::token_generation()
 }
 
 /// The caller's extra request headers, `name: value` per line (the
@@ -201,11 +183,7 @@ fn client() -> &'static reqwest::Client {
 
 async fn fetch(url: String, headers: HeaderMap, sink: &Sink) {
     let mut request = client().get(&url).headers(headers);
-    let token = MEDIA_TOKEN
-        .read()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone();
-    if let Some(bearer) = bearer(&yap_core::config::get().api_base, &url, token.as_ref()) {
+    if let Some(bearer) = yap_ui::media::bearer_for(&url) {
         request = request.header(AUTHORIZATION, bearer);
     }
     let mut response = match request.send().await {
@@ -322,27 +300,6 @@ pub unsafe extern "C" fn yap_http_private(url: *const c_char, len: usize) -> boo
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const API: &str = "https://api.example.com";
-
-    #[test]
-    fn bearer_only_for_the_apis_private_media() {
-        let token = Token::new("t0k");
-        let t = Some(&token);
-        assert_eq!(
-            bearer(API, "https://api.example.com/api/attachments/a/b.png", t).as_deref(),
-            Some("Bearer t0k")
-        );
-        assert!(bearer(API, "https://api.example.com/api/emojis/assets/x.webp", t).is_some());
-        // Public avatars, other hosts and look-alike hosts never get it.
-        assert!(bearer(API, "https://api.example.com/api/avatars/u.png", t).is_none());
-        assert!(bearer(API, "https://cdn.example.net/api/attachments/a.png", t).is_none());
-        assert!(bearer(API, "https://api.example.com.evil.net/api/attachments/a", t).is_none());
-        assert!(bearer(API, "https://api.example.com@evil.net/api/attachments/a", t).is_none());
-        assert!(bearer(API, "http://api.example.com/api/attachments/a.png", t).is_none());
-        // Signed out: nothing to send.
-        assert!(bearer(API, "https://api.example.com/api/attachments/a.png", None).is_none());
-    }
 
     #[test]
     fn request_headers_parse_and_drop_credentials() {
