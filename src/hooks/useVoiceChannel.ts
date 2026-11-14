@@ -907,8 +907,11 @@ export function useVoiceChannel({
     () =>
       new VoiceSession<SFUClient>({
         timers: {
-          setTimeout: (callback, ms) => window.setTimeout(callback, ms),
-          clearTimeout: (handle) => window.clearTimeout(handle as number),
+          // globalThis, not window: a leave's send window can outlive the
+          // hook (and a test's DOM), where `window` no longer exists.
+          setTimeout: (callback, ms) => globalThis.setTimeout(callback, ms),
+          clearTimeout: (handle) =>
+            globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
         },
         onStepError: (step, error) =>
           vcLog.warn("Voice teardown step failed", { step, error }),

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCameraBackgroundEffect,
   getCameraBackgroundEffectKey,
@@ -544,6 +544,9 @@ function deferred<T>() {
 
 describe("useVoiceChannel SFU lifecycle", () => {
   beforeEach(() => {
+    // Time moves with the clock, so waits and waitFor behave as usual, but
+    // every timer the hook starts belongs to this test and can be drained.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     resetVoiceStandbyForTests();
     vi.clearAllMocks();
     vi.mocked(resolveLocalAudioPublicationMode).mockReset();
@@ -578,6 +581,18 @@ describe("useVoiceChannel SFU lifecycle", () => {
     vi.mocked(createLocalAudioProcessor).mockImplementation(async (stream) =>
       createProcessor(stream),
     );
+  });
+
+  afterEach(() => {
+    // A leave's send window outlives the hook's unmount. Complete what is
+    // pending now, while the DOM is up, and fail if anything stays behind:
+    // a timer firing after the environment is torn down is an uncaught
+    // error in whichever test file runs next.
+    cleanup();
+    vi.runOnlyPendingTimers();
+    const left = vi.getTimerCount();
+    vi.useRealTimers();
+    expect(left, "timers pending after unmount").toBe(0);
   });
 
   it("merges legacy full updates over cached optional profile fields", () => {

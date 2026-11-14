@@ -10,6 +10,8 @@ import type { VoiceEndReason, VoicePhase } from "../state-machine";
 /** Hand-cranked timers: nothing fires until `advance`. */
 class FakeTimers implements VoiceTimers {
   now = 0;
+  /** Handles passed to `clearTimeout`, in order. */
+  readonly cleared: unknown[] = [];
   private nextId = 1;
   private readonly pending = new Map<
     number,
@@ -23,6 +25,7 @@ class FakeTimers implements VoiceTimers {
   }
 
   clearTimeout(handle: unknown): void {
+    this.cleared.push(handle);
     this.pending.delete(handle as number);
   }
 
@@ -389,6 +392,28 @@ describe("VoiceSession teardown idempotency", () => {
     expect(session.phase).toBe("idle");
     timers.advance(200);
     expect(client.disconnects).toEqual(["user-leave"]);
+  });
+
+  it("clears the send window's timer when a flush completes the leave early", () => {
+    const client = joinedSession("a");
+    session.end("user-leave", recordingSteps(), notCall);
+    expect(timers.size).toBe(1);
+    expect(session.pendingLeaves).toBe(1);
+    session.flush();
+    expect(timers.size).toBe(0);
+    expect(timers.cleared).toHaveLength(1);
+    expect(session.pendingLeaves).toBe(0);
+    timers.advance(200);
+    expect(client.disconnects).toEqual(["user-leave"]);
+  });
+
+  it("does not clear a send window's timer that already fired", () => {
+    joinedSession("a");
+    session.end("user-leave", recordingSteps(), notCall);
+    timers.advance(100);
+    expect(timers.cleared).toEqual([]);
+    expect(timers.size).toBe(0);
+    expect(session.pendingLeaves).toBe(0);
   });
 
   it("tears a reconnecting session down as joined on unmount", () => {
