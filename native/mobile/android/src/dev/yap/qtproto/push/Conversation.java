@@ -28,7 +28,8 @@ final class Conversation {
     static Conversation of(YapPush.Message push) {
         String title;
         if (push.isDm()) {
-            title = push.senderName;
+            // Not known when the text could not be fetched (YapPush).
+            title = push.senderName != null ? push.senderName : "Direct message";
         } else {
             StringBuilder b = new StringBuilder();
             if (push.conversation != null) b.append(push.conversation);

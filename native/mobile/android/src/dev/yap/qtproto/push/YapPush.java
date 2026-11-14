@@ -9,6 +9,10 @@ import java.util.Map;
  * `ralph` = "2" marks the format; anything else is not ours. The call
  * kinds (`call_ring`, `call_ring_stop`, src/services/call.service.ts) are
  * read as an IncomingCall.
+ *
+ * A message push carries ids only (FCM never sees the text): the sender's
+ * name, the conversation and the line to show are fetched by
+ * `notificationId` (PushApi.notificationText) and filled in here.
  */
 final class YapPush {
     private YapPush() {}
@@ -22,14 +26,20 @@ final class YapPush {
         /** Null for a DM. */
         String serverId;
         String messageId;
+        /** What the text is fetched by; null from a server that sends none. */
+        String notificationId;
         String senderId;
+        long sentAt;
+
+        // Fetched (or, when the fetch fails, remembered from an earlier one).
+        /** Null when not known: the notification then names no one. */
         String senderName;
         String senderAvatar;
-        /** "#general" for a server channel; null for a DM. */
+        /** "#general" for a server channel; null for a DM or not known. */
         String conversation;
         String serverName;
+        /** The line shown: the message's text, or the fallback's. */
         String preview;
-        long sentAt;
 
         boolean isDm() {
             return serverId == null;
@@ -56,15 +66,14 @@ final class YapPush {
         if (m.channelId == null || m.messageId == null || m.senderId == null) return null;
         m.type = data.containsKey("type") ? data.get("type") : "mention";
         m.serverId = nonEmpty(data.get("serverId"));
-        String name = nonEmpty(data.get("senderName"));
-        m.senderName = name != null ? name : "Someone";
-        m.senderAvatar = nonEmpty(data.get("senderAvatar"));
-        m.conversation = nonEmpty(data.get("conversation"));
-        m.serverName = nonEmpty(data.get("serverName"));
-        String preview = data.get("preview");
-        m.preview = preview != null ? preview : "";
+        m.notificationId = nonEmpty(data.get("notificationId"));
         m.sentAt = epochMillis(data.get("sentAt"));
         return m;
+    }
+
+    /** The line a message shows when its text could not be fetched. */
+    static String fallbackText(String senderName) {
+        return senderName != null ? "New message from " + senderName : "New message";
     }
 
     private static long epochMillis(String iso) {

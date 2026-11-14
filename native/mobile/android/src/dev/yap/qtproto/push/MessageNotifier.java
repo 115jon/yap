@@ -14,6 +14,7 @@ import android.graphics.Paint;
 import android.graphics.Shader;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 
@@ -94,6 +95,15 @@ final class MessageNotifier {
         if (push.channelId.equals(PushShim.activeConversation()) && inForeground()) return;
         PushStore.Session session = PushStore.session(context);
         if (session == null) return;
+        NotificationCompat.MessagingStyle previous = activeStyle(context, push.channelId);
+        if (previous != null) {
+            for (NotificationCompat.MessagingStyle.Message m : previous.getMessages()) {
+                if (push.messageId.equals(m.getExtras().getString(EXTRA_MESSAGE_ID))) return;
+            }
+        }
+        // The push holds ids only: the text comes from the API, or a
+        // fallback line names the sender as the last fetch did.
+        if (!fillText(context, session, push)) return;
         ensureChannels(context);
 
         IconCompat avatar = null;
@@ -103,15 +113,9 @@ final class MessageNotifier {
         }
         Person sender = new Person.Builder()
                 .setKey(push.senderId)
-                .setName(push.senderName)
+                .setName(push.senderName != null ? push.senderName : "Yap")
                 .setIcon(avatar)
                 .build();
-        NotificationCompat.MessagingStyle previous = activeStyle(context, push.channelId);
-        if (previous != null) {
-            for (NotificationCompat.MessagingStyle.Message m : previous.getMessages()) {
-                if (push.messageId.equals(m.getExtras().getString(EXTRA_MESSAGE_ID))) return;
-            }
-        }
         Conversation conversation = Conversation.of(push);
         NotificationCompat.MessagingStyle style = previous != null ? previous : newStyle(conversation);
         NotificationCompat.MessagingStyle.Message message =
@@ -120,7 +124,10 @@ final class MessageNotifier {
         style.addMessage(message);
         trim(style);
 
-        String shortcutId = publishShortcut(context, conversation, sender);
+        // A fallback that names no one keeps the shortcut it had (if any).
+        String shortcutId = push.senderName != null
+                ? publishShortcut(context, conversation, sender)
+                : conversation.shortcutId();
         Notification notification = builder(context, conversation, style)
                 .setShortcutId(shortcutId)
                 .setLocusId(new LocusIdCompat(shortcutId))
@@ -131,6 +138,41 @@ final class MessageNotifier {
         boolean shown = post(context, conversation.channelId, notification)
                 && channelOn(context, conversation.channel);
         postSummary(context, shown ? conversation.channelId : null, shown ? notification : null);
+    }
+
+    /** How long a push waits for its text before it shows the fallback. */
+    private static final long TEXT_TIMEOUT_MS = 5_000;
+
+    /**
+     * Fills in the push's text and names: fetched by its notification id
+     * (at most TEXT_TIMEOUT_MS), else the fallback ("New message from Ada",
+     * the names the last fetch gave, or "New message"). False when the
+     * server says the user may not see the message (deleted, no longer in
+     * the channel, a block): then nothing is shown.
+     */
+    private static boolean fillText(Context context, PushStore.Session session, YapPush.Message push) {
+        PushApi.NotificationText text = push.notificationId == null ? null
+                : PushApi.notificationText(session, push.notificationId,
+                        SystemClock.elapsedRealtime() + TEXT_TIMEOUT_MS);
+        if (text != null && text.gone) return false;
+        if (text != null) {
+            push.senderName = text.senderName;
+            push.senderAvatar = text.senderAvatar;
+            push.conversation = text.conversation;
+            push.serverName = text.serverName;
+            push.preview = text.preview;
+            PushStore.rememberNames(context, push.senderId, text.senderName, push.channelId,
+                    text.conversation, text.serverName);
+            return true;
+        }
+        Log.i(TAG, "message text not fetched: the fallback shows");
+        push.senderName = PushStore.senderName(context, push.senderId);
+        if (!push.isDm()) {
+            push.conversation = PushStore.conversation(context, push.channelId);
+            push.serverName = PushStore.serverName(context, push.channelId);
+        }
+        push.preview = YapPush.fallbackText(push.senderName);
+        return true;
     }
 
     /**
@@ -169,6 +211,7 @@ final class MessageNotifier {
             }
         }
         ShortcutManagerCompat.removeAllDynamicShortcuts(context);
+        PushStore.forgetNames(context);
     }
 
     // ---- Building -----------------------------------------------------------

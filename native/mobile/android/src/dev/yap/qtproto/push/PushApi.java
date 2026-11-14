@@ -103,6 +103,68 @@ final class PushApi {
         return request(session, "POST", "/api/calls/" + Uri.encode(callId) + "/" + answer, "{}");
     }
 
+    /** What notificationText found. */
+    static final class NotificationText {
+        /** The server says the user may not see it (deleted, left, blocked). */
+        final boolean gone;
+        final String senderName;
+        final String senderAvatar;
+        final String conversation;
+        final String serverName;
+        final String preview;
+
+        NotificationText(boolean gone, String senderName, String senderAvatar, String conversation,
+                String serverName, String preview) {
+            this.gone = gone;
+            this.senderName = senderName;
+            this.senderAvatar = senderAvatar;
+            this.conversation = conversation;
+            this.serverName = serverName;
+            this.preview = preview;
+        }
+    }
+
+    private static final NotificationText GONE = new NotificationText(true, null, null, null, null, null);
+    /** The server's own 404 for a notification the user may not see. */
+    private static final String NOT_FOUND_CODE = "NOTIFICATION_NOT_FOUND";
+
+    /**
+     * GET /api/notifications/:id/push, done by `deadline` (elapsedRealtime):
+     * the text a push left out. GONE when the server says the user may not
+     * see it; null on any other failure (offline, signed out, out of time,
+     * an unreadable answer), which shows the fallback. Never logs the text.
+     */
+    static NotificationText notificationText(PushStore.Session session, String notificationId,
+            long deadline) {
+        Answer answer = fetch(session,
+                "/api/notifications/" + Uri.encode(notificationId) + "/push", deadline);
+        if (answer == null) return null;
+        try {
+            JSONObject json = new JSONObject(answer.body);
+            if (answer.status == 404) {
+                return NOT_FOUND_CODE.equals(json.optString("code")) ? GONE : null;
+            }
+            if (answer.status < 200 || answer.status > 299) return null;
+            JSONObject data = json.optJSONObject("data");
+            if (data != null) json = data;
+            JSONObject sender = json.optJSONObject("sender");
+            String preview = optString(json, "preview");
+            if (sender == null || preview == null) return null;
+            return new NotificationText(false, optString(sender, "name"), optString(sender, "avatar_url"),
+                    optString(json, "conversation"), optString(json, "server_name"), preview);
+        } catch (JSONException e) {
+            Log.w(TAG, "notification text: unreadable answer");
+            return null;
+        }
+    }
+
+    /** A non-empty string at `key`; null when missing, null or empty. */
+    private static String optString(JSONObject json, String key) {
+        if (json.isNull(key)) return null;
+        String value = json.optString(key, "");
+        return value.isEmpty() ? null : value;
+    }
+
     /** POST /api/push-tokens (a rotated token, the app not running). */
     static int register(PushStore.Session session, String token) {
         try {
@@ -164,6 +226,31 @@ final class PushApi {
 
     /** A GET's body on a 2xx, else null. */
     private static String get(PushStore.Session session, String path, long deadline) {
+        Answer answer = fetch(session, path, deadline);
+        if (answer == null) return null;
+        if (answer.status < 200 || answer.status > 299) {
+            Log.w(TAG, "GET: HTTP " + answer.status);
+            return null;
+        }
+        return answer.body;
+    }
+
+    /** A GET's status and body (an error's too). */
+    private static final class Answer {
+        final int status;
+        final String body;
+
+        Answer(int status, String body) {
+            this.status = status;
+            this.body = body;
+        }
+    }
+
+    /** The largest answer read: a JSON object of a few fields. */
+    private static final int MAX_ANSWER_BYTES = 1024 * 1024;
+
+    /** A GET by `deadline`; null offline, out of time or past MAX_ANSWER_BYTES. */
+    private static Answer fetch(PushStore.Session session, String path, long deadline) {
         int timeout = timeout(deadline);
         if (timeout == 0) {
             Log.w(TAG, "GET skipped: out of time");
@@ -176,16 +263,17 @@ final class PushApi {
             connection.setReadTimeout(timeout);
             connection.setRequestProperty("Authorization", "Bearer " + session.token);
             int status = connection.getResponseCode();
-            if (status < 200 || status > 299) {
-                Log.w(TAG, "GET: HTTP " + status);
-                return null;
-            }
-            try (InputStream in = connection.getInputStream()) {
+            InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            if (stream == null) return new Answer(status, "");
+            try (InputStream in = stream) {
                 ByteArrayOutputStream all = new ByteArrayOutputStream();
                 byte[] buffer = new byte[16 * 1024];
                 int n;
-                while ((n = in.read(buffer)) > 0) all.write(buffer, 0, n);
-                return all.toString(StandardCharsets.UTF_8.name());
+                while ((n = in.read(buffer)) > 0) {
+                    all.write(buffer, 0, n);
+                    if (all.size() > MAX_ANSWER_BYTES) return null;
+                }
+                return new Answer(status, all.toString(StandardCharsets.UTF_8.name()));
             }
         } catch (Exception e) {
             Log.w(TAG, "GET failed: " + e.getClass().getSimpleName());
