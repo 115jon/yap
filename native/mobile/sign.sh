@@ -40,11 +40,17 @@ checksum() {
 if [[ "$in" == *.aab ]]; then
   [[ "$out" == *.aab ]] || { echo "sign.sh: an AAB signs to an .aab" >&2; exit 2; }
   jarsigner="${JAVA_HOME:+$JAVA_HOME/bin/}jarsigner"
-  # jarsigner's default algorithms for the key (SHA-256 digests); the
-  # passwords go through the environment.
-  YAP_SIGN_STORE_PASS="$store_pass" YAP_SIGN_KEY_PASS="$key_pass" "$jarsigner" \
+  # SHA-256 with RSA, as Gradle signs bundles (the keys are RSA; a JDK's
+  # default for a 4096-bit key would be SHA-384). The passwords go through
+  # the environment; jarsigner reports errors on stdout.
+  if ! log="$(YAP_SIGN_STORE_PASS="$store_pass" YAP_SIGN_KEY_PASS="$key_pass" "$jarsigner" \
     -keystore "$keystore" -storepass:env YAP_SIGN_STORE_PASS -keypass:env YAP_SIGN_KEY_PASS \
-    -signedjar "$out" "$in" "$alias" >/dev/null
+    -sigalg SHA256withRSA -digestalg SHA-256 \
+    -signedjar "$out" "$in" "$alias" 2>&1)"; then
+    echo "$log" >&2
+    echo "sign.sh: jarsigner could not sign $in" >&2
+    exit 1
+  fi
   # Warnings about a self-signed certificate without a timestamp are
   # expected (Android's signing keys are self-signed).
   verify="$("$jarsigner" -verify "$out")"
