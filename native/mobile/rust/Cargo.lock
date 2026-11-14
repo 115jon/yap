@@ -3386,12 +3386,14 @@ dependencies = [
 name = "yap_mobile_qt"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "cxx",
  "cxx-qt",
  "cxx-qt-build",
  "cxx-qt-lib",
  "libc",
  "reqwest 0.13.5",
+ "ring",
  "rustls",
  "serde_json",
  "tokio",

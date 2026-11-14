@@ -79,6 +79,8 @@ qt_add_executable(yapqt
   # Remote call video: the newest frame per key and the item that draws it.
   cpp/videohub.cpp cpp/videohub.h
   cpp/videoitem.cpp cpp/videoitem.h
+  # Video and sound previews on Android's player, and video posters.
+  cpp/videoplayer.cpp cpp/videoplayer.h
   cpp/rustnetwork.cpp cpp/rustnetwork.h)
 target_include_directories(yapqt PRIVATE cpp)
 if(YAP_CRASH_TEST)

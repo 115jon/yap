@@ -32,6 +32,7 @@
 #include "rustnetwork.h"
 #include "videohub.h"
 #include "videoitem.h"
+#include "videoplayer.h"
 #include "yap_ui.h"
 
 extern "C" void yap_mobile_init(const char* data_dir, const char* device_name);
@@ -118,6 +119,9 @@ int main(int argc, char* argv[])
   // on the GUI thread, before a call's media thread can ask for it.
   VideoHub::instance();
   qmlRegisterType<VideoView>("Yap.Mobile", 1, 0, "VideoView");
+  // Video and sound previews on Android's player (videoplayer.h).
+  auto* player = new VideoPlayer(&app);
+  qmlRegisterSingletonInstance("Yap.Mobile", 1, 0, "Player", player);
 
   QQmlApplicationEngine engine;
   // Network pictures over the core's rustls client, with a disk cache in
@@ -127,6 +131,8 @@ int main(int argc, char* argv[])
   // AnimatedPicture and ViewportWatch (Yap.Media; GIF, APNG and WebP
   // through yap-anim), the icon and dither providers: the desktop's C++.
   yap_ui_register(engine);
+  // Video posters, in memory only (videoplayer.h).
+  engine.addImageProvider(QStringLiteral("videoposter"), new VideoPosterProvider);
   QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                    [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
   // The first frame on screen, for the cold-start comparison (README), and
