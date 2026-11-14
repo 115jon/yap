@@ -5,8 +5,9 @@ import Yap.Platform
 import Yap.Ui
 
 // The call's video at phone size (the desktop's stage and grid,
-// VoiceGrid.tsx): everyone else's camera that is on and every share, as
-// tiles from the shared VoiceTileModel. Two to a row at 16:9; a tap puts a
+// VoiceGrid.tsx): everyone else's camera that is on, every share, and our
+// own camera's self-view (from the tap that turns it on, mirrored for the
+// front camera), as tiles from the shared VoiceTileModel. Two to a row at 16:9; a tap puts a
 // tile on stage, full width above the rest, and a second tap takes it off.
 // A camera is cropped to its tile, a share letterboxed on black. A share
 // nobody here watches yet shows its owner's still under a scrim with
@@ -27,8 +28,12 @@ Item {
     // Tiles with something to show (the model's rows change in place).
     property int count: 0
 
+    // Ours: the camera only (the phone shares no screen yet), shown while
+    // it is wanted, before the call has pushed it.
     function shows(kind, me, video) {
-        return !me && (kind === "screen" || video)
+        if (me)
+            return kind === "person" && (video || Voice.cameraWanted)
+        return kind === "screen" || video
     }
     function recount() {
         let n = 0
@@ -125,7 +130,8 @@ Item {
                         border.color: tile.onStage ? Theme.accentInk : Theme.line
                         clip: true
                         Accessible.role: Accessible.Button
-                        Accessible.name: tile.screen ? qsTr("%1's screen").arg(tile.name) : qsTr("%1's camera").arg(tile.name)
+                        Accessible.name: tile.screen ? qsTr("%1's screen").arg(tile.name)
+                            : tile.me ? qsTr("Your camera") : qsTr("%1's camera").arg(tile.name)
 
                         // Before the first frame, and for a share not watched:
                         // the owner's face, or their share's still.
@@ -163,6 +169,9 @@ Item {
                             sourceComponent: VideoSurface {
                                 videoKey: tile.videoKey
                                 crop: !tile.screen
+                                // As a mirror shows us; everyone else sees
+                                // it the right way round.
+                                mirror: tile.me && Native.cameraFront
                             }
                         }
                         Spinner {

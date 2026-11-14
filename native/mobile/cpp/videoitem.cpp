@@ -93,6 +93,15 @@ void VideoView::setCrop(bool crop)
   emit cropChanged();
 }
 
+void VideoView::setMirror(bool mirror)
+{
+  if (mirror == m_mirror)
+    return;
+  m_mirror = mirror;
+  update();
+  emit mirrorChanged();
+}
+
 void VideoView::frameArrived(QSize shown)
 {
   if (!m_hasFrame) {
@@ -152,8 +161,11 @@ QSGNode* VideoView::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
   const QSizeF drawn = source * scale;
   node->m_quad.setRect(QRectF(QPointF((w - drawn.width()) / 2, (h - drawn.height()) / 2), drawn));
   QMatrix4x4 turn;
-  if (frame.rotation != 0) {
+  if (frame.rotation != 0 || m_mirror) {
     turn.translate(float(w / 2), float(h / 2));
+    // Mirrored as shown: the flip comes after the turn.
+    if (m_mirror)
+      turn.scale(-1, 1);
     turn.rotate(float(frame.rotation), 0, 0, 1);
     turn.translate(float(-w / 2), float(-h / 2));
   }

@@ -19,3 +19,6 @@ mod sound;
 // Remote call video into the phone's video hub (cpp/videohub.cpp).
 #[cfg(target_os = "android")]
 mod video;
+// The phone's camera into the call (cpp/camera.cpp).
+#[cfg(target_os = "android")]
+mod camera;

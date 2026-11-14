@@ -5,7 +5,8 @@ import Yap.Ui
 
 // You, floating at the drawer's foot (Drawer Plus; the desktop's
 // AccountRow and call strip in one plate): while in a call its segment on
-// top (Yap.Ui's CallStatusLine and a key to the call page), then your
+// top (Yap.Ui's CallStatusLine, the camera key and its flip, and a key to
+// the call page), then your
 // avatar with your presence LED, your name and what you play, your custom
 // status or your presence word, and the mic and deafen keys. A tap on the
 // row grows the account panel out of the plate (AccountPanel); the panel
@@ -60,10 +61,45 @@ Item {
                 id: line
                 anchors.left: parent.left
                 anchors.leftMargin: 14
-                anchors.right: callCaret.left
-                anchors.rightMargin: 12
+                anchors.right: callKeys.left
+                anchors.rightMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
                 clockShown: root.clockShown
+            }
+            // The call page's camera keys (CameraLink), at the plate's size.
+            Row {
+                id: callKeys
+                anchors.right: callCaret.left
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 2
+                IconKey {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: CameraLink.on
+                    size: 36
+                    iconName: "refresh"
+                    tone: "rest"
+                    tip: Native.cameraFront ? qsTr("Switch to the back camera") : qsTr("Switch to the front camera")
+                    Accessible.name: tip
+                    onClicked: {
+                        Native.haptic(Native.Tick)
+                        Native.flipCamera()
+                    }
+                }
+                IconKey {
+                    anchors.verticalCenter: parent.verticalCenter
+                    size: 36
+                    iconName: "camera"
+                    tone: CameraLink.on ? "live" : "rest"
+                    tip: CameraLink.on ? qsTr("Turn off camera") : qsTr("Turn on camera")
+                    Accessible.name: tip
+                    Accessible.checkable: true
+                    Accessible.checked: CameraLink.on
+                    onClicked: {
+                        Native.haptic(Native.Tick)
+                        ShellState.toggleCamera()
+                    }
+                }
             }
             Icon {
                 id: callCaret

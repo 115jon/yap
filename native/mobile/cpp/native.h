@@ -36,6 +36,11 @@
 //                  (speaker, earpiece, headset, Bluetooth) and what the call
 //                  notification shows (cpp/voice.cpp,
 //                  android/src/dev/yap/qtproto/voice)
+//   camera         the phone's camera in a call: the camera permission,
+//                  the capture (libwebrtc's Camera2Capturer) and its
+//                  flip, and the device's heat that bounds it
+//                  (cpp/camera.cpp,
+//                  android/src/dev/yap/qtproto/voice/CameraShim.java)
 //   calls          a DM call ringing this phone: the ring from a push or
 //                  the core, its ringtone or notification, Answer and
 //                  Decline outside the app (cpp/calls.cpp,
@@ -88,6 +93,18 @@ class Native : public QObject
   // channelId, callerId, callerName, callerAvatar}` (empty: none): also a
   // ring the core never saw (the app started from its push).
   Q_PROPERTY(QVariantMap incomingCall READ incomingCall NOTIFY incomingCallChanged)
+  // The camera captures into the call (CameraLink.qml binds it to the
+  // call's camera while the app is in front). A capture that cannot start
+  // or stops on its own says why with cameraFailed.
+  Q_PROPERTY(bool cameraCapture READ cameraCapture WRITE setCameraCapture NOTIFY cameraCaptureChanged)
+  // The capture uses (or starts with) the front camera; flipCamera switches.
+  Q_PROPERTY(bool cameraFront READ cameraFront NOTIFY cameraFrontChanged)
+  // Android's thermal status (PowerManager THERMAL_STATUS_*: 2 moderate,
+  // 3 severe; -1 unknown), read while video shows or the camera runs.
+  Q_PROPERTY(int thermalStatus READ thermalStatus NOTIFY thermalStatusChanged)
+  // The screen is on. In a call the app stays resumed behind the lock
+  // screen with it off, so the app state alone does not say so.
+  Q_PROPERTY(bool screenOn READ screenOn NOTIFY screenOnChanged)
 
 public:
   enum Haptic { Tick, LongPress, Confirm, Reject };
@@ -199,6 +216,20 @@ public:
   // call) that deafened the call no longer undoes it when it ends.
   Q_INVOKABLE void callTouched() const;
 
+  bool cameraCapture() const { return m_cameraCapture; }
+  void setCameraCapture(bool on);
+  bool cameraFront() const { return m_cameraFront; }
+  int thermalStatus() const { return m_thermalStatus; }
+  bool screenOn() const { return m_screenOn; }
+  void setThermalStatus(int status);
+  // Front to back and back again, while the capture runs.
+  Q_INVOKABLE void flipCamera();
+  // The camera permission is granted already.
+  Q_INVOKABLE bool cameraAllowed() const;
+  // Asks for the camera (the system dialog while it can still show); the
+  // answer arrives as cameraAnswered, at once when already decided.
+  Q_INVOKABLE void requestCamera();
+
   QVariantMap incomingCall() const { return m_incomingCall; }
   // The core's ring (CALL_RING; the keys of incomingCall): rings once per
   // call id with a push's, the ringtone in front, else the notification.
@@ -230,6 +261,9 @@ public:
   void onRing(const QByteArray& json);
   void onRingEnded(const QString& callId);
   void onAnswered();
+  void onCameraStarted(bool front);
+  void onCameraFailed(const QString& reason);
+  void onScreen(bool on);
 
 signals:
   void handlesBackChanged();
@@ -258,6 +292,14 @@ signals:
   void microphoneAnswered(bool granted);
   void incomingCallChanged();
   void callAnswered();
+  void cameraCaptureChanged();
+  void cameraFrontChanged();
+  void thermalStatusChanged();
+  void screenOnChanged();
+  void cameraAnswered(bool granted);
+  // The capture could not start or stopped on its own: `denied`,
+  // `missing`, `busy` or `unknown` (the desktop's Camera reasons).
+  void cameraFailed(const QString& reason);
 
 protected:
   bool eventFilter(QObject* watched, QEvent* event) override;
@@ -286,6 +328,8 @@ private:
   void installLinks();
   // cpp/calls.cpp.
   void installCalls();
+  // cpp/camera.cpp.
+  void installCamera();
 
   bool m_handlesBack = false;
   // Back reaches the app through the shim's OnBackInvokedCallback (API 33+).
@@ -311,6 +355,11 @@ private:
   QVariantMap m_openRequest;
   QVariantList m_audioRoutes;
   bool m_askingMicrophone = false;
+  bool m_cameraCapture = false;
+  bool m_cameraFront = true;
+  bool m_askingCamera = false;
+  int m_thermalStatus = -1;
+  bool m_screenOn = true;
   QVariantMap m_incomingCall;
 };
 

@@ -712,6 +712,22 @@ Window {
         onConfirmed: Native.openAppSettings()
     }
 
+    // The camera refused (CameraLink): the system settings are where it
+    // can be allowed once Android stops asking.
+    Connections {
+        target: CameraLink
+        function onRefused() { cameraSheet.open() }
+    }
+    ConfirmSheet {
+        id: cameraSheet
+        anchors.fill: parent
+        anchors.bottomMargin: Native.clippedBottom
+        title: qsTr("Yap needs the camera")
+        body: qsTr("Your camera shows in calls only while you turn it on. Allow it for Yap in the system settings, then turn it on again.")
+        confirmText: qsTr("Open settings")
+        onConfirmed: Native.openAppSettings()
+    }
+
     // Ring them? (StartCallModal.tsx): a call rings at once, and leaves a
     // voice channel's call we are in.
     ConfirmSheet {

@@ -65,8 +65,12 @@ fn main() {
     let files = QML
         .iter()
         .map(|path| QmlFile::from(*path))
-        // This phone's own settings (QSettings), and the page router.
-        .chain(std::iter::once(QmlFile::from("qml/Prefs.qml").singleton(true)))
-        .chain(std::iter::once(QmlFile::from("qml/Router.qml").singleton(true)));
+        // This phone's own settings (QSettings), the page router and the
+        // camera's link to the call.
+        .chain([
+            QmlFile::from("qml/Prefs.qml").singleton(true),
+            QmlFile::from("qml/Router.qml").singleton(true),
+            QmlFile::from("qml/CameraLink.qml").singleton(true),
+        ]);
     CxxQtBuilder::new_qml_module(QmlModule::new("com.yap.mobile").qml_files(files)).build();
 }

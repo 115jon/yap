@@ -8,8 +8,9 @@ import Yap.Ui
 // as an LED word (Connecting, Voice connected, Reconnecting) with the link
 // quality beside it, everyone in the call as rows (the desktop's occupant
 // leaf at phone size: square avatar with the 2 px talk ring, the name, the
-// state glyphs, the talk LED) under their cameras and shares (CallVideo),
-// and the one dock: mic, deafen, where it plays, leave. Opened by joining
+// state glyphs, the talk LED) under their cameras and shares and our own
+// self-view (CallVideo), and the one dock: mic, deafen, camera (and its
+// flip while it is on), where it plays, leave. Opened by joining
 // a voice channel in the drawer and from the drawer's call bar; Back
 // leaves the page, not the call. A DM call is the same page under the
 // other person's name; while ours rings them (no room joined yet) it
@@ -228,6 +229,7 @@ Rectangle {
         id: trouble
         readonly property string line: !root.inCall ? (root.failed ? (root.unreachable.length > 0 ? root.unreachable : Voice.error) : "")
             : root.micStalled ? qsTr("We can't hear you. Check that nothing else is using the microphone.")
+            : Voice.cameraError.length > 0 ? CameraLink.errorText(Voice.cameraError)
             : root.inboundStalled ? qsTr("You can't hear anyone right now. Yap is trying to get the audio back.")
             : ""
         anchors.top: statusRow.bottom
@@ -425,9 +427,12 @@ Rectangle {
             color: Theme.line
         }
         Row {
+            id: keys
             anchors.horizontalCenter: parent.horizontalCenter
             y: 12
-            spacing: 16
+            // Up to six keys; closer together on a narrow phone.
+            readonly property int count: flipKey.visible ? 6 : 5
+            spacing: Math.max(4, Math.min(16, Math.floor((root.width - root.leftInset - root.rightInset - 32 - count * 48) / (count - 1))))
             visible: root.inCall
 
             IconKey {
@@ -450,6 +455,32 @@ Rectangle {
                     Native.haptic(Native.Tick)
                     Native.callTouched()
                     Voice.requestDeafen(!Voice.deafened)
+                }
+            }
+            IconKey {
+                size: 48
+                iconName: "camera"
+                tone: CameraLink.on ? "live" : "rest"
+                tip: CameraLink.on ? qsTr("Turn off camera") : qsTr("Turn on camera")
+                Accessible.name: tip
+                Accessible.checkable: true
+                Accessible.checked: CameraLink.on
+                onClicked: {
+                    Native.haptic(Native.Tick)
+                    ShellState.toggleCamera()
+                }
+            }
+            IconKey {
+                id: flipKey
+                visible: CameraLink.on
+                size: 48
+                iconName: "refresh"
+                tone: "rest"
+                tip: Native.cameraFront ? qsTr("Switch to the back camera") : qsTr("Switch to the front camera")
+                Accessible.name: tip
+                onClicked: {
+                    Native.haptic(Native.Tick)
+                    Native.flipCamera()
                 }
             }
             IconKey {

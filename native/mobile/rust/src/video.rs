@@ -98,4 +98,5 @@ pub extern "C" fn yap_mobile_video_limits(thermal: i32, metered: bool, backgroun
         if limits.paused { ", paused" } else { "" }
     );
     demand::set_limits(limits);
+    crate::camera::set_limits(thermal, metered);
 }
