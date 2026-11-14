@@ -314,7 +314,7 @@ Rectangle {
             Component {
                 id: rail
                 ListView {
-                    implicitHeight: Math.round(164 * 3 / 4) + 56 + 32
+                    implicitHeight: Math.round(196 * 3 / 4) + 56 + 32
                     orientation: ListView.Horizontal
                     spacing: 8
                     clip: false
@@ -325,7 +325,7 @@ Rectangle {
                     model: slot.modelData.cards
                     delegate: ShopCard {
                         required property var modelData
-                        width: 164
+                        width: 196
                         height: implicitHeight
                         card: modelData
                         onOpened: id => root.openItem(id)
@@ -465,13 +465,21 @@ Rectangle {
         anchors.fill: parent
         z: 3
         contentHeight: detailBody.implicitHeight
+        // Scrolls where the window is short (a phone on its side).
+        flickable: detailScroll
         onUpChanged: if (!up && root.core.detailOpen) root.core.closeDetail()
 
-        ShopItemSheet {
-            id: detailBody
-            width: parent.width
-            core: root.core
-            shown: detailSheet.up
+        Flickable {
+            id: detailScroll
+            anchors.fill: parent
+            contentHeight: detailBody.implicitHeight
+            clip: true
+            ShopItemSheet {
+                id: detailBody
+                width: detailScroll.width
+                core: root.core
+                shown: detailSheet.up
+            }
         }
     }
 

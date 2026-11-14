@@ -86,8 +86,11 @@ Rectangle {
         id: band
         anchors.top: header.bottom
         width: parent.width
-        // Shorter while the keyboard is up (a search).
-        height: Native.imeHeight > 0 ? 0 : Math.round(Math.min(280, Math.max(168, root.height * 0.3)))
+        // Gone while the keyboard is up (a search) and where the window is
+        // too short to leave room for the options (a phone on its side):
+        // the foot still names the choice.
+        height: Native.imeHeight > 0 || root.height < 600 ? 0
+            : Math.round(Math.min(280, Math.max(168, root.height * 0.3)))
         visible: height > 0
         color: Theme.ply1
         clip: true
@@ -131,6 +134,7 @@ Rectangle {
         spacing: 8
         z: 1
         Text {
+            visible: band.visible || !root.core.hasCatalog
             width: parent.width
             textFormat: Text.PlainText
             text: root.core.hasCatalog
