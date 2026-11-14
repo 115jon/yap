@@ -11,7 +11,8 @@ import android.util.Log;
  * handle()). `am start -n <app id>/dev.yap.qtproto.YapActivity --es
  * yap_crash_test java|rust|segv` crashes the app three seconds later on the
  * main thread: an uncaught Java exception, a Rust panic, or a segmentation
- * fault in Rust (cpp/main.cpp registers rustCrash, rust/src/crash.rs). The
+ * fault in Rust (cpp/main.cpp registers rustCrash, rust/src/crash.rs);
+ * `dump` prints the saved reports to logcat instead. The
  * Java message carries made-up secrets for the report's redaction to
  * remove, as the Rust panic's does.
  */
@@ -24,6 +25,15 @@ final class CrashTest {
     static void handle(Intent intent) {
         String kind = intent == null ? null : intent.getStringExtra("yap_crash_test");
         if (kind == null) return;
+        if (kind.equals("dump")) {
+            // The saved reports into logcat (tag yap-crash-dump): a release
+            // build is not debuggable, so run-as cannot read them.
+            for (java.io.File report : CrashReports.reports()) {
+                Log.i("yap-crash-dump", "==== " + report.getName());
+                for (String line : CrashReports.read(report).split("\n")) Log.i("yap-crash-dump", line);
+            }
+            return;
+        }
         Log.w("yap-crash", "crash test '" + kind + "' in 3 s");
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             switch (kind) {
