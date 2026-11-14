@@ -7,8 +7,8 @@ import Yap.Ui
 // user popout, someone's call menu (volume, mute), the camera and share
 // keys and the server administration dialogs, which the shell owns so any
 // row can open them. Also what media rows remember between reuses: decoded
-// picture sizes (so a row lays out at once the next time) and the
-// sensitive media shown.
+// picture sizes (so a row lays out at once the next time), the
+// sensitive media shown and the blocked users' messages shown.
 //
 // Mostly pure state. It imports its own module (Yap.Ui) for the Voice and
 // Nav singletons `watchStream` calls. A composite singleton that imports
@@ -346,5 +346,17 @@ QtObject {
     function reveal(id) {
         revealed[id] = true
         mediaVersion++
+    }
+
+    // Messages from blocked users shown with Show (MessageDelegate's
+    // collapsed row), by message id, for the rest of the session.
+    property int blockedVersion: 0
+    property var blockedShown: ({})
+    function isBlockedShown(id) {
+        return blockedVersion >= 0 && blockedShown[id] === true
+    }
+    function showBlocked(id) {
+        blockedShown[id] = true
+        blockedVersion++
     }
 }

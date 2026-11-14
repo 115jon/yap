@@ -7,6 +7,7 @@
  *     (/disconnect-participant, as voice-disconnect.ts does)
  *
  * Used by the admin console (suspensions, apps/admin) and account deletion.
+ * A block ends the pair's ring and DM call the same way (endCallsBetween).
  * Every call goes through a Durable Object stub; none of these paths is
  * reachable from a public URL. Each answers within GATEWAY_TIMEOUT_MS or
  * counts as "could not ask".
@@ -16,6 +17,9 @@ const INTROSPECT_URL = "https://internal/admin/introspect";
 const DISCONNECT_URL = "https://internal/admin/disconnect-user";
 const DISCONNECT_PARTICIPANT_URL = "https://internal/disconnect-participant";
 const GATEWAY_TIMEOUT_MS = 3000;
+
+/** The global gateway's internal path that ends any ring between two users. */
+export const CALL_STOP_BETWEEN_PATH = "/calls/stop-between";
 
 type Namespace = Pick<DurableObjectNamespace, "get" | "idFromName">;
 
@@ -97,7 +101,7 @@ export async function callRoomSlug(
 
 /** Ends the user's sessions in one call room; returns sockets closed. */
 async function leaveCallRoom(
-  bindings: UserSocketBindings,
+  bindings: Pick<UserSocketBindings, "meetingRooms" | "voiceRooms">,
   slug: string,
   userId: string,
   reason: string,
@@ -158,4 +162,35 @@ export async function disconnectUserEverywhere(
   );
   closed += roomClosed.reduce((sum, count) => sum + count, 0);
   return closed;
+}
+
+/** Two users' DM call room, `dm-call-<a>-<b>` (sorted), as admission names it. */
+export function dmCallRoomSlug(userA: string, userB: string): string {
+  const [first, second] = [userA, userB].sort();
+  return `dm-call-${first}-${second}`;
+}
+
+/**
+ * One of the two blocked the other: the global gateway ends any ring between
+ * them (both clients and the callee's phones stop ringing), and both leave
+ * their DM's call room, so a call running there ends. The room's admission
+ * refuses them from then on. Never throws.
+ */
+export async function endCallsBetween(
+  bindings: Pick<UserSocketBindings, "meetingRooms" | "voiceRooms">,
+  userA: string,
+  userB: string,
+): Promise<void> {
+  const slug = dmCallRoomSlug(userA, userB);
+  await Promise.allSettled([
+    post(
+      bindings.meetingRooms,
+      "global-gateway",
+      `https://internal${CALL_STOP_BETWEEN_PATH}`,
+      { user_ids: [userA, userB] },
+    ),
+    ...[userA, userB].map((userId) =>
+      leaveCallRoom(bindings, slug, userId, "This call has ended."),
+    ),
+  ]);
 }

@@ -6,6 +6,12 @@ import { CacheKey } from "@/lib/cache";
 import { ServiceError } from "@/lib/service-error";
 import type { D1Database } from "@cloudflare/workers-types";
 import type { BroadcastDescriptor } from "./server.service";
+import {
+  blockBetween,
+  blockRefusal,
+  BLOCK_ERROR,
+  type BlockState,
+} from "./block.service";
 import { recordServerJoin } from "./profile-activity.service";
 
 // ─── listRelationships ───────────────────────────────────────────────────────
@@ -73,6 +79,12 @@ export async function sendFriendRequest(
     throw ServiceError.badRequest("Cannot friend yourself");
   }
 
+  // A block either way refuses the request (the blocked side cannot even
+  // leave a pending row behind for the blocker). The block may name an
+  // account purged and signed up again with the same id (migration 046).
+  const block = await blockBetween(db, userId, target.id as string);
+  if (block) throw friendBlockRefusal(block);
+
   // Check existing relationship
   const existing = (await db
     .prepare(
@@ -83,25 +95,19 @@ export async function sendFriendRequest(
 
   if (existing) {
     if (existing.type === 0) throw ServiceError.conflict("Already friends");
-    if (existing.type === 1) throw ServiceError.conflict("User is blocked");
     if (existing.type === 3)
       throw ServiceError.conflict("Request already sent");
 
     if (existing.type === 2) {
       // They sent us a request — auto-accept
       const now = new Date().toISOString();
-      await db.batch([
-        db
-          .prepare(
-            `UPDATE relationships SET type = 0, updated_at = ? WHERE user_id = ? AND target_user_id = ?`,
-          )
-          .bind(now, userId, target.id as string),
-        db
-          .prepare(
-            `UPDATE relationships SET type = 0, updated_at = ? WHERE user_id = ? AND target_user_id = ?`,
-          )
-          .bind(now, target.id as string, userId),
-      ]);
+      const accepted = await acceptPendingRequest(
+        db,
+        userId,
+        target.id as string,
+        now,
+      );
+      if (!accepted) await throwRequestGone(db, userId, target.id as string);
       return {
         user: {
           id: target.id,
@@ -116,20 +122,6 @@ export async function sendFriendRequest(
         broadcasts: [],
       };
     }
-  }
-
-  // Refused when the target has blocked the sender (a block deletes the
-  // sender's own row, so `existing` is null then). The block may name an
-  // account purged and signed up again with the same id (migration 046).
-  const blockedBy = await db
-    .prepare(
-      `SELECT 1 FROM relationships
-       WHERE type = 1 AND user_id = ? AND target_user_id = ?`,
-    )
-    .bind(target.id as string, userId)
-    .first();
-  if (blockedBy) {
-    throw ServiceError.forbidden("Can't send a friend request to this user");
   }
 
   // Create pending relationships
@@ -187,6 +179,66 @@ export async function sendFriendRequest(
 
 // ─── acceptFriendRequest ────────────────────────────────────────────────────
 
+/** A friend request refused over a block, worded for the side asking. */
+function friendBlockRefusal(block: BlockState): ServiceError {
+  return block === "you_blocked"
+    ? ServiceError.conflict(
+        "You blocked this user. Unblock to send a friend request.",
+        BLOCK_ERROR.youBlocked,
+      )
+    : ServiceError.forbidden(
+        "You can't send this user a friend request.",
+        BLOCK_ERROR.blockedYou,
+      );
+}
+
+/**
+ * Turns `requesterId`'s pending request to `userId` into a friendship both
+ * ways: `userId`'s incoming row (type 2) and the requester's outgoing one
+ * (type 3). Both change or neither does, so a block made after the caller
+ * read the request (the blocker's row is type 1, the other row is gone)
+ * stays a block. True when it became a friendship.
+ */
+async function acceptPendingRequest(
+  db: D1Database,
+  userId: string,
+  requesterId: string,
+  now: string,
+): Promise<boolean> {
+  const [incoming] = await db.batch([
+    db
+      .prepare(
+        `UPDATE relationships SET type = 0, updated_at = ?
+          WHERE user_id = ? AND target_user_id = ? AND type = 2
+            AND EXISTS (SELECT 1 FROM relationships
+                         WHERE user_id = ? AND target_user_id = ? AND type = 3)`,
+      )
+      .bind(now, userId, requesterId, requesterId, userId),
+    // Runs after the first in the same transaction: our row is a
+    // friendship only if the first statement changed it.
+    db
+      .prepare(
+        `UPDATE relationships SET type = 0, updated_at = ?
+          WHERE user_id = ? AND target_user_id = ? AND type = 3
+            AND EXISTS (SELECT 1 FROM relationships
+                         WHERE user_id = ? AND target_user_id = ? AND type = 0)`,
+      )
+      .bind(now, requesterId, userId, userId, requesterId),
+  ]);
+  return Number(incoming?.meta?.changes ?? 0) > 0;
+}
+
+/** The pending request went away before it was accepted: say why. */
+async function throwRequestGone(
+  db: D1Database,
+  userId: string,
+  requesterId: string,
+): Promise<never> {
+  const block = await blockBetween(db, userId, requesterId);
+  if (block) throw friendBlockRefusal(block);
+  throw ServiceError.notFound("No pending request");
+}
+
 export async function acceptFriendRequest(
   db: D1Database,
   userId: string,
@@ -204,18 +256,9 @@ export async function acceptFriendRequest(
   }
 
   const now = new Date().toISOString();
-  await db.batch([
-    db
-      .prepare(
-        `UPDATE relationships SET type = 0, updated_at = ? WHERE user_id = ? AND target_user_id = ?`,
-      )
-      .bind(now, userId, targetUserId),
-    db
-      .prepare(
-        `UPDATE relationships SET type = 0, updated_at = ? WHERE user_id = ? AND target_user_id = ?`,
-      )
-      .bind(now, targetUserId, userId),
-  ]);
+  if (!(await acceptPendingRequest(db, userId, targetUserId, now))) {
+    await throwRequestGone(db, userId, targetUserId);
+  }
 
   const userA = await db
     .prepare(
@@ -256,9 +299,14 @@ export async function blockUser(
   userId: string,
   targetUserId: string,
 ): Promise<{ type: number; broadcasts: BroadcastDescriptor[] }> {
+  if (targetUserId === userId) {
+    throw ServiceError.badRequest("Cannot block yourself");
+  }
   const now = new Date().toISOString();
 
-  await db.batch([
+  // Their side of a friendship or request goes; their own block of us
+  // stays (both can block each other, and each unblocks on their own).
+  const [, reverse] = await db.batch([
     db
       .prepare(
         `INSERT OR REPLACE INTO relationships (user_id, target_user_id, type, created_at, updated_at)
@@ -267,7 +315,7 @@ export async function blockUser(
       .bind(userId, targetUserId, now, now),
     db
       .prepare(
-        `DELETE FROM relationships WHERE user_id = ? AND target_user_id = ?`,
+        `DELETE FROM relationships WHERE user_id = ? AND target_user_id = ? AND type != 1`,
       )
       .bind(targetUserId, userId),
   ]);
@@ -279,23 +327,23 @@ export async function blockUser(
     .bind(targetUserId)
     .first();
 
-  return {
-    type: 1,
-    broadcasts: [
-      {
-        type: "user",
-        target: userId,
-        event: "RELATIONSHIP_ADD",
-        data: { user: userB, type: 1, created_at: now },
-      },
-      {
-        type: "user",
-        target: targetUserId,
-        event: "RELATIONSHIP_REMOVE",
-        data: { user_id: userId },
-      },
-    ],
-  };
+  const broadcasts: BroadcastDescriptor[] = [
+    {
+      type: "user",
+      target: userId,
+      event: "RELATIONSHIP_ADD",
+      data: { user: userB, type: 1, created_at: now },
+    },
+  ];
+  if (Number(reverse?.meta?.changes ?? 0) > 0) {
+    broadcasts.push({
+      type: "user",
+      target: targetUserId,
+      event: "RELATIONSHIP_REMOVE",
+      data: { user_id: userId },
+    });
+  }
+  return { type: 1, broadcasts };
 }
 
 // ─── removeRelationship ──────────────────────────────────────────────────────
@@ -305,7 +353,10 @@ export async function removeRelationship(
   userId: string,
   targetUserId: string,
 ): Promise<{ broadcasts: BroadcastDescriptor[] }> {
-  await db.batch([
+  // Unfriending, cancelling and unblocking clear our row and their side of a
+  // friendship or request, never their block of us: a blocked user cannot
+  // lift a block by "removing" the blocker.
+  const [, reverse] = await db.batch([
     db
       .prepare(
         `DELETE FROM relationships WHERE user_id = ? AND target_user_id = ?`,
@@ -313,27 +364,28 @@ export async function removeRelationship(
       .bind(userId, targetUserId),
     db
       .prepare(
-        `DELETE FROM relationships WHERE user_id = ? AND target_user_id = ?`,
+        `DELETE FROM relationships WHERE user_id = ? AND target_user_id = ? AND type != 1`,
       )
       .bind(targetUserId, userId),
   ]);
 
-  return {
-    broadcasts: [
-      {
-        type: "user",
-        target: userId,
-        event: "RELATIONSHIP_REMOVE",
-        data: { user_id: targetUserId },
-      },
-      {
-        type: "user",
-        target: targetUserId,
-        event: "RELATIONSHIP_REMOVE",
-        data: { user_id: userId },
-      },
-    ],
-  };
+  const broadcasts: BroadcastDescriptor[] = [
+    {
+      type: "user",
+      target: userId,
+      event: "RELATIONSHIP_REMOVE",
+      data: { user_id: targetUserId },
+    },
+  ];
+  if (Number(reverse?.meta?.changes ?? 0) > 0) {
+    broadcasts.push({
+      type: "user",
+      target: targetUserId,
+      event: "RELATIONSHIP_REMOVE",
+      data: { user_id: userId },
+    });
+  }
+  return { broadcasts };
 }
 
 // ─── listDMs ─────────────────────────────────────────────────────────────────
@@ -436,6 +488,10 @@ export async function getOrCreateDM(
       },
     };
   }
+
+  // A block either way stops a new DM (an existing one still opens, to read).
+  const block = await blockBetween(db, userId, targetUserId);
+  if (block) throw blockRefusal(block);
 
   // Create new DM
   const channelId = crypto.randomUUID();

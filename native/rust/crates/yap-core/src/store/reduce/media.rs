@@ -90,6 +90,8 @@ pub(super) fn describe_error(error: &ApiError, action: &str) -> String {
         ApiError::Http { status, .. } if *status < 500 => {
             format!("Unable to {action}. Check the details and try again.")
         }
+        // A block: the server's sentence is written for people.
+        ApiError::Blocked { message, .. } => message.clone(),
         ApiError::Deletion(refusal) => describe_error(
             &ApiError::Http {
                 status: refusal.status(),
@@ -207,7 +209,7 @@ impl State {
             // Confirmed: the cache may take the chip now.
             Ok(_) => self.persist_messages(fx),
             Err(error) if error.is_unauthorized() => self.fail(fx, &error),
-            Err(_) => {
+            Err(error) => {
                 let ReactionChange {
                     message_id,
                     emoji,
@@ -216,6 +218,10 @@ impl State {
                 } = &change;
                 self.react_row(fx, message_id, emoji, user_id, !added);
                 self.react_thread_copy(message_id, emoji, user_id, !added);
+                // Refused over a block: the open DM's composer says why.
+                if let Some(channel_id) = self.messages.as_ref().map(|log| log.channel_id.clone()) {
+                    self.note_dm_refusal(fx, &channel_id, &error);
+                }
             }
         }
     }

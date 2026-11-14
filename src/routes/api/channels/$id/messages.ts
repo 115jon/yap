@@ -40,6 +40,7 @@ import {
 } from "@/lib/background-tasks";
 import { recordR2CleanupFailure } from "@/services/r2-cleanup.service";
 import { scheduleMessageSent } from "@/services/stats.service";
+import { blockRefusal, dmBlockState } from "@/services/block.service";
 import { cfTimeZone } from "@/lib/request-time-zone";
 
 // GET /api/channels/:id/messages — get message history (paginated)
@@ -125,6 +126,13 @@ export const POST = async ({ request, params }: any) => {
         "You do not have permission to send messages in this channel",
         403,
       );
+    }
+  } else {
+    // A block either way closes a 1:1 DM to new messages (Discord-style).
+    const block = await dmBlockState(getDB(), userId, channelId);
+    if (block) {
+      const refusal = blockRefusal(block);
+      return apiError(refusal.message, refusal.status, refusal.code);
     }
   }
 
@@ -247,6 +255,15 @@ export const PATCH = async ({ request, params }: any) => {
   // Must provide either content or embeds update
   if (!body.content?.trim() && !Array.isArray(body.embeds)) {
     return apiError("content or embeds required", 400);
+  }
+
+  // No edits (content or embed removal) in a 1:1 DM closed by a block.
+  if ((accessResult as { serverId: string | null }).serverId === null) {
+    const block = await dmBlockState(db, userId, channelId);
+    if (block) {
+      const refusal = blockRefusal(block);
+      return apiError(refusal.message, refusal.status, refusal.code);
+    }
   }
 
   try {

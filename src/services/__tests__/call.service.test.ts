@@ -112,13 +112,15 @@ describe("buildCallRingStopPush", () => {
     expect(buildCallRingStopPush(RING, "declined").android.ttl).toBe("60s");
   });
 
-  it("counts every stop but an answer or a decline as missed", () => {
+  it("counts every stop but an answer, a decline or a block as missed", () => {
     expect(isMissedRingStop("timeout")).toBe(true);
     expect(isMissedRingStop("cancelled")).toBe(true);
     expect(isMissedRingStop("abandoned")).toBe(true);
     expect(isMissedRingStop("disconnected")).toBe(true);
     expect(isMissedRingStop("accepted")).toBe(false);
     expect(isMissedRingStop("declined")).toBe(false);
+    // A block ended it: no missed call to show the blocker.
+    expect(isMissedRingStop("blocked")).toBe(false);
   });
 });
 

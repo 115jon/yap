@@ -40,6 +40,7 @@ import {
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { apiDelete, apiPost, apiPut } from "@/lib/api-client";
 import { describeApiError } from "@/lib/api-errors";
+import { blockErrorMessage } from "@/lib/blocks";
 import type { Relationship } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { livePresenceStatus, UserStatusDot } from "./UserStatusDot";
@@ -171,6 +172,9 @@ function statusLine(rel: Relationship): string | null {
  * 400 yourself, 409 already friends / blocked / request pending.
  */
 function addFriendError(err: unknown) {
+  // A block either way (403 blocked by them, 409 blocked by you).
+  const blocked = blockErrorMessage(err);
+  if (blocked) return blocked;
   const status = (err as { status?: unknown } | null)?.status;
   if (status === 404)
     return "No one has that username. Check the spelling and try again.";

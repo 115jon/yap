@@ -156,9 +156,21 @@ impl State {
     }
 
     pub(super) fn emit_active_dm(&mut self, fx: &mut Effects) {
+        // A refusal holds for the open DM only: leaving it forgets.
+        let active = self.active_channel.clone();
+        self.friends
+            .dm_refusals
+            .retain(|channel, _| active.as_deref() == Some(channel.as_str()));
         let dm = self
             .active_dm()
             .map(|dm| {
+                let block = crate::store::blocks::dm_composer_block(
+                    crate::store::blocks::has_blocked(
+                        &self.friends.relationships,
+                        &dm.recipient.id,
+                    ),
+                    self.friends.dm_refusals.get(&dm.id).copied(),
+                );
                 let avatar = view::avatar_url(
                     &self.api_base,
                     dm.recipient.avatar_url.as_deref(),
@@ -174,6 +186,8 @@ impl State {
                     username: dm.recipient.username.clone(),
                     avatar,
                     deco,
+                    block: block.map(|b| b.as_str().to_owned()).unwrap_or_default(),
+                    block_notice: block.map(|b| b.notice().to_owned()).unwrap_or_default(),
                 }
             })
             .unwrap_or_default();

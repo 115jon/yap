@@ -399,6 +399,8 @@ fn set_dm(mut nav: Pin<&mut Nav>, dm: &DmView) {
     nav.as_mut().set_dm_username(q(&dm.username));
     nav.as_mut().set_dm_avatar(q(&dm.avatar));
     nav.as_mut().set_dm_deco(q(&dm.deco));
+    nav.as_mut().set_dm_block(q(&dm.block));
+    nav.as_mut().set_dm_block_notice(q(&dm.block_notice));
     nav.set_dm_user_id(q(&dm.user_id));
 }
 

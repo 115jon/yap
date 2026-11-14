@@ -144,6 +144,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
     state.sync_panels(&mut fx);
     state.sync_search(&mut fx);
     state.sync_friends(&mut fx);
+    state.sync_blocks(&mut fx);
     state.sync_invites(&mut fx);
     state.sync_apps(&mut fx);
     state.sync_deletion(&mut fx);
@@ -282,6 +283,7 @@ impl State {
                 .and_then(|server| self.members.get(server))
                 .map_or(&[], Vec::as_slice),
             dm_recipient: self.active_dm().map(|dm| &dm.recipient),
+            relationships: &self.friends.relationships,
         }
     }
 
@@ -3437,6 +3439,19 @@ impl State {
             // An odd body: the gateway echo still reconciles the row.
             Ok(_) => {}
             Err(error) if error.is_unauthorized() => self.fail(fx, &error),
+            // A DM closed by a block: the message never will go, so its row
+            // leaves (no Retry) and the composer says why.
+            Err(error) if super::blocks::dm_refusal(&error).is_some() => {
+                if let Some(outgoing) = self.outbox.remove(nonce) {
+                    let channel_id = outgoing.message.channel_id;
+                    self.remove_row(fx, &pending_id(nonce));
+                    self.note_dm_refusal(fx, &channel_id, &error);
+                } else if toast_reply.is_some() {
+                    if let Some(block) = super::blocks::dm_refusal(&error) {
+                        fx.view(ViewUpdate::Notice(block.notice().to_owned()));
+                    }
+                }
+            }
             Err(_) if self.outbox.contains_key(nonce) => self.set_send_failed(fx, nonce, true),
             // A toast reply to a channel that is not open has no row to
             // mark failed: say so, with the text.
@@ -3894,7 +3909,10 @@ impl State {
             }
             Dispatch::TypingStart(typing) => {
                 let me = self.me().map(|me| me.id.as_str()).unwrap_or_default();
-                if typing.channel_id == active && typing.user_id != me {
+                // Someone we blocked types unseen.
+                let blocked =
+                    super::blocks::has_blocked(&self.friends.relationships, &typing.user_id);
+                if typing.channel_id == active && typing.user_id != me && !blocked {
                     self.typing_generation += 1;
                     let generation = self.typing_generation;
                     let user_id = typing.user_id;
@@ -4650,6 +4668,17 @@ fn join_error_copy(error: &str) -> String {
         // Already written for people (yap-voice close reasons).
         return error.to_owned();
     }
+    // A DM call room refused over a block (socket-admission.ts
+    // BLOCK_CALL_COPY), or a block ended the call (endCallsBetween).
+    if has(&["unblock to call"]) {
+        return "You blocked this user. Unblock to call.".to_owned();
+    }
+    if has(&["can't call this user"]) {
+        return super::blocks::CALL_BLOCKED.to_owned();
+    }
+    if has(&["this call has ended"]) {
+        return "This call has ended.".to_owned();
+    }
     if has(&["403", "forbidden", "connect_denied"]) {
         return "You can't join this channel.".to_owned();
     }
@@ -4683,7 +4712,10 @@ fn unreachable(error: &ApiError) -> bool {
     match error {
         ApiError::Network(_) => true,
         ApiError::Http { status, .. } => *status == 429 || *status >= 500,
-        ApiError::Unauthorized | ApiError::Decode(_) | ApiError::Deletion(_) => false,
+        ApiError::Unauthorized
+        | ApiError::Decode(_)
+        | ApiError::Deletion(_)
+        | ApiError::Blocked { .. } => false,
     }
 }
 
@@ -4714,4 +4746,31 @@ fn earliest_start(
         .into_iter()
         .flatten()
         .min()
+}
+
+#[cfg(test)]
+mod join_error_tests {
+    use super::join_error_copy;
+
+    #[test]
+    fn a_call_refused_over_a_block_should_say_so() {
+        // ApiError::Blocked shows the server's sentence, no status.
+        assert_eq!(
+            join_error_copy("call admission: You can't call this user."),
+            "You can't call this user."
+        );
+        assert_eq!(
+            join_error_copy("call admission: You blocked this user. Unblock to call."),
+            "You blocked this user. Unblock to call."
+        );
+        assert_eq!(
+            join_error_copy("room closed: This call has ended."),
+            "This call has ended."
+        );
+        // Other refusals keep their copy.
+        assert_eq!(
+            join_error_copy("call admission: HTTP 403: CONNECT_DENIED"),
+            "You can't join this channel."
+        );
+    }
 }

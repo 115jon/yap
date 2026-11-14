@@ -110,16 +110,23 @@ describe("sendFriendRequest", () => {
     ).rejects.toHaveProperty("status", 400);
   });
 
-  it("throws 403 when the target has blocked the sender", async () => {
+  it("refuses a request to someone who blocked us", async () => {
     db.mockQuery("FROM users WHERE username", userRow());
-    db.mockQuery("WHERE type = 1 AND user_id", { "1": 1 }, [
-      TARGET_ID,
-      USER_ID,
-    ]);
+    db.mockQuery("WHERE type = 1", { results: [{ user_id: TARGET_ID }] });
 
     await expect(
       sendFriendRequest(db as any, USER_ID, "bob"),
-    ).rejects.toHaveProperty("status", 403);
+    ).rejects.toMatchObject({ status: 403, code: "BLOCKED_BY_USER" });
+    expect(db.getCalls("INSERT INTO relationships")).toHaveLength(0);
+  });
+
+  it("refuses a request to someone we blocked", async () => {
+    db.mockQuery("FROM users WHERE username", userRow());
+    db.mockQuery("WHERE type = 1", { results: [{ user_id: USER_ID }] });
+
+    await expect(
+      sendFriendRequest(db as any, USER_ID, "bob"),
+    ).rejects.toMatchObject({ status: 409, code: "USER_BLOCKED" });
     expect(db.getCalls("INSERT INTO relationships")).toHaveLength(0);
   });
 
@@ -135,19 +142,44 @@ describe("sendFriendRequest", () => {
   it("auto-accepts when target already sent a request (type 2)", async () => {
     db.mockQuery("FROM users WHERE username", userRow());
     db.mockQuery("FROM relationships WHERE user_id", { type: 2 });
+    db.mockQuery("UPDATE relationships SET type = 0", { meta: { changes: 1 } });
 
     const result = await sendFriendRequest(db as any, USER_ID, "bob");
     expect(result.type).toBe(0); // Friends now
-    db.assertCalledWith("UPDATE relationships SET type = 0", [
+    // Only the pending rows change: ours (2) and theirs (3).
+    db.assertCalledWith("AND type = 2", [
       anyTimestamp(),
       USER_ID,
       TARGET_ID,
-    ]);
-    db.assertCalledWith("UPDATE relationships SET type = 0", [
-      anyTimestamp(),
       TARGET_ID,
       USER_ID,
     ]);
+    db.assertCalledWith("AND type = 3", [
+      anyTimestamp(),
+      TARGET_ID,
+      USER_ID,
+      USER_ID,
+      TARGET_ID,
+    ]);
+  });
+
+  it("refuses the auto-accept when a block raced it", async () => {
+    db.mockQuery("FROM users WHERE username", userRow());
+    db.mockQuery("FROM relationships WHERE user_id", { type: 2 });
+    db.mockQuery("UPDATE relationships SET type = 0", { meta: { changes: 0 } });
+    // They block us between the block check and the accept.
+    const batch = db.batch.bind(db);
+    db.batch = async (stmts) => {
+      db.mockQuery("WHERE type = 1", { results: [{ user_id: TARGET_ID }] });
+      return batch(stmts);
+    };
+
+    await expect(
+      sendFriendRequest(db as any, USER_ID, "bob"),
+    ).rejects.toMatchObject({ status: 403, code: "BLOCKED_BY_USER" });
+    expect(db.calls.some((call) => call.sql.includes("AND type = 2"))).toBe(
+      true,
+    );
   });
 });
 
@@ -165,20 +197,54 @@ describe("acceptFriendRequest", () => {
       USER_ID,
       TARGET_ID,
     ]);
+    db.mockQuery("UPDATE relationships SET type = 0", { meta: { changes: 1 } });
 
     const result = await acceptFriendRequest(db as any, USER_ID, TARGET_ID);
     expect(result.type).toBe(0);
-    // Both directions become friends, each row keyed (user, target).
-    db.assertCalledWith("UPDATE relationships SET type = 0", [
+    // Both directions become friends, each row keyed (user, target), and
+    // only from the pending types (ours 2, theirs 3).
+    db.assertCalledWith("AND type = 2", [
       anyTimestamp(),
       USER_ID,
       TARGET_ID,
-    ]);
-    db.assertCalledWith("UPDATE relationships SET type = 0", [
-      anyTimestamp(),
       TARGET_ID,
       USER_ID,
     ]);
+    db.assertCalledWith("AND type = 3", [
+      anyTimestamp(),
+      TARGET_ID,
+      USER_ID,
+      USER_ID,
+      TARGET_ID,
+    ]);
+  });
+
+  it("lets a block made after the read win", async () => {
+    db.mockQuery("FROM relationships WHERE user_id", { "1": 1 }, [
+      USER_ID,
+      TARGET_ID,
+    ]);
+    db.mockQuery("UPDATE relationships SET type = 0", { meta: { changes: 0 } });
+    db.mockQuery("WHERE type = 1", { results: [{ user_id: USER_ID }] });
+
+    await expect(
+      acceptFriendRequest(db as any, USER_ID, TARGET_ID),
+    ).rejects.toMatchObject({ status: 409, code: "USER_BLOCKED" });
+    expect(
+      db.calls.some((call) => call.sql.includes("FROM users WHERE id")),
+    ).toBe(false);
+  });
+
+  it("says the request is gone when it was cancelled after the read", async () => {
+    db.mockQuery("FROM relationships WHERE user_id", { "1": 1 }, [
+      USER_ID,
+      TARGET_ID,
+    ]);
+    db.mockQuery("UPDATE relationships SET type = 0", { meta: { changes: 0 } });
+
+    await expect(
+      acceptFriendRequest(db as any, USER_ID, TARGET_ID),
+    ).rejects.toHaveProperty("status", 404);
   });
 
   it("throws 404 when no pending request", async () => {
@@ -200,6 +266,11 @@ describe("blockUser", () => {
   });
 
   it("blocks user and removes reverse relationship", async () => {
+    // The blocked user had a friendship or request row pointing back.
+    db.mockQuery("DELETE FROM relationships", { meta: { changes: 1 } }, [
+      TARGET_ID,
+      USER_ID,
+    ]);
     const result = await blockUser(db as any, USER_ID, TARGET_ID);
     expect(result.type).toBe(1);
     // The blocker's row is written (1 = blocked); the blocked user's row
@@ -213,6 +284,28 @@ describe("blockUser", () => {
     db.assertCalledWith("DELETE FROM relationships", [TARGET_ID, USER_ID]);
     expect(result.broadcasts).toHaveLength(2);
   });
+
+  it("keeps the other user's block of us (mutual blocks)", async () => {
+    // No row of theirs was deleted: their block (type 1) is spared.
+    db.mockQuery("DELETE FROM relationships", { meta: { changes: 0 } }, [
+      TARGET_ID,
+      USER_ID,
+    ]);
+    const result = await blockUser(db as any, USER_ID, TARGET_ID);
+    const [reverse] = db.getCalls("DELETE FROM relationships");
+    expect(reverse.sql).toContain("type != 1");
+    // They keep their relationship list as it is: no REMOVE broadcast.
+    expect(result.broadcasts).toEqual([
+      expect.objectContaining({ target: USER_ID, event: "RELATIONSHIP_ADD" }),
+    ]);
+  });
+
+  it("refuses to block yourself", async () => {
+    await expect(blockUser(db as any, USER_ID, USER_ID)).rejects.toHaveProperty(
+      "status",
+      400,
+    );
+  });
 });
 
 // ─── removeRelationship ──────────────────────────────────────────────────────
@@ -225,10 +318,33 @@ describe("removeRelationship", () => {
   });
 
   it("removes both sides of relationship", async () => {
+    db.mockQuery("DELETE FROM relationships", { meta: { changes: 1 } }, [
+      TARGET_ID,
+      USER_ID,
+    ]);
     const result = await removeRelationship(db as any, USER_ID, TARGET_ID);
     db.assertCalledWith("DELETE FROM relationships", [USER_ID, TARGET_ID]);
     db.assertCalledWith("DELETE FROM relationships", [TARGET_ID, USER_ID]);
     expect(result.broadcasts).toHaveLength(2);
+  });
+
+  it("never lifts the other user's block", async () => {
+    // A blocked user "removing" the blocker deletes only their own row.
+    db.mockQuery("DELETE FROM relationships", { meta: { changes: 0 } }, [
+      TARGET_ID,
+      USER_ID,
+    ]);
+    const result = await removeRelationship(db as any, USER_ID, TARGET_ID);
+    const reverse = db
+      .getCalls("DELETE FROM relationships")
+      .find((call) => call.bindings[0] === TARGET_ID);
+    expect(reverse?.sql).toContain("type != 1");
+    expect(result.broadcasts).toEqual([
+      expect.objectContaining({
+        target: USER_ID,
+        event: "RELATIONSHIP_REMOVE",
+      }),
+    ]);
   });
 });
 
@@ -320,6 +436,43 @@ describe("getOrCreateDM", () => {
     // Both people are recipients of the new channel.
     db.assertCalledWith("INSERT INTO dm_recipients", [result.dm.id, USER_ID]);
     db.assertCalledWith("INSERT INTO dm_recipients", [result.dm.id, TARGET_ID]);
+  });
+
+  it("refuses a new DM with someone who blocked us", async () => {
+    db.mockQuery("FROM users WHERE id", userRow(), [TARGET_ID]);
+    db.mockQuery("WHERE type = 1", { results: [{ user_id: TARGET_ID }] });
+
+    await expect(
+      getOrCreateDM(db as any, USER_ID, TARGET_ID),
+    ).rejects.toMatchObject({
+      status: 403,
+      code: "BLOCKED_BY_USER",
+      message: "You can't message this user.",
+    });
+    expect(db.getCalls("INSERT INTO channels")).toHaveLength(0);
+  });
+
+  it("refuses a new DM with someone we blocked", async () => {
+    db.mockQuery("FROM users WHERE id", userRow(), [TARGET_ID]);
+    db.mockQuery("WHERE type = 1", { results: [{ user_id: USER_ID }] });
+
+    await expect(
+      getOrCreateDM(db as any, USER_ID, TARGET_ID),
+    ).rejects.toMatchObject({
+      status: 403,
+      code: "USER_BLOCKED",
+      message: "You blocked this user. Unblock to message.",
+    });
+    expect(db.getCalls("INSERT INTO channels")).toHaveLength(0);
+  });
+
+  it("still opens an existing DM across a block (to read it)", async () => {
+    db.mockQuery("FROM users WHERE id", userRow());
+    db.mockQuery("FROM dm_recipients a", { id: "dm_existing" });
+    db.mockQuery("WHERE type = 1", { results: [{ user_id: TARGET_ID }] });
+
+    const result = await getOrCreateDM(db as any, USER_ID, TARGET_ID);
+    expect(result.dm.id).toBe("dm_existing");
   });
 
   it("throws 400 when DMing yourself", async () => {

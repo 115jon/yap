@@ -52,6 +52,17 @@ pub enum ApiError {
     /// routes answers while the account waits for deletion.
     #[error("{0}")]
     Deletion(crate::account_deletion::DeletionRefusal),
+    /// A refusal over a block, by its `code`
+    /// ([`crate::store::blocks::refusal`]): `USER_BLOCKED` (you blocked
+    /// them) or `BLOCKED_BY_USER` (they blocked you). `message` is the
+    /// server's sentence, written for people ("You can't message this
+    /// user.").
+    #[error("{message}")]
+    Blocked {
+        block: crate::store::blocks::DmBlock,
+        status: u16,
+        message: String,
+    },
 }
 
 /// The message of an error response whose body had no `error`.
@@ -94,6 +105,7 @@ impl ApiError {
             Self::Unauthorized => Some(401),
             Self::Http { status, .. } => Some(*status),
             Self::Deletion(refusal) => Some(refusal.status()),
+            Self::Blocked { status, .. } => Some(*status),
             Self::Network(_) | Self::Decode(_) => None,
         }
     }
@@ -285,6 +297,13 @@ impl Api {
                 .and_then(Value::as_str)
                 .unwrap_or(NO_SERVER_MESSAGE)
                 .to_owned();
+            if let Some(block) = crate::store::blocks::refusal(status.as_u16(), &body) {
+                return Err(ApiError::Blocked {
+                    block,
+                    status: status.as_u16(),
+                    message,
+                });
+            }
             return Err(ApiError::Http {
                 status: status.as_u16(),
                 message,

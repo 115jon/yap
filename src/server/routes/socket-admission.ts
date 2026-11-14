@@ -30,6 +30,11 @@ import type {
 } from "@/server/errors";
 import { signedInUserId, type KovaAuth } from "@/server/kova-auth";
 import {
+  BLOCK_CALL_COPY,
+  blockBetween,
+  blockRefusal,
+} from "@/services/block.service";
+import {
   VOICE_MOVE_GRANT_USE_PATH,
   type VoiceMoveGrantUseRequest,
 } from "../../../realtime/voice-move";
@@ -133,10 +138,10 @@ function authorizeChannel(
       typeof target.roomSlug === "string" &&
       target.roomSlug.startsWith("dm-call-")
     ) {
-      const callRoomSlug = yield* Effect.promise(() =>
-        getAuthorizedDmCallRoomSlug(db, userId, channelId),
+      const callRoom = yield* Effect.promise(() =>
+        getAuthorizedDmCallRoom(db, userId, channelId),
       );
-      if (!callRoomSlug || callRoomSlug !== target.roomSlug) {
+      if (!callRoom || callRoom.slug !== target.roomSlug) {
         return apiError(
           "Channel not found or access denied",
           403,
@@ -144,9 +149,18 @@ function authorizeChannel(
           request,
         );
       }
+      // A block either way closes the DM's call room too: no joining a ring
+      // or an existing call (the block route ends one that is running).
+      const block = yield* Effect.promise(() =>
+        blockBetween(db, userId, callRoom.otherId),
+      );
+      if (block) {
+        const refusal = blockRefusal(block, BLOCK_CALL_COPY);
+        return apiError(refusal.message, refusal.status, refusal.code, request);
+      }
       return {
         accessMode: "authenticated",
-        roomSlug: callRoomSlug,
+        roomSlug: callRoom.slug,
         channelId,
         subject: userId,
       } satisfies SocketAdmission;
@@ -293,11 +307,12 @@ async function spendVoiceMoveGrant(
   }
 }
 
-async function getAuthorizedDmCallRoomSlug(
+/** The DM's call room and the caller's other member, or null if not theirs. */
+async function getAuthorizedDmCallRoom(
   db: D1Database,
   userId: string,
   channelId: string,
-): Promise<string | null> {
+): Promise<{ slug: string; otherId: string } | null> {
   const { results } = await db
     .prepare(
       `SELECT user_id FROM dm_recipients WHERE channel_id = ? ORDER BY user_id ASC`,
@@ -308,7 +323,8 @@ async function getAuthorizedDmCallRoomSlug(
     .map((row: { user_id: string }) => row.user_id)
     .filter(Boolean);
   if (recipients.length !== 2 || !recipients.includes(userId)) return null;
-  return `dm-call-${recipients[0]}-${recipients[1]}`;
+  const otherId = recipients[0] === userId ? recipients[1] : recipients[0];
+  return { slug: `dm-call-${recipients[0]}-${recipients[1]}`, otherId };
 }
 
 /** The ticket signing secret, or the 503 code naming what is missing. */

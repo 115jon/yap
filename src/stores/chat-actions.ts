@@ -17,6 +17,9 @@ import type {
   Server,
   User,
 } from "@/lib/types";
+import { toast } from "@/components/ui/toast";
+import { blockErrorMessage, blockStateFromError } from "@/lib/blocks";
+import { useDmBlockStore } from "./useDmBlockStore";
 import { useMediaSafetySettingsStore } from "./useMediaSafetySettingsStore";
 import { useSoundSettingsStore } from "./useSoundSettingsStore";
 
@@ -388,8 +391,9 @@ export function createChatActions(
           try {
             await post();
             clearFailedSend(nonce);
-          } catch {
-            markFailed();
+          } catch (error) {
+            if (refusedByBlock(error)) clearFailedSend(nonce);
+            else markFailed();
           }
         },
         discard: () => {
@@ -398,10 +402,20 @@ export function createChatActions(
         },
       });
 
+    // A DM closed by a block: the message was not sent and never will be,
+    // so it leaves the list (no Retry) and the composer says why.
+    const refusedByBlock = (error: unknown) => {
+      const block = blockStateFromError(error);
+      if (!block) return false;
+      dispatch({ type: "DELETE_MESSAGE", id: pendingId });
+      useDmBlockStore.getState().refuse(channelId, block);
+      return true;
+    };
+
     try {
       await post();
-    } catch {
-      markFailed();
+    } catch (error) {
+      if (!refusedByBlock(error)) markFailed();
     }
   };
 
@@ -448,8 +462,10 @@ export function createChatActions(
         message_id: messageId,
         emoji,
       });
-    } catch {
+    } catch (error) {
       dispatch({ type: "REMOVE_REACTION", messageId, emoji, userId: user.id });
+      const block = blockStateFromError(error);
+      if (block) useDmBlockStore.getState().refuse(channelId, block);
     }
   };
 
@@ -1242,7 +1258,10 @@ export function createChatActions(
       );
       dispatch({ type: "ADD_DM_CHANNEL", dmChannel: data });
       return data.id;
-    } catch {
+    } catch (error) {
+      // A block either way: no new DM, and the server's sentence says why.
+      const blocked = blockErrorMessage(error);
+      if (blocked) toast.error(blocked);
       return null;
     }
   };

@@ -69,9 +69,11 @@ vi.mock("./useDesktopSettingsStore", () => ({
 vi.mock("./useSoundSettingsStore", () => ({
   isSoundEnabled: vi.fn(() => false),
 }));
+vi.mock("@/components/ui/toast", () => ({ toast: { error: vi.fn() } }));
 
 import { createChatGateway } from "./chat-gateway";
 import { SocketTicketError } from "@/lib/voice/socket-ticket-client";
+import { toast } from "@/components/ui/toast";
 import {
   playCallConnect,
   playCallEnd,
@@ -129,9 +131,13 @@ function sentMessages(socket: FakeWebSocket) {
   );
 }
 
-function createFixture({ withUser = true } = {}) {
+function createFixture({
+  withUser = true,
+  relationships = [] as ChatState["relationships"],
+} = {}) {
   const state: ChatState = {
     ...initialState,
+    relationships,
     user: withUser
       ? ({ ...initialState.user, id: "user-1" } as NonNullable<
           ChatState["user"]
@@ -873,6 +879,20 @@ describe("chat gateway CALL_RING_STOP", () => {
     gateway.disconnectGateway();
   });
 
+  it("says why when a ring is refused over a block, without the end tone", async () => {
+    const { gateway, socket, endCall } = await connectWithCall({
+      status: "ringing_outgoing",
+      callId: null,
+    });
+
+    ringStop(socket, { call_id: null, reason: "blocked" });
+
+    expect(endCall).toHaveBeenCalledWith("blocked");
+    expect(playCallEnd).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith("You can't call this user.");
+    gateway.disconnectGateway();
+  });
+
   it("keeps the existing behaviour when the stop has no call id", async () => {
     const { gateway, socket, endCall } = await connectWithCall({
       status: "active",
@@ -1094,6 +1114,56 @@ describe("chat gateway CALL_RING_STOP", () => {
     ringStop(socket, { call_id: "call-x", reason: "cancelled" });
 
     expect(endCall).toHaveBeenCalledWith("cancelled");
+    gateway.disconnectGateway();
+  });
+});
+
+describe("chat gateway and blocked users", () => {
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    mocks.fetchSocketProtocols.mockResolvedValue([]);
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("does not show typing from someone we blocked", async () => {
+    const { gateway, dispatch } = createFixture({
+      relationships: [
+        {
+          user: { id: "user-blocked", username: "blocked" },
+          type: 1,
+          created_at: "2026-11-14T00:00:00.000Z",
+        },
+      ] as ChatState["relationships"],
+    });
+    gateway.initGateway("user-1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const socket = FakeWebSocket.instances[0]!;
+    socket.open();
+    socket.message({ op: 8, d: { heartbeat_interval: 45_000 } });
+    socket.message({ op: 2, d: { participant_id: "session-1" } });
+
+    const typing = (userId: string) =>
+      socket.message({
+        op: 19,
+        d: {
+          seq: 1,
+          event: "TYPING_START",
+          data: { channel_id: "channel-1", user_id: userId },
+        },
+      });
+    typing("user-blocked");
+    typing("user-friend");
+
+    const typed = dispatch.mock.calls
+      .map(([action]) => action as { type: string; userId?: string })
+      .filter((action) => action.type === "SET_TYPING")
+      .map((action) => action.userId);
+    expect(typed).toEqual(["user-friend"]);
     gateway.disconnectGateway();
   });
 });

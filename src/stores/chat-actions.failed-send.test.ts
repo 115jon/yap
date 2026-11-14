@@ -3,6 +3,7 @@ import { initialState, chatReducer, type ChatState } from "@/lib/chat-reducer";
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createChatActions, useFailedSend } from "./chat-actions";
+import { useDmBlockStore } from "./useDmBlockStore";
 
 const mocks = vi.hoisted(() => ({ apiPost: vi.fn() }));
 
@@ -27,6 +28,7 @@ vi.mock("./useMediaSafetySettingsStore", () => ({
     getState: () => ({ hydrateSettings: vi.fn(), setCurrentUser: vi.fn() }),
   },
 }));
+vi.mock("@/components/ui/toast", () => ({ toast: { error: vi.fn() } }));
 vi.mock("./useSoundSettingsStore", () => ({
   useSoundSettingsStore: { getState: () => ({ hydrateFromBackend: vi.fn() }) },
 }));
@@ -95,5 +97,43 @@ describe("failed sends", () => {
 
     expect(getState().messages.some((m) => m.nonce === nonce)).toBe(false);
     expect(result.current).toBeUndefined();
+  });
+});
+
+describe("sends refused over a block", () => {
+  beforeEach(() => {
+    mocks.apiPost.mockReset();
+    useDmBlockStore.setState({ refusals: {} });
+  });
+
+  function refusal(code: string, message: string) {
+    return Object.assign(new Error(message), { status: 403, code });
+  }
+
+  it("drops the row (no Retry) and closes the DM's composer", async () => {
+    mocks.apiPost.mockRejectedValueOnce(
+      refusal("BLOCKED_BY_USER", "You can't message this user."),
+    );
+    const { actions, getState } = setup();
+
+    await actions.sendMessage("channel-1", "hello?");
+
+    expect(getState().messages.some((m) => m.content === "hello?")).toBe(false);
+    expect(useDmBlockStore.getState().refusals["channel-1"]).toBe(
+      "blocked_you",
+    );
+  });
+
+  it("records the blocker's own block the same way", async () => {
+    mocks.apiPost.mockRejectedValueOnce(
+      refusal("USER_BLOCKED", "You blocked this user. Unblock to message."),
+    );
+    const { actions } = setup();
+
+    await actions.sendMessage("channel-1", "hi");
+
+    expect(useDmBlockStore.getState().refusals["channel-1"]).toBe(
+      "you_blocked",
+    );
   });
 });
