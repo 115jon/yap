@@ -74,7 +74,6 @@ import { Route as ApiBillingPortalRouteImport } from './routes/api/billing/porta
 import { Route as ApiBillingCheckoutRouteImport } from './routes/api/billing/checkout'
 import { Route as ApiAvatarsSplatRouteImport } from './routes/api/avatars/$'
 import { Route as ApiAuthSyncRouteImport } from './routes/api/auth/sync'
-import { Route as ApiAuthDesktopRouteImport } from './routes/api/auth/desktop'
 import { Route as ApiAttachmentsSplatRouteImport } from './routes/api/attachments/$'
 import { Route as ApiAdminBadgesRouteImport } from './routes/api/admin/badges'
 import { Route as ApiAccountDeletionRouteImport } from './routes/api/account/deletion'
@@ -465,11 +464,6 @@ const ApiAuthSyncRoute = ApiAuthSyncRouteImport.update({
   path: '/api/auth/sync',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAuthDesktopRoute = ApiAuthDesktopRouteImport.update({
-  id: '/api/auth/desktop',
-  path: '/api/auth/desktop',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiAttachmentsSplatRoute = ApiAttachmentsSplatRouteImport.update({
   id: '/api/attachments/$',
   path: '/api/attachments/$',
@@ -833,7 +827,6 @@ export interface FileRoutesByFullPath {
   '/api/account/deletion': typeof ApiAccountDeletionRoute
   '/api/admin/badges': typeof ApiAdminBadgesRoute
   '/api/attachments/$': typeof ApiAttachmentsSplatRoute
-  '/api/auth/desktop': typeof ApiAuthDesktopRoute
   '/api/auth/sync': typeof ApiAuthSyncRoute
   '/api/avatars/$': typeof ApiAvatarsSplatRoute
   '/api/billing/checkout': typeof ApiBillingCheckoutRoute
@@ -962,7 +955,6 @@ export interface FileRoutesByTo {
   '/api/account/deletion': typeof ApiAccountDeletionRoute
   '/api/admin/badges': typeof ApiAdminBadgesRoute
   '/api/attachments/$': typeof ApiAttachmentsSplatRoute
-  '/api/auth/desktop': typeof ApiAuthDesktopRoute
   '/api/auth/sync': typeof ApiAuthSyncRoute
   '/api/avatars/$': typeof ApiAvatarsSplatRoute
   '/api/billing/checkout': typeof ApiBillingCheckoutRoute
@@ -1092,7 +1084,6 @@ export interface FileRoutesById {
   '/api/account/deletion': typeof ApiAccountDeletionRoute
   '/api/admin/badges': typeof ApiAdminBadgesRoute
   '/api/attachments/$': typeof ApiAttachmentsSplatRoute
-  '/api/auth/desktop': typeof ApiAuthDesktopRoute
   '/api/auth/sync': typeof ApiAuthSyncRoute
   '/api/avatars/$': typeof ApiAvatarsSplatRoute
   '/api/billing/checkout': typeof ApiBillingCheckoutRoute
@@ -1223,7 +1214,6 @@ export interface FileRouteTypes {
     | '/api/account/deletion'
     | '/api/admin/badges'
     | '/api/attachments/$'
-    | '/api/auth/desktop'
     | '/api/auth/sync'
     | '/api/avatars/$'
     | '/api/billing/checkout'
@@ -1352,7 +1342,6 @@ export interface FileRouteTypes {
     | '/api/account/deletion'
     | '/api/admin/badges'
     | '/api/attachments/$'
-    | '/api/auth/desktop'
     | '/api/auth/sync'
     | '/api/avatars/$'
     | '/api/billing/checkout'
@@ -1481,7 +1470,6 @@ export interface FileRouteTypes {
     | '/api/account/deletion'
     | '/api/admin/badges'
     | '/api/attachments/$'
-    | '/api/auth/desktop'
     | '/api/auth/sync'
     | '/api/avatars/$'
     | '/api/billing/checkout'
@@ -1610,7 +1598,6 @@ export interface RootRouteChildren {
   ApiAccountDeletionRoute: typeof ApiAccountDeletionRoute
   ApiAdminBadgesRoute: typeof ApiAdminBadgesRoute
   ApiAttachmentsSplatRoute: typeof ApiAttachmentsSplatRoute
-  ApiAuthDesktopRoute: typeof ApiAuthDesktopRoute
   ApiAuthSyncRoute: typeof ApiAuthSyncRoute
   ApiAvatarsSplatRoute: typeof ApiAvatarsSplatRoute
   ApiBillingCheckoutRoute: typeof ApiBillingCheckoutRoute
@@ -2110,13 +2097,6 @@ declare module '@tanstack/react-router' {
       path: '/api/auth/sync'
       fullPath: '/api/auth/sync'
       preLoaderRoute: typeof ApiAuthSyncRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/auth/desktop': {
-      id: '/api/auth/desktop'
-      path: '/api/auth/desktop'
-      fullPath: '/api/auth/desktop'
-      preLoaderRoute: typeof ApiAuthDesktopRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/attachments/$': {
@@ -2927,7 +2907,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAccountDeletionRoute: ApiAccountDeletionRoute,
   ApiAdminBadgesRoute: ApiAdminBadgesRoute,
   ApiAttachmentsSplatRoute: ApiAttachmentsSplatRoute,
-  ApiAuthDesktopRoute: ApiAuthDesktopRoute,
   ApiAuthSyncRoute: ApiAuthSyncRoute,
   ApiAvatarsSplatRoute: ApiAvatarsSplatRoute,
   ApiBillingCheckoutRoute: ApiBillingCheckoutRoute,

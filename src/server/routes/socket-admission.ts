@@ -1,16 +1,11 @@
-// Who may open a call socket, shared by /api/voice/admission (one request per
-// join, realtime/ADMISSION.md) and the deprecated room and voice audiences of
+// Who may open a socket: the call sockets for /api/voice/admission (one
+// request per join, realtime/ADMISSION.md) and the chat socket for
 // /api/voice/socket-ticket. Each check proves the caller once: one Kova
 // session lookup (signedInUserId) and one channel-access read per request.
 
 import { Effect } from "effect";
 
-import {
-  apiError,
-  buildVoiceChannelRoomSlug,
-  getCorsHeaders,
-  handleCorsPreflightIfNeeded,
-} from "@/lib/api-helpers";
+import { apiError, buildVoiceChannelRoomSlug } from "@/lib/api-helpers";
 import { resolveChannelAccess } from "@/lib/channel-access";
 import { PERMISSIONS, hasPermission } from "@/lib/permissions";
 import { getOrCreateDemoSession } from "@/lib/voice/demo-session";
@@ -43,14 +38,6 @@ import {
 export const SOCKET_TICKET_TTL_MS = 60_000;
 const DEMO_TICKET_RATE_LIMIT = { limit: 12, windowMs: 60 * 60 * 1000 };
 const DEMO_SESSION_TICKET_RATE_LIMIT = { limit: 30, windowMs: 60 * 60 * 1000 };
-
-export const socketAdmissionOptions = async ({
-  request,
-}: {
-  request: Request;
-}) =>
-  handleCorsPreflightIfNeeded(request) ??
-  new Response(null, { status: 204, headers: getCorsHeaders(request) });
 
 export type SocketAdmission = {
   accessMode: RealtimeAccessMode;

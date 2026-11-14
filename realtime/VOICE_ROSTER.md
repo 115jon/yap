@@ -15,9 +15,8 @@ media through a voice-socket reconnect, and no roster changes either way.
 ## Event flow
 
 1. A room learns its channel id when it admits a room socket: the socket
-   ticket's `channelId` claim (set by `/api/voice/admission`, or the
-   deprecated room audience of `/api/voice/socket-ticket`, after its channel
-   checks), or, for a server voice slug, the slug minus
+   ticket's `channelId` claim (set by `/api/voice/admission` after its
+   channel checks), or, for a server voice slug, the slug minus
    `voice-<serverId>-`. It keeps it in storage (`vc:roster`).
 2. The roster is computed from the room's own sessions: one member per user,
    from live non-standby authenticated sessions (`connected`) and sessions held

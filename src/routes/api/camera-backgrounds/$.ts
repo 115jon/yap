@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { apiError, getBucket, getCorsHeaders } from "@/lib/api-helpers";
+import { apiError, getBucket } from "@/lib/api-helpers";
 import { requireMediaAuth } from "@/lib/media-auth";
 import {
   DELETE as deleteBackground,
@@ -17,12 +17,6 @@ const DANGEROUS_CONTENT_TYPES = new Set([
   "application/javascript",
   "text/javascript",
 ]);
-
-function setCorsHeaders(headers: Headers, request: Request) {
-  for (const [key, value] of Object.entries(getCorsHeaders(request))) {
-    headers.set(key, value);
-  }
-}
 
 function getSplatPath(params: { _splat?: string } | undefined): string {
   return params?._splat ?? "";
@@ -72,7 +66,6 @@ const GET = async (context: any) => {
   headers.set("X-Frame-Options", "DENY");
   headers.set("Referrer-Policy", "no-referrer");
   headers.set("Cross-Origin-Resource-Policy", "cross-origin");
-  setCorsHeaders(headers, request);
 
   return new Response(object.body as ReadableStream, {
     status: 200,

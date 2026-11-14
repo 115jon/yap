@@ -61,7 +61,7 @@ session check.
 - `participant_id`: the participant the tickets are for. With `media`, it
   is the room ticket's nonce, the id the room's `Ready` will carry. Without
   it, the `participantId` the client sent (absent if it sent none).
-- `media`: present when `media` was true. The same object the deprecated
+- `media`: present when `media` was true. The same object the removed
   `media_bootstrap` was. `ice_servers` falls back to public STUN when TURN is
   not configured.
 - Public demo rooms also get `Set-Cookie` for the demo session.
@@ -157,13 +157,10 @@ Voice tokens minted per cold join: 2 before (the room ticket's bootstrap,
 then Identify for `MediaReady` and `Ready`), 1 now; every Resume minted
 another, now none. TURN lookups (cached per isolate) went the same way.
 
-## Deprecated: the two-request flow
+## Removed: the two-request flow
 
-`POST /api/voice/socket-ticket` with `audience: "room"` (which also returns
-`media_bootstrap`) and `audience: "voice"`, and the Identify/Resume minting
-for room tickets without a `media` claim, stay for installed desktop builds up
-to v3.12.0 and mobile builds up to mobile-v0.5.1. They behave exactly as
-before. Delete them after v3.14.0, once the desktop updater and the mobile
-minimum version are past those builds (comments in
-`src/server/routes/socket-ticket.ts` and `realtime/meeting-room.ts` say the
-same).
+Before v3.13.0, clients joined with two `POST /api/voice/socket-ticket`
+requests (`audience: "room"`, which also returned `media_bootstrap`, and
+`audience: "voice"`), and the room minted credentials on every Identify and
+Resume. The route now refuses those audiences (400 `INVALID_AUDIENCE`) and
+`Resumed` never carries credentials except in reply to op 40.

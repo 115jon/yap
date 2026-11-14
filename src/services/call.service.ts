@@ -49,9 +49,8 @@ export function planCallRing(callee: {
 }
 
 /**
- * The callee's devices that can ring natively: tokens registered as
- * `native` (older apps cannot draw a call), and none at all while the user
- * is on Do Not Disturb, the rule message pushes follow too.
+ * The callee's devices to ring: none at all while the user is on Do Not
+ * Disturb, the rule message pushes follow too.
  */
 export async function callRingTokens(
   db: D1Database,
@@ -61,7 +60,7 @@ export async function callRingTokens(
     .prepare(
       `SELECT t.token FROM push_tokens t
        JOIN users u ON u.id = t.user_id
-       WHERE t.user_id = ? AND t.push_format = 'native'
+       WHERE t.user_id = ?
          AND COALESCE(u.status, 'online') != 'dnd'`,
     )
     .bind(userId)
@@ -69,13 +68,10 @@ export async function callRingTokens(
   return (results ?? []).map((row) => row.token as string);
 }
 
-/** Every native token of the user, DND or not: stopping a ring always goes. */
-async function nativeTokens(db: D1Database, userId: string): Promise<string[]> {
+/** Every token of the user, DND or not: stopping a ring always goes. */
+async function allTokens(db: D1Database, userId: string): Promise<string[]> {
   const { results } = await db
-    .prepare(
-      `SELECT token FROM push_tokens
-       WHERE user_id = ? AND push_format = 'native'`,
-    )
+    .prepare(`SELECT token FROM push_tokens WHERE user_id = ?`)
     .bind(userId)
     .all();
   return (results ?? []).map((row) => row.token as string);
@@ -213,7 +209,7 @@ export async function sendCallRingStopPushes(
 ): Promise<void> {
   if (!sender) return;
   try {
-    const tokens = await nativeTokens(db, calleeId);
+    const tokens = await allTokens(db, calleeId);
     if (tokens.length === 0) return;
     await sendToTokens(db, sender, tokens, buildCallRingStopPush(ring, reason));
   } catch (error: unknown) {

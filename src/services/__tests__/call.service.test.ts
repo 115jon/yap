@@ -65,7 +65,7 @@ describe("planCallRing", () => {
 });
 
 describe("callRingTokens", () => {
-  it("asks only for native tokens of a callee not on Do Not Disturb", async () => {
+  it("asks only for tokens of a callee not on Do Not Disturb", async () => {
     const db = createMockD1();
     db.mockQuery("FROM push_tokens t", { results: [{ token: "phone" }] });
 
@@ -73,7 +73,6 @@ describe("callRingTokens", () => {
 
     db.assertCalledWith("FROM push_tokens t", ["bob"]);
     const [call] = db.getCalls("FROM push_tokens t");
-    expect(call?.sql).toMatch(/t\.push_format = 'native'/);
     expect(call?.sql).toMatch(/COALESCE\(u\.status, 'online'\) != 'dnd'/);
   });
 });
@@ -155,7 +154,9 @@ describe("sending", () => {
       "accepted",
     );
 
-    db.assertCalledWith(/push_format = 'native'/, ["bob"]);
+    db.assertCalledWith("SELECT token FROM push_tokens WHERE user_id = ?", [
+      "bob",
+    ]);
     const [call] = db.getCalls("FROM push_tokens");
     expect(call?.sql).not.toMatch(/dnd/);
     expect(send).toHaveBeenCalledWith(

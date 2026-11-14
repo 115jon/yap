@@ -19,7 +19,7 @@ import {
   deletionDateFrom,
   invalidatePendingDeletionCache,
 } from "@/lib/account-deletion";
-import { apiSuccess, getCorsHeaders } from "@/lib/api-helpers";
+import { apiSuccess } from "@/lib/api-helpers";
 import { validateBody } from "@/lib/validate-body";
 import { Database, Gateway, RateLimiter, WorkerEnv } from "@/server/bindings";
 import { runRoute, type RouteServices } from "@/server/edge";
@@ -111,7 +111,7 @@ const requestDeletion = Effect.fn("accountDeletion.request")(function* (
                 code: cause.code,
                 servers: cause.servers,
               },
-              { status: 409, headers: getCorsHeaders(request) },
+              { status: 409 },
             ),
           )
         : service(() => Promise.reject(cause)),

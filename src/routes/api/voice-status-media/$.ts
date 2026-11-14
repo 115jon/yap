@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { apiError, getBucket, getCorsHeaders, getDB } from "@/lib/api-helpers";
+import { apiError, getBucket, getDB } from "@/lib/api-helpers";
 import { requireMediaAuth } from "@/lib/media-auth";
 import { getVoiceStatusMediaAssetById } from "@/services/voice-status-media.service";
 
@@ -105,7 +105,7 @@ const GET = async ({ request, params }: any) => {
     contentType = "application/octet-stream";
   }
 
-  const headers = new Headers(getCorsHeaders(request));
+  const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("Content-Type", contentType);
   headers.set("Content-Disposition", "inline");
@@ -137,7 +137,7 @@ const GET = async ({ request, params }: any) => {
     }
 
     if (offset >= object.size || length <= 0) {
-      const invalidRangeHeaders = new Headers(getCorsHeaders(request));
+      const invalidRangeHeaders = new Headers();
       invalidRangeHeaders.set("Content-Range", `bytes */${object.size}`);
       invalidRangeHeaders.set("X-Content-Type-Options", "nosniff");
       invalidRangeHeaders.set(

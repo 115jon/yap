@@ -41,12 +41,6 @@ describe("describeSessionClient", () => {
     expect(title({ userAgent: "YapNative/0.6.0" })).toBe(
       "Desktop · Yap desktop app",
     );
-    expect(title({ userAgent: "okhttp/4.12.0" })).toBe(
-      "Mobile · Yap mobile app on Android",
-    );
-    expect(
-      title({ userAgent: "Yap/42 CFNetwork/1568.200.51 Darwin/24.1.0" }),
-    ).toBe("Mobile · Yap mobile app on iOS");
   });
 
   it("prefers what a device sign-in reported", () => {

@@ -23,7 +23,7 @@ import {
 } from "../../src/lib/voice/socket-ticket";
 import { DEFAULT_KOVA_AUTH_URL } from "../../src/lib/site-defaults";
 import { memoryAuth, testServices } from "../../src/server/testing";
-import { socketTicketRoutes } from "../../src/server/routes/socket-ticket";
+import { voiceAdmissionRoutes } from "../../src/server/routes/voice-admission";
 import { generateMessageNotifications } from "../../src/services/message.service";
 import {
   acceptFriendRequest,
@@ -836,7 +836,7 @@ describe("edits and pins in a blocked DM", () => {
 
 describe("DM call room admission", () => {
   const ticketRoutes = (user: TestUser) =>
-    socketTicketRoutes(
+    voiceAdmissionRoutes(
       testServices({
         auth: memoryAuth({ [`Bearer ${user.token}`]: user.id }),
         db,
@@ -849,13 +849,13 @@ describe("DM call room admission", () => {
 
   async function admit(user: TestUser, channelId: string, roomSlug: string) {
     const response = await ticketRoutes(user).POST({
-      request: new Request(`${BASE}/api/voice/socket-ticket`, {
+      request: new Request(`${BASE}/api/voice/admission`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${user.token}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ audience: "voice", channelId, roomSlug }),
+        body: JSON.stringify({ channelId, roomSlug }),
       }),
     });
     return {

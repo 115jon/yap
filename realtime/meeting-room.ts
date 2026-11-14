@@ -264,8 +264,7 @@ interface WsAttachment {
     subject: string;
     /**
      * Where this socket's participant gets voice credentials: set by
-     * /api/voice/admission tickets (SocketTicketMedia), absent for the
-     * deprecated two-request flow, whose Identify and Resume mint them.
+     * /api/voice/admission tickets (SocketTicketMedia).
      */
     media?: SocketTicketMedia;
     /** Cloudflare's IANA time zone for the client, stamped at upgrade. */
@@ -3819,11 +3818,8 @@ export class MeetingRoom extends DurableObject<Env> {
 
       // The admission already handed this participant its voice token and
       // TURN (one request per join): mint nothing, send no MediaReady, and
-      // leave both out of Ready. Otherwise (deprecated two-request clients,
-      // or a reconnect's new participant) mint them here, as before.
-      // DEPRECATED for tickets without a media claim (desktop up to v3.12.0,
-      // mobile up to mobile-v0.5.1): delete that case after v3.14.0, with
-      // the room audience of /api/voice/socket-ticket.
+      // leave both out of Ready. Otherwise (a reconnect's new participant)
+      // mint them here.
       const mintsMedia = admission.media !== "issued";
 
       // Run all async sub-tasks in parallel to reduce time-to-Ready.
@@ -4331,19 +4327,8 @@ export class MeetingRoom extends DurableObject<Env> {
         replayedSeqs.add(entry.seq);
       }
 
-      // DEPRECATED: two-request clients (no media claim on this socket's
-      // ticket; desktop up to v3.12.0, mobile up to mobile-v0.5.1) take a
-      // fresh voice token and TURN from every Resumed; delete after v3.14.0.
-      // Clients admitted by /api/voice/admission keep theirs and refresh
-      // with op 40.
-      const freshMedia =
-        admission?.media === undefined
-          ? await this.mintVoiceMedia(
-              resumedAttachment.id,
-              resumedAttachment.admission?.subject,
-            )
-          : null;
-
+      // Resumed carries no voice credentials: clients admitted by
+      // /api/voice/admission keep theirs and refresh with op 40.
       if (this.resumeOverflowedSockets.has(ws)) {
         throw new Error("Resume continuity buffer exceeded");
       }
@@ -4361,12 +4346,6 @@ export class MeetingRoom extends DurableObject<Env> {
       this.sendTo(ws, {
         op: Op.Resumed,
         d: {
-          ...(freshMedia
-            ? {
-                voice_token: freshMedia.voiceToken,
-                ice_servers: freshMedia.iceServers,
-              }
-            : {}),
           participants,
           spatial_audio_state: this.spatialAudioStates.get(
             resumedAttachment.voice_channel_id || this.roomSlug,
