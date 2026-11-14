@@ -7,7 +7,6 @@
 //! camera's frames into it [`camera`], the share picker's sources and
 //! pictures [`share`]; the in-app updater is [`updater`].
 
-mod apps_audio;
 mod audio;
 mod camera;
 mod client;

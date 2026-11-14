@@ -7,7 +7,15 @@ publish.workspace = true
 description = "Yap local playback: soundboard clips, built-in tones and the Listen Together stream, decoded with symphonia, resampled to 48 kHz, mixed and played as an input of the app speaker (yap-speaker). No Qt."
 
 [features]
-default = []
+default = ["native-tls"]
+# The TLS backend of the clients this crate builds: native-tls (SChannel)
+# on the desktop, rustls on the phone (with its configuration handed over
+# through `set_client_setup`).
+native-tls = ["reqwest/native-tls"]
+rustls = ["reqwest/rustls-no-provider"]
+# The app's side (src/player.rs, src/ui.rs): the store's audio commands
+# and the UI sounds, which the desktop and the phone both run.
+store = ["dep:yap-core"]
 # Opus (Ogg/WebM) through the libopus that LiveKit's `webrtc.lib` already
 # carries. This crate only declares the symbols; the final executable must
 # link `webrtc.lib` (the app does, through yap-voice). Off, Opus fails with
@@ -15,11 +23,14 @@ default = []
 libopus = []
 
 [dependencies]
-reqwest = { workspace = true, features = ["native-tls"] }
+reqwest.workspace = true
 rubato = "5.0.1"
 symphonia = { version = "0.5.5", default-features = false, features = ["aac", "flac", "isomp4", "mkv", "mp3", "ogg", "pcm", "vorbis", "wav"] }
 tokio = { workspace = true, features = ["net"] }
 url = "2.5.8"
+# A path dependency, not the workspace one: that keeps its default
+# (native-tls, desktop) features, and the phone builds this on rustls.
+yap-core = { path = "../yap-core", default-features = false, optional = true }
 yap-protocol.workspace = true
 yap-speaker.workspace = true
 

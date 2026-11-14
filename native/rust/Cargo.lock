@@ -2360,7 +2360,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4007,6 +4007,7 @@ dependencies = [
  "symphonia",
  "tokio",
  "url",
+ "yap-core",
  "yap-protocol",
  "yap-speaker",
 ]

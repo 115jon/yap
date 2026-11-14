@@ -1,56 +1,31 @@
-//! UI sounds: each is rendered once (`yap_core::synth`, the web's recipes)
-//! and played as a voice of one input on the app's speaker
-//! (`yap-speaker`), so sounds overlap like Web Audio voices, follow the
-//! output device, and reach the call's echo canceller like everything else
-//! that plays. The web engine's gates apply: the sounds switch,
-//! the per-group rate limit, and the per-group voice cap (the oldest voice
-//! is cut, as `SoundEngine` fades it), each sound's category switch, and
-//! the volume from the settings. With "Use custom sounds" on, a sound the
+//! UI sounds, played by [`yap_audio::ui`] (rendered once, a voice of one
+//! input on the app's speaker, the per-group rate limit and voice cap).
+//! Here are the desktop's gates: the sounds switch, each sound's category
+//! switch, and the volume from the settings. With "Use custom sounds" on, a sound the
 //! user imported a file for plays that file instead (decoded once, at 48
 //! kHz stereo, [`crate::custom_sounds`]).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
-use std::time::Instant;
 
-use yap_core::shell::{Sound, SoundGate};
+use yap_audio::ui;
+use yap_core::shell::Sound;
 use yap_core::synth;
 
-#[derive(Default)]
-struct Mixer {
-    gate: SoundGate,
-    /// Rendered once per sound and volume.
-    rendered: HashMap<(Sound, u8), Arc<Vec<i16>>>,
-    /// Imported files, decoded once per sound id (the volume is applied
-    /// when one plays, so this does not grow with the slider).
-    custom: HashMap<String, Arc<Vec<f32>>>,
-}
-
-fn mixer() -> &'static Mutex<Mixer> {
-    static MIXER: OnceLock<Mutex<Mixer>> = OnceLock::new();
-    MIXER.get_or_init(Mutex::default)
-}
-
-fn lock() -> std::sync::MutexGuard<'static, Mixer> {
-    mixer().lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// How many cycles a ring plays before it stops by itself: past the
-/// server's 30 s ring timeout (`CALL_RING_TIMEOUT_MS`).
-const RING_CYCLES: usize = 13;
-
-fn pcm(sound: Sound, volume: u8) -> Vec<i16> {
-    let gain = synth::volume_to_gain(volume);
-    if sound.loop_period().is_some() {
-        return synth::pcm16(&synth::render_loop(sound, gain, RING_CYCLES));
-    }
-    synth::pcm16(&synth::render(sound, gain))
+/// Imported files, decoded once per sound id (the volume is applied when
+/// one plays, so this does not grow with the slider).
+fn custom() -> std::sync::MutexGuard<'static, HashMap<String, Arc<Vec<f32>>>> {
+    static CUSTOM: OnceLock<Mutex<HashMap<String, Arc<Vec<f32>>>>> = OnceLock::new();
+    CUSTOM
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Stops a sound's group at once (`playRingStop`): every voice of it is
 /// reset. Never gated.
 pub fn stop(sound: Sound) {
-    output::stop_group(sound.spec().group);
+    ui::stop(sound);
 }
 
 /// Plays `sound` unless the sounds switch or its category is off, or its
@@ -114,7 +89,7 @@ pub fn preview(id: &str) {
 
 /// A new file (or none) for a sound: its decoded copies go.
 pub fn forget_custom(id: &str) {
-    lock().custom.remove(id);
+    custom().remove(id);
 }
 
 /// 48 kHz stereo `f32` to 16-bit at the sound volume.
@@ -135,7 +110,7 @@ fn play_custom(id: String, group: &'static str, max_voices: usize, volume: u8) {
     let spawned = std::thread::Builder::new()
         .name("yap-sound".into())
         .spawn(move || {
-            let cached = lock().custom.get(&id).cloned();
+            let cached = custom().get(&id).cloned();
             let samples = match cached {
                 Some(samples) => samples,
                 None => {
@@ -149,7 +124,7 @@ fn play_custom(id: String, group: &'static str, max_voices: usize, volume: u8) {
                     match decoded {
                         Ok((samples, _)) => {
                             let samples = Arc::new(samples);
-                            lock().custom.insert(id.clone(), Arc::clone(&samples));
+                            custom().insert(id.clone(), Arc::clone(&samples));
                             samples
                         }
                         Err(error) => {
@@ -160,7 +135,7 @@ fn play_custom(id: String, group: &'static str, max_voices: usize, volume: u8) {
                 }
             };
             eprintln!("[sound] custom {id}");
-            output::play(group, max_voices, Arc::new(custom_pcm(&samples, volume)), 2);
+            ui::play_pcm(group, max_voices, Arc::new(custom_pcm(&samples, volume)), 2);
         });
     if let Err(error) = spawned {
         eprintln!("[sound] no thread: {error}");
@@ -174,60 +149,11 @@ fn start(sound: Sound, volume: u8, custom: bool) {
     let id = yap_core::custom_sounds::id_of(sound);
     if custom && crate::custom_sounds::file_for(id).is_some() {
         let spec = sound.spec();
-        if !lock().gate.allow(sound, Instant::now()) {
+        if !ui::allow(sound) {
             return;
         }
         play_custom(id.to_owned(), spec.group, spec.max_voices, volume);
         return;
     }
-    let samples = {
-        let mut mixer = lock();
-        if !mixer.gate.allow(sound, Instant::now()) {
-            return;
-        }
-        eprintln!("[sound] {sound:?}");
-        Arc::clone(
-            mixer
-                .rendered
-                .entry((sound, volume))
-                .or_insert_with(|| Arc::new(pcm(sound, volume))),
-        )
-    };
-    // With YAP_NULL_SPEAKER=1 the speaker plays to no device (its tap and
-    // the fake room still hear the sound).
-    let spec = sound.spec();
-    output::play(spec.group, spec.max_voices, samples, 1);
-}
-
-/// The UI sounds' voices, as one input of the app's speaker.
-mod output {
-    use std::sync::{Arc, OnceLock};
-
-    use yap_speaker::{Input, Voices};
-
-    fn voices() -> &'static Arc<Voices> {
-        static VOICES: OnceLock<Arc<Voices>> = OnceLock::new();
-        VOICES.get_or_init(|| {
-            let voices = Arc::new(Voices::default());
-            let input: Arc<dyn Input> = voices.clone();
-            yap_speaker::speaker().add(&input);
-            voices
-        })
-    }
-
-    /// Plays `samples` (48 kHz, `channels` interleaved) on the speaker.
-    pub(super) fn play(
-        group: &'static str,
-        max_voices: usize,
-        samples: Arc<Vec<i16>>,
-        channels: usize,
-    ) {
-        voices().start(group, max_voices, samples, channels);
-        yap_speaker::speaker().wake();
-    }
-
-    /// Cuts every playing voice of `group`.
-    pub(super) fn stop_group(group: &'static str) {
-        voices().stop(group);
-    }
+    ui::play(sound, volume);
 }

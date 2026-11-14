@@ -1,5 +1,5 @@
 //! The desktop's [`Platform`]: the native-tls client, Credential Manager,
-//! the gateway, calls and the local player of this crate, and the desktop
+//! the gateway, calls and the local player (`yap_audio::player`), and the desktop
 //! side of the view (toasts, sounds, the tray badge, camera backgrounds,
 //! uploads from disk, screen share and video).
 
@@ -42,7 +42,9 @@ impl Realtime for NativeRealtime {
     }
 
     fn spawn_audio(&self, http: reqwest::Client, events: yap_core::AudioEvents) -> AudioHandle {
-        crate::apps_audio::spawn(http, events)
+        // The soundboard volume from the settings until the first change.
+        let volume = || crate::desktop::current().sound_settings.soundboard_volume;
+        yap_audio::player::spawn(http, events, Box::new(volume))
     }
 }
 
@@ -136,7 +138,7 @@ impl Platform for Desktop {
     }
 
     fn player_level(&self) -> f64 {
-        crate::apps_audio::level()
+        yap_audio::player::level()
     }
 }
 

@@ -335,7 +335,7 @@ fn store(mut desktop: Pin<&mut qobject::Desktop>, next: DesktopSettings) {
     apply_settings(desktop.as_mut(), next);
     apply_badge(desktop);
     send_local_settings();
-    crate::apps_audio::set_soundboard_volume(next.sound_settings.soundboard_volume);
+    yap_audio::player::set_soundboard_volume(next.sound_settings.soundboard_volume);
 }
 
 /// The core's badge changed.

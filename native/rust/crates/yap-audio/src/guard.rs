@@ -130,7 +130,7 @@ impl Resolve for PublicResolver {
 /// A client for a stranger's URL: public addresses only, redirects only to
 /// public https hosts. Build it inside a tokio runtime context.
 pub(crate) fn public_client_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
+    crate::client_setup(reqwest::Client::builder())
         .connect_timeout(Duration::from_secs(10))
         .dns_resolver(PublicResolver)
         .redirect(public_redirect_policy())
