@@ -4,7 +4,6 @@ import { createMockD1 } from "@/lib/__tests__/mock-d1";
 import type { FcmSendResult } from "@/server/fcm";
 
 import {
-  buildMessagePush,
   buildNativeMessagePush,
   deletePushToken,
   deleteSessionPushTokens,
@@ -35,56 +34,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("buildMessagePush", () => {
-  it("names the sender and the channel, and tags per conversation", () => {
-    expect(buildMessagePush(MENTION)).toEqual({
-      notification: {
-        title: "Ada (#general, Ralph)",
-        body: "hey @bob look at this",
-      },
-      data: {
-        type: "mention",
-        channelId: "chan-1",
-        messageId: "msg-1",
-        notificationId: "n-1",
-        tag: "channel:chan-1",
-        serverId: "srv-1",
-      },
-      android: {
-        priority: "HIGH",
-        notification: { channel_id: "messages", tag: "channel:chan-1" },
-      },
-    });
-  });
-
-  it("titles a DM with the sender only and leaves serverId out", () => {
-    const push = buildMessagePush({
-      ...MENTION,
-      type: "dm",
-      serverId: null,
-      channelName: null,
-      serverName: null,
-      content: "",
-    });
-
-    expect(push.notification).toEqual({
-      title: "Ada",
-      body: "Sent an attachment",
-    });
-    expect(push.data).not.toHaveProperty("serverId");
-  });
-
-  it("trims a long preview with an ellipsis", () => {
-    const { body } = buildMessagePush({
-      ...MENTION,
-      content: "a".repeat(500),
-    }).notification;
-
-    expect(body).toHaveLength(180);
-    expect(body.endsWith("…")).toBe(true);
-  });
-});
-
 describe("push tokens", () => {
   it("upserts by token, re-owning it to the caller", async () => {
     const db = createMockD1();
@@ -93,7 +42,6 @@ describe("push tokens", () => {
       token: "tok",
       platform: "android",
       appVariant: "development",
-      pushFormat: "native",
       sessionId: "session-1",
     });
 
@@ -105,7 +53,6 @@ describe("push tokens", () => {
         "tok",
         "android",
         "development",
-        "native",
         "session-1",
         expect.any(String),
         expect.any(String),
@@ -203,6 +150,16 @@ describe("sendMessagePushes", () => {
 });
 
 describe("buildNativeMessagePush", () => {
+  it("trims a long preview with an ellipsis", () => {
+    const { data } = buildNativeMessagePush({
+      ...MENTION,
+      content: "a".repeat(500),
+    });
+
+    expect(data.preview).toHaveLength(180);
+    expect(data.preview?.endsWith("…")).toBe(true);
+  });
+
   it("is data-only with the native contract for a channel mention", () => {
     const message = buildNativeMessagePush(MENTION);
 
@@ -252,20 +209,24 @@ describe("buildNativeMessagePush", () => {
 });
 
 describe("sendMessagePushes formats", () => {
-  it("sends native tokens data-only and legacy tokens the system push", async () => {
+  it("sends every token the data-only push", async () => {
     const db = createMockD1();
     db.mockQuery("FROM push_tokens t", {
       results: [
-        { user_id: "user-2", token: "new", push_format: "native" },
-        { user_id: "user-2", token: "old", push_format: null },
+        { user_id: "user-2", token: "phone" },
+        { user_id: "user-2", token: "tablet" },
       ],
     });
     const send = vi.fn(async (): Promise<FcmSendResult> => ({ ok: true }));
 
     await sendMessagePushes(db as never, { send }, [MENTION]);
 
-    expect(send).toHaveBeenCalledWith("new", buildNativeMessagePush(MENTION));
-    expect(send).toHaveBeenCalledWith("old", buildMessagePush(MENTION));
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledWith("phone", buildNativeMessagePush(MENTION));
+    expect(send).toHaveBeenCalledWith(
+      "tablet",
+      buildNativeMessagePush(MENTION),
+    );
   });
 
   it("asks only for recipients who are not on Do Not Disturb", async () => {
@@ -284,7 +245,7 @@ describe("sendMessagePushes formats", () => {
 describe("sendReadPushes", () => {
   const ok = async (): Promise<FcmSendResult> => ({ ok: true });
 
-  it("sends a data-only read push to native tokens only", async () => {
+  it("sends a data-only read push to every token", async () => {
     const db = createMockD1();
     db.mockQuery("FROM push_tokens", { results: [{ token: "new" }] });
     const send = vi.fn(ok);
@@ -298,7 +259,9 @@ describe("sendReadPushes", () => {
       1_000,
     );
 
-    db.assertCalledWith(/push_format = 'native'/, ["read-user-1"]);
+    db.assertCalledWith("SELECT token FROM push_tokens WHERE user_id = ?", [
+      "read-user-1",
+    ]);
     expect(send).toHaveBeenCalledWith("new", {
       data: {
         ralph: "2",

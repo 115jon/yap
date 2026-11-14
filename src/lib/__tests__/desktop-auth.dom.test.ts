@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/kova-auth-config", () => ({
   KOVA_AUTH_PUBLISHABLE_KEY: "pk_live_new",
@@ -22,19 +22,10 @@ const OLD = "kova-auth:pk_dev_old:session-token";
 const LEGACY_CURRENT = "ralph-auth:pk_live_new:session-token";
 const LEGACY_OLD = "ralph-auth:pk_dev_old:session-token";
 
-function setTauri(on: boolean) {
-  const w = window as { __TAURI_INTERNALS__?: unknown };
-  if (on) w.__TAURI_INTERNALS__ = {};
-  else delete w.__TAURI_INTERNALS__;
-}
-
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
-  setTauri(true);
 });
-
-afterEach(() => setTauri(false));
 
 describe("stored Kova session token", () => {
   it("prefers the current publishable key's token", () => {
@@ -67,12 +58,12 @@ describe("stored Kova session token", () => {
 
   it("ignores keys that aren't session tokens", () => {
     localStorage.setItem("kova-auth:pk_dev_old:pending-state", "x");
-    localStorage.setItem("desktop_auth_token_backup", "x");
+    localStorage.setItem("session_token_backup", "x");
     expect(getStoredKovaAuthSessionToken()).toBeNull();
     expect(localStorage.getItem(CURRENT)).toBeNull();
   });
 
-  it("reaches the desktop handoff token through adoption", () => {
+  it("reaches the handoff token through adoption", () => {
     localStorage.setItem(OLD, "tok_old");
     expect(getDesktopAuthHandoffToken()).toBe("tok_old");
   });
@@ -81,7 +72,6 @@ describe("stored Kova session token", () => {
     localStorage.setItem(CURRENT, "tok_current");
     localStorage.setItem(OLD, "tok_old");
     localStorage.setItem(LEGACY_OLD, "tok_legacy");
-    localStorage.setItem("desktop_auth_token", "tok_current");
 
     clearDesktopAuthSession();
 
@@ -100,60 +90,30 @@ describe("stored Kova session token", () => {
 });
 
 describe("handleKovaSessionTokenChange", () => {
-  it("mirrors an SDK token into desktop_auth_token even though the SDK already wrote its pk key", () => {
-    // KovaAuthProvider writes kova-auth:<pk>:session-token, then reports it.
-    localStorage.setItem(CURRENT, "tok_sdk");
+  it("stores an SDK token under the current publishable key", () => {
     handleKovaSessionTokenChange("tok_sdk", { seenSessionToken: false });
-    expect(localStorage.getItem("desktop_auth_token")).toBe("tok_sdk");
-  });
-
-  it("keeps an existing desktop token", () => {
-    localStorage.setItem("desktop_auth_token", "tok_desktop");
-    handleKovaSessionTokenChange("tok_sdk", { seenSessionToken: false });
-    expect(localStorage.getItem("desktop_auth_token")).toBe("tok_desktop");
-  });
-
-  it("does not write desktop_auth_token on the web", () => {
-    setTauri(false);
-    handleKovaSessionTokenChange("tok_sdk", { seenSessionToken: false });
-    expect(localStorage.getItem("desktop_auth_token")).toBeNull();
     expect(localStorage.getItem(CURRENT)).toBe("tok_sdk");
   });
 
   it("clears only after a token was seen (a sign-out), never on a bare null", () => {
-    localStorage.setItem("desktop_auth_token", "tok");
     localStorage.setItem(CURRENT, "tok");
     const state = { seenSessionToken: false };
 
     handleKovaSessionTokenChange(null, state);
-    expect(localStorage.getItem("desktop_auth_token")).toBe("tok");
+    expect(localStorage.getItem(CURRENT)).toBe("tok");
     expect(consumeAuthLogoutIntent()).toBe(false);
 
     handleKovaSessionTokenChange("tok", state);
     handleKovaSessionTokenChange(null, state);
-    expect(localStorage.getItem("desktop_auth_token")).toBeNull();
     expect(localStorage.getItem(CURRENT)).toBeNull();
     expect(consumeAuthLogoutIntent()).toBe(true);
   });
 });
 
 describe("token change announcements", () => {
-  it("announces a token the SDK already wrote to its pk key (web)", () => {
-    setTauri(false);
+  it("announces a token the SDK already wrote to its pk key", () => {
     // KovaAuthProvider writes kova-auth:<pk>:session-token, then reports it.
     localStorage.setItem(CURRENT, "tok_sdk");
-    const listener = vi.fn();
-    const unsubscribe = subscribeDesktopTokenChanges(listener);
-
-    handleKovaSessionTokenChange("tok_sdk", { seenSessionToken: false });
-
-    expect(listener).toHaveBeenCalledWith("tok_sdk");
-    unsubscribe();
-  });
-
-  it("announces a token when desktop_auth_token already holds it (desktop)", () => {
-    localStorage.setItem(CURRENT, "tok_sdk");
-    localStorage.setItem("desktop_auth_token", "tok_sdk");
     const listener = vi.fn();
     const unsubscribe = subscribeDesktopTokenChanges(listener);
 
@@ -164,7 +124,6 @@ describe("token change announcements", () => {
   });
 
   it("announces a stored token even when the slot already holds it", () => {
-    setTauri(false);
     localStorage.setItem(CURRENT, "tok_same");
     const listener = vi.fn();
     const unsubscribe = subscribeDesktopTokenChanges(listener);

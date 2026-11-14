@@ -5,11 +5,12 @@ import {
   apiError,
   apiSuccess,
   getEnv,
-  isDesktopOrigin,
   pendingDeletionResponse,
   requireAuth,
+  suspendedResponse,
 } from "@/lib/api-helpers";
 import { pendingDeletionDate } from "@/lib/account-deletion";
+import { ACCOUNT_SUSPENDED, isSuspended } from "@/lib/suspension";
 import { checkRateLimitDO } from "@/lib/rate-limit";
 import { cacheFetch, cacheGet, cacheSet } from "@/lib/cache";
 import { clog } from "@/lib/console-logger";
@@ -1160,15 +1161,23 @@ export const BEARER_MEMO_TTL_MS = 30_000;
 const BEARER_MEMO_MAX = 2_000;
 const bearerMemo = new Map<string, { userId: string; until: number }>();
 
+/** What bearerUserId returns for a session whose account is suspended. */
+export const SUSPENDED_BEARER: unique symbol = Symbol("suspended-bearer");
+
+export type BearerCheck = (
+  request: Request,
+) => Promise<string | null | typeof SUSPENDED_BEARER>;
+
 /**
  * The native apps send their session bearer to the API's own URLs.
  * A valid session is remembered per isolate for BEARER_MEMO_TTL_MS, keyed
  * by a hash of the token, so a screen of images costs one session lookup.
- * Returns the session's user, or null. An account waiting for deletion is
- * let through here and refused by authorizeGenericMediaRequest on every
- * request, so the memo cannot carry it past the deletion request.
+ * Returns the session's user, SUSPENDED_BEARER when requireAuth refused it
+ * as suspended, or null. An account waiting for deletion is let through
+ * here; it and a suspension that starts while the memo holds the session
+ * are refused by authorizeGenericMediaRequest on every request.
  */
-async function bearerUserId(request: Request): Promise<string | null> {
+const bearerUserId: BearerCheck = async (request) => {
   const authorization = request.headers.get("authorization");
   if (!authorization?.startsWith("Bearer ")) return null;
   const memoKey = nodeCrypto
@@ -1181,7 +1190,13 @@ async function bearerUserId(request: Request): Promise<string | null> {
   bearerMemo.delete(memoKey);
 
   const result = await requireAuth(request, { allowPendingDeletion: true });
-  if (result instanceof Response) return null;
+  if (result instanceof Response) {
+    if (result.status !== 403) return null;
+    const body = (await result.json().catch(() => null)) as {
+      code?: unknown;
+    } | null;
+    return body?.code === ACCOUNT_SUSPENDED ? SUSPENDED_BEARER : null;
+  }
   if (bearerMemo.size >= BEARER_MEMO_MAX) {
     const oldest = bearerMemo.keys().next().value;
     if (oldest !== undefined) bearerMemo.delete(oldest);
@@ -1191,11 +1206,13 @@ async function bearerUserId(request: Request): Promise<string | null> {
     until: now + BEARER_MEMO_TTL_MS,
   });
   return result.userId;
-}
+};
 
 export type GenericMediaAuthorization =
   | { via: "signature" }
   | { via: "pass" | "bearer"; userId: string }
+  /** A pass or bearer whose account is suspended (and nothing better). */
+  | { via: "suspended" }
   /** A pass or bearer whose account waits for deletion (and nothing else). */
   | { via: "pending-deletion"; deleteAfter: string }
   | null;
@@ -1203,21 +1220,26 @@ export type GenericMediaAuthorization =
 /** When `userId`'s account will be deleted (ISO), or null when it won't. */
 export type PendingDeletionCheck = (userId: string) => Promise<string | null>;
 
+/** Whether `userId`'s account is suspended (lib/suspension). */
+export type SuspensionCheck = (userId: string) => Promise<boolean>;
+
 /**
  * How (if at all) a generic-mode request is allowed to use the proxy.
  *
- * A pass or bearer counts only while its account is not waiting for
- * deletion, as for requireAuth and media capabilities (lib/media-auth): a
- * pass issued before the deletion request stays valid for up to an hour,
- * and a bearer is remembered for BEARER_MEMO_TTL_MS, so both are checked on
- * every request. A signature carries no user and is not affected.
+ * A pass or bearer counts only while its account is neither suspended nor
+ * waiting for deletion, as for requireAuth and media capabilities
+ * (lib/media-auth): a pass issued before the suspension or deletion request
+ * stays valid for up to an hour, and a bearer is remembered for
+ * BEARER_MEMO_TTL_MS, so both are checked on every request. A signature
+ * carries no user and is not affected.
  */
 export async function authorizeGenericMediaRequest(
   request: Request,
   targetUrl: string,
   key: Buffer,
-  checkBearer: (request: Request) => Promise<string | null> = bearerUserId,
+  checkBearer: BearerCheck = bearerUserId,
   checkPendingDeletion: PendingDeletionCheck = pendingDeletionDate,
+  checkSuspended: SuspensionCheck = isSuspended,
 ): Promise<GenericMediaAuthorization> {
   const params = new URL(request.url).searchParams;
   const signature = params.get("sig");
@@ -1234,16 +1256,28 @@ export async function authorizeGenericMediaRequest(
     key,
   );
   let deleteAfter: string | null = null;
+  let suspended = false;
   if (pass) {
-    deleteAfter = await checkPendingDeletion(pass.userId);
-    if (!deleteAfter) return { via: "pass", userId: pass.userId };
+    if (await checkSuspended(pass.userId)) {
+      suspended = true;
+    } else {
+      deleteAfter = await checkPendingDeletion(pass.userId);
+      if (!deleteAfter) return { via: "pass", userId: pass.userId };
+    }
   }
-  const userId = await checkBearer(request);
-  if (userId) {
-    const bearerDeleteAfter = await checkPendingDeletion(userId);
-    if (!bearerDeleteAfter) return { via: "bearer", userId };
-    deleteAfter ??= bearerDeleteAfter;
+  const bearer = await checkBearer(request);
+  if (bearer === SUSPENDED_BEARER) {
+    suspended = true;
+  } else if (bearer) {
+    if (await checkSuspended(bearer)) {
+      suspended = true;
+    } else {
+      const bearerDeleteAfter = await checkPendingDeletion(bearer);
+      if (!bearerDeleteAfter) return { via: "bearer", userId: bearer };
+      deleteAfter ??= bearerDeleteAfter;
+    }
   }
+  if (suspended) return { via: "suspended" };
   return deleteAfter ? { via: "pending-deletion", deleteAfter } : null;
 }
 
@@ -1298,6 +1332,8 @@ export interface ProxyMediaChecks {
   signedIp?: SignedIpRateCheck;
   /** Defaults to lib/account-deletion's gate. */
   pendingDeletion?: PendingDeletionCheck;
+  /** Defaults to lib/suspension's check. */
+  suspended?: SuspensionCheck;
 }
 
 function hostKey(url: URL): string {
@@ -1360,17 +1396,22 @@ export async function handleProxyMedia(
         key,
         undefined,
         checks.pendingDeletion,
+        checks.suspended,
       )
     : null;
 
-  if (!authorization || authorization.via === "pending-deletion") {
+  if (
+    !authorization ||
+    authorization.via === "pending-deletion" ||
+    authorization.via === "suspended"
+  ) {
     // The allowlisted hosts stay open to everyone, unsigned.
     if (isAllowedMediaUrl(targetUrl)) return proxyMedia(request, includeBody);
     if (authorization) {
-      const refused = pendingDeletionResponse(
-        authorization.deleteAfter,
-        request,
-      );
+      const refused =
+        authorization.via === "suspended"
+          ? suspendedResponse(request)
+          : pendingDeletionResponse(authorization.deleteAfter, request);
       refused.headers.set("Cache-Control", "no-store");
       return refused;
     }
@@ -1446,9 +1487,7 @@ const POST = async ({ request }: { request: Request }) => {
   );
   response.headers.set(
     "Set-Cookie",
-    mediaPassCookie(pass.value, MEDIA_PASS_TTL_SECONDS, {
-      crossSite: isDesktopOrigin(request.headers.get("origin")),
-    }),
+    mediaPassCookie(pass.value, MEDIA_PASS_TTL_SECONDS),
   );
   response.headers.set("Cache-Control", "no-store");
   return response;
@@ -1456,12 +1495,7 @@ const POST = async ({ request }: { request: Request }) => {
 
 const DELETE = async ({ request }: { request: Request }) => {
   const response = apiSuccess({ ok: true }, 200, request);
-  response.headers.set(
-    "Set-Cookie",
-    mediaPassCookie("", 0, {
-      crossSite: isDesktopOrigin(request.headers.get("origin")),
-    }),
-  );
+  response.headers.set("Set-Cookie", mediaPassCookie("", 0));
   response.headers.set("Cache-Control", "no-store");
   return response;
 };

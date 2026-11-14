@@ -5,12 +5,10 @@
  * lib/media-capability) for the requests a browser makes on its own.
  *
  * The session token in the query string (`?token=`) is refused, except
- * from the retired Tauri desktop app until LEGACY_QUERY_TOKEN_SUNSET (its
- * released builds bundle a web UI that signs nothing) and from web tabs
- * opened before this release, for their own subresources, until
- * STALE_WEB_TAB_SUNSET. Those requests are logged as deprecated, without the
- * token; the Worker's own logs and traces drop query strings
- * (`observability.redact_query_string`).
+ * from web tabs opened before media capabilities, for their own
+ * subresources, until STALE_WEB_TAB_SUNSET. Those requests are logged as
+ * deprecated, without the token; the Worker's own logs and traces drop query
+ * strings (`observability.redact_query_string`).
  */
 import { pendingDeletionDate } from "@/lib/account-deletion";
 import {
@@ -32,23 +30,11 @@ import { isSuspended } from "@/lib/suspension";
 const log = clog("media-auth");
 
 /**
- * After this date the Tauri app's `?token=` media requests are refused too.
- * Its updater moves it to the native app (which sends a header), so by then
- * only installs that never started again are left.
- */
-export const LEGACY_QUERY_TOKEN_SUNSET = Date.UTC(2027, 0, 15);
-
-/**
  * Until this date a web tab opened before this release keeps loading its
  * media with `?token=` (its own subresource requests only). A reload picks
  * up the bundle that signs URLs instead.
  */
 export const STALE_WEB_TAB_SUNSET = Date.UTC(2026, 11, 1);
-
-const TAURI_ORIGINS = new Set([
-  "http://tauri.localhost",
-  "https://tauri.localhost",
-]);
 
 interface MediaSecrets {
   MEDIA_CAP_SECRET?: string;
@@ -68,19 +54,6 @@ function mediaRoute(url: URL): string {
       url.pathname.startsWith(prefix),
     ) ?? "other"
   );
-}
-
-/** The request came from the Tauri app's webview (its origin, or its referrer's). */
-function isTauriWebviewRequest(request: Request): boolean {
-  const origin = request.headers.get("origin");
-  if (origin && TAURI_ORIGINS.has(origin)) return true;
-  const referer = request.headers.get("referer");
-  if (!referer) return false;
-  try {
-    return TAURI_ORIGINS.has(new URL(referer).origin);
-  } catch {
-    return false;
-  }
 }
 
 /** What a same-origin page loads on its own: images, media, its fetches. */
@@ -107,22 +80,18 @@ function isStaleWebTabRequest(request: Request): boolean {
 
 /**
  * Which legacy client a header-less `?token=` request is, if it is one still
- * allowed to send it: a GET/HEAD from the Tauri webview before
- * LEGACY_QUERY_TOKEN_SUNSET, or a stale web tab's own subresource request
+ * allowed to send it: a stale web tab's own GET/HEAD subresource request
  * before STALE_WEB_TAB_SUNSET. Null for anything else.
  */
 export function legacyQueryTokenClient(
   request: Request,
   now: number = Date.now(),
-): "tauri" | "web-stale-tab" | null {
+): "web-stale-tab" | null {
   if (
     (request.method !== "GET" && request.method !== "HEAD") ||
     request.headers.get("authorization")
   ) {
     return null;
-  }
-  if (now < LEGACY_QUERY_TOKEN_SUNSET && isTauriWebviewRequest(request)) {
-    return "tauri";
   }
   if (now < STALE_WEB_TAB_SUNSET && isStaleWebTabRequest(request)) {
     return "web-stale-tab";

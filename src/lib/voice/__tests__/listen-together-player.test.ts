@@ -21,6 +21,10 @@ import {
   resetMediaGrantForTests,
   seedMediaGrantForTests,
 } from "@/lib/media-grant";
+import { KOVA_AUTH_PUBLISHABLE_KEY } from "@/lib/kova-auth-config";
+
+/** Where the signed-in session's token lives (lib/desktop-auth). */
+const SESSION_KEY = `kova-auth:${KOVA_AUTH_PUBLISHABLE_KEY}:session-token`;
 
 function makeSnapshot(
   overrides: Partial<ListenTogetherStateSnapshot> = {},
@@ -253,19 +257,14 @@ describe("listen together playback plan", () => {
 
 afterEach(() => {
   localStorage.clear();
-  delete (window as typeof window & { __TAURI_INTERNALS__?: unknown })
-    .__TAURI_INTERNALS__;
 });
 
 describe("listen together stream url", () => {
-  it("signs the media URL for tauri audio playback, never with the session token", () => {
-    (
-      window as typeof window & { __TAURI_INTERNALS__?: unknown }
-    ).__TAURI_INTERNALS__ = {};
-    localStorage.setItem("desktop_auth_token", "desktop-token");
+  it("signs the media URL for audio playback, never with the session token", () => {
+    localStorage.setItem(SESSION_KEY, "session-token");
     seedMediaGrantForTests(
       issueMediaGrant("test-secret", "user-1", Date.now()),
-      "desktop-token",
+      "session-token",
     );
 
     const parsed = new URL(
@@ -298,13 +297,10 @@ describe("listen together stream url", () => {
 
 describe("listen together warm-up", () => {
   it("signs warm=1 into the capability instead of appending it after", async () => {
-    (
-      window as typeof window & { __TAURI_INTERNALS__?: unknown }
-    ).__TAURI_INTERNALS__ = {};
-    localStorage.setItem("desktop_auth_token", "desktop-token");
+    localStorage.setItem(SESSION_KEY, "session-token");
     seedMediaGrantForTests(
       issueMediaGrant("test-secret", "user-1", Date.now()),
-      "desktop-token",
+      "session-token",
     );
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
@@ -319,7 +315,10 @@ describe("listen together warm-up", () => {
     });
     await prefetchListenTogetherStream(src);
 
-    const warmed = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    const warmed = new URL(
+      String(fetchMock.mock.calls[0]?.[0]),
+      window.location.origin,
+    );
     expect(warmed.searchParams.get("warm")).toBe("1");
     expect(
       verifyMediaCap(

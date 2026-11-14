@@ -1,10 +1,6 @@
 import { recoverAppSession } from "@/lib/app-session-recovery";
-import {
-  getDesktopToken,
-  getStoredKovaAuthSessionToken,
-} from "@/lib/desktop-auth";
-import { KOVA_AUTH_PUBLISHABLE_KEY } from "@/lib/kova-auth-config";
-import { getApiBaseUrl, isTauri } from "@/lib/platform";
+import { getStoredKovaAuthSessionToken } from "@/lib/desktop-auth";
+import { getApiBaseUrl } from "@/lib/platform";
 import { buildSocketTicketProtocols } from "@/lib/voice/socket-ticket";
 
 // The chat socket's ticket (/api/gateway, audience "global"). The call
@@ -28,9 +24,6 @@ function postSocketTicket(
 ): Promise<Response> {
   const headers = new Headers({ "Content-Type": "application/json" });
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (isTauri() && KOVA_AUTH_PUBLISHABLE_KEY) {
-    headers.set("X-Publishable-Key", KOVA_AUTH_PUBLISHABLE_KEY);
-  }
   return fetch(`${getApiBaseUrl()}/api/voice/socket-ticket`, {
     method: "POST",
     credentials: "include",
@@ -50,7 +43,7 @@ async function requestSocketTicket(
   request: SocketTicketRequest,
   signal?: AbortSignal,
 ): Promise<string> {
-  const token = getDesktopToken() ?? getStoredKovaAuthSessionToken();
+  const token = getStoredKovaAuthSessionToken();
   let response = await postSocketTicket(request, token, signal);
 
   if (response.status === 401) {

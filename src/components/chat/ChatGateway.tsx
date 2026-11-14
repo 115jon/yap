@@ -1,5 +1,4 @@
 import { getDesktopAuthHandoffToken } from "@/lib/desktop-auth";
-import { isTauri } from "@/lib/platform";
 import { onPageWake } from "@/lib/realtime-socket/page-wake";
 import { useChatStore } from "@/stores/chat-store";
 import { useAuth } from "@kova/react";
@@ -27,16 +26,15 @@ export function ChatGateway({ authenticatedUserId }: ChatGatewayProps) {
     authenticatedUserId === "web" || authenticatedUserId === "oauth-callback"
       ? null
       : authenticatedUserId;
-  const gatewayUserId = userId ?? (!isTauri() ? routeUserId : null);
+  const gatewayUserId = userId ?? routeUserId;
 
   const disconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    // Wait for auth to settle before initialising the gateway. On web the DO
-    // needs a real Ralph Auth user id for Identify; desktop can use the
-    // bearer-token-backed API path while the provider remains signed out.
+    // Wait for auth to settle before initialising the gateway: the DO needs
+    // a real Kova user id for Identify.
     if (!tokenReady) return;
-    if (!isTauri() && !gatewayUserId) return;
+    if (!gatewayUserId) return;
 
     // If there was a pending disconnect from a strict-mode unmount, cancel it.
     if (disconnectTimeoutRef.current) {

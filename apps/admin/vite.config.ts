@@ -75,32 +75,7 @@ export default defineConfig(({ mode }) => ({
       "@": appSrc,
       // Yap's modules are written for the web app; these are its client shims.
       "cloudflare:workers": path.resolve(shims, "cloudflare-workers.ts"),
-      "@tauri-apps/plugin-shell": path.resolve(shims, "tauri-plugin-shell.ts"),
-      "@tauri-apps/plugin-updater": path.resolve(
-        shims,
-        "tauri-plugin-updater.ts",
-      ),
-      "@tauri-apps/plugin-process": path.resolve(
-        shims,
-        "tauri-plugin-process.ts",
-      ),
-      "@tauri-apps/plugin-autostart": path.resolve(
-        shims,
-        "tauri-plugin-autostart.ts",
-      ),
-      "@tauri-apps/plugin-notification": path.resolve(
-        shims,
-        "tauri-plugin-notification.ts",
-      ),
-      "tauri-plugin-status-bar-color-api": path.resolve(
-        shims,
-        "tauri-plugin-status-bar-color-api.ts",
-      ),
     },
-  },
-  define: {
-    __IS_DESKTOP__: false,
-    __IS_MOBILE__: false,
   },
   server: {
     port: Number(process.env.ADMIN_DEV_PORT ?? 5260),

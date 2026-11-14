@@ -43,7 +43,6 @@ vi.mock("@/lib/console-logger", () => ({
 }));
 
 import {
-  LEGACY_QUERY_TOKEN_SUNSET,
   legacyQueryTokenClient,
   requireMediaAuth,
   STALE_WEB_TAB_SUNSET,
@@ -97,7 +96,8 @@ describe("requireMediaAuth", () => {
       new Request(`${ATTACHMENT}?token=other`, {
         headers: {
           authorization: "Bearer mine",
-          origin: "http://tauri.localhost",
+          "sec-fetch-site": "same-origin",
+          "sec-fetch-dest": "image",
         },
       }),
     );
@@ -107,12 +107,14 @@ describe("requireMediaAuth", () => {
     });
   });
 
-  it("accepts ?token= from the Tauri app's webview until the sunset, logging no token", async () => {
+  it("accepts ?token= from a stale web tab until the sunset, logging no token", async () => {
+    vi.useFakeTimers({ now: STALE_WEB_TAB_SUNSET - 1 });
     const result = await requireMediaAuth(
       new Request(`${ATTACHMENT}?token=legacy-token`, {
-        headers: { referer: "http://tauri.localhost/chat" },
+        headers: { "sec-fetch-site": "same-origin", "sec-fetch-dest": "image" },
       }),
     );
+    vi.useRealTimers();
     expect(result).toEqual({ userId: "from-session" });
     expect(credentialsPassed()).toEqual({
       authorization: "Bearer legacy-token",
@@ -123,8 +125,7 @@ describe("requireMediaAuth", () => {
     expect(JSON.stringify(mocks.logs)).not.toContain("f.png");
   });
 
-  it("keeps the legacy rule narrow: Tauri and stale web tabs, reads only, before their sunsets", () => {
-    const tauri = { referer: "http://tauri.localhost/" };
+  it("keeps the legacy rule narrow: stale web tabs, reads only, before the sunset", () => {
     const staleTab = {
       "sec-fetch-site": "same-origin",
       "sec-fetch-dest": "image",
@@ -133,11 +134,6 @@ describe("requireMediaAuth", () => {
     const client = (init: RequestInit, now = before) =>
       legacyQueryTokenClient(new Request(ATTACHMENT, init), now);
 
-    expect(client({ headers: tauri })).toBe("tauri");
-    expect(client({ headers: { origin: "https://tauri.localhost" } })).toBe(
-      "tauri",
-    );
-    expect(client({ headers: tauri }, LEGACY_QUERY_TOKEN_SUNSET)).toBeNull();
     expect(client({ headers: staleTab })).toBe("web-stale-tab");
     expect(client({ headers: staleTab }, STALE_WEB_TAB_SUNSET)).toBeNull();
     // A pasted link: opened from elsewhere, or a top-level navigation.
@@ -160,13 +156,10 @@ describe("requireMediaAuth", () => {
       }),
     ).toBeNull();
     expect(client({ headers: { referer: "https://evil.test/" } })).toBeNull();
-    // A Tauri request without Origin or Referer is not recognised.
     expect(client({})).toBeNull();
+    expect(client({ method: "POST", headers: staleTab })).toBeNull();
     expect(
-      client({ method: "POST", headers: { origin: "http://tauri.localhost" } }),
-    ).toBeNull();
-    expect(
-      client({ headers: { ...tauri, authorization: "Bearer other" } }),
+      client({ headers: { ...staleTab, authorization: "Bearer other" } }),
     ).toBeNull();
   });
 

@@ -177,8 +177,7 @@ export const ImageViewerModal: React.FC = () => {
   const getUrl = useCallback(
     (att: { url?: string; file_key: string; content_type?: string }) => {
       const raw = att.url || `/api/${att.file_key}`;
-      // Videos need range requests for seeking; route them through the real
-      // backend to bypass Tauri's custom protocol which breaks range support.
+      // Videos need range requests for seeking (getMediaUrl).
       return isVideo(att.content_type)
         ? getMediaUrl(raw)
         : getAuthAssetUrl(raw);

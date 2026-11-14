@@ -21,8 +21,6 @@ import {
   type LocalMediaOwner,
 } from "@/lib/local-media-manager";
 import { resolveOutputSinkId } from "@/lib/stored-device";
-import { isDesktop, isWgcCaptureAllowed } from "@/lib/platform";
-import { getHost } from "@/lib/host";
 import { areReconnectSoundsSuppressed } from "@/lib/reconnect-sound-guard";
 import type { ScreenShareOptions } from "@/lib/screen-share-types";
 import { SFUClient, type SFUEventMap } from "@/lib/sfu-client";
@@ -77,10 +75,6 @@ import { markVoice } from "@/lib/voice/latency-marks";
 import { prefetchVoiceChannelJoin } from "@/lib/voice/voice-admission-client";
 import { prewarmWebRtc } from "@/lib/voice/webrtc-prewarm";
 import { getVoiceActivityThreshold } from "@/lib/voice/vad";
-import {
-  parseNativeShareEndedPayload,
-  resolveNativeShareEndedAction,
-} from "@/lib/voice/native-share-ended";
 import {
   getSoundboardServerKey,
   stopAutomaticJoinSoundboardPlaybacksByOwner,
@@ -152,7 +146,6 @@ import {
   useState,
 } from "react";
 import { useShallow } from "zustand/shallow";
-import { useNativeShareStats } from "@/hooks/useNativeShareStats";
 import { useSpatialAudioSync } from "@/hooks/useSpatialAudioSync";
 
 const vcLog = clog("VoiceChannel");
@@ -731,8 +724,6 @@ export function useVoiceChannel({
     desiredCameraStateRef.current = isCameraActive;
   }, [isCameraActive]);
 
-  const { isHookActive } = useNativeShareStats();
-
   useEffect(() => {
     const localUserId =
       mode === "room" ? myIdRef.current || null : user?.id || null;
@@ -1070,14 +1061,6 @@ export function useVoiceChannel({
   );
   const standbyMediaOwnerRef = useRef<LocalMediaOwner | null>(null);
   const alwaysShowStreamPreviewRef = useRef(false);
-  // A native share ended by itself; set below, where it is defined.
-  const nativeShareEndedRef = useRef<
-    (
-      rawPayload: unknown,
-      client: SFUClient | null,
-      origin: "backend" | "reconnect",
-    ) => void
-  >(() => {});
   // The one owner of this session's screen share (packages/voice,
   // SCREEN_SHARE.md); it publishes through the client's reconciler.
   // Created for a client on first use and disposed by the teardown.
@@ -2699,11 +2682,6 @@ export function useVoiceChannel({
     // The room socket closed on its own (it reconnects); Resumed brings it
     // back as participants-sync, a new Ready as joined.
     onSfu("disconnected", () => voiceSession.connectionLost());
-
-    // The native share could not come back after the voice reconnect.
-    onSfu("native-screen-share-ended", (payload) => {
-      nativeShareEndedRef.current(payload, sfu, "reconnect");
-    });
 
     onSfu("voice-reconnected", () => {
       void (async () => {
@@ -4330,24 +4308,8 @@ export function useVoiceChannel({
       if (wanted && !changes) {
         share.stop();
       } else if (!wanted || options?.changeSource || otherSource) {
-        // A desktop restart re-targets the live source unless the picker
-        // chose another, so it goes back through the same capture path
-        // (the native hook) instead of a fresh getDisplayMedia.
-        const live = wanted?.source;
-        const merged: ScreenShareOptions | undefined =
-          live?.sourceId && isDesktop()
-            ? {
-                sourceId: live.sourceId,
-                captureId: live.captureId ?? undefined,
-                sourceName: live.sourceName ?? undefined,
-                sourceKind: live.sourceKind ?? undefined,
-                sourceAppName: live.sourceAppName ?? undefined,
-                sourceIcon: live.sourceIcon ?? undefined,
-                ...options,
-              }
-            : options;
         share.start(
-          webScreenShareRequest(merged, {
+          webScreenShareRequest(options, {
             quality: wanted?.quality ?? currentScreenQuality,
             audio: wanted?.audio ?? isStreamingAudio,
           }),
@@ -4361,74 +4323,6 @@ export function useVoiceChannel({
     [screenShareFor, currentScreenQuality, isStreamingAudio],
   );
 
-  // ── Native share ended itself (desktop) ─────────────────────────────────────
-  // The backend emits `native-screen-share-ended` when a native share ends on
-  // its own:
-  //   * `source-closed` — the captured window closed / its process exited. Stop
-  //     the share like an explicit stop (drop tracks, clear UI, stop sound).
-  //   * `connection-failed` — the hardware stream's connection died mid-share.
-  //     Restart the same source through CEF capture (quality and audio kept)
-  //     unless the hook-exclusive policy forbids WGC/CEF capture, then stop.
-  // The client emits the same `connection-failed` when a native share could
-  // not reconnect after a voice reconnect (the backend says nothing for a
-  // stop the renderer made); it counts only while the live share is native.
-  const handleNativeShareEnded = useCallback(
-    (
-      rawPayload: unknown,
-      client: SFUClient | null,
-      origin: "backend" | "reconnect",
-    ) => {
-      const share = existingScreenShare(client);
-      const wanted = share?.wanted ?? null;
-      const payload = parseNativeShareEndedPayload(rawPayload);
-      const action = resolveNativeShareEndedAction(payload, {
-        isSharing:
-          wanted !== null &&
-          (origin === "backend" || share?.live?.path === "native"),
-        wgcCaptureAllowed: isWgcCaptureAllowed(),
-      });
-      vcLog.info("Native screen share ended by itself", {
-        origin,
-        payload,
-        action,
-      });
-      if (!share || !wanted || action === "ignore") return;
-      if (action === "fallback-cef") {
-        toast.info("Screen share switched to standard capture", {
-          id: "native-share-fallback",
-          description: "The hardware stream lost its connection.",
-        });
-        share.start({ ...wanted, preferNative: false });
-      } else {
-        share.stop();
-      }
-    },
-    [existingScreenShare],
-  );
-  nativeShareEndedRef.current = handleNativeShareEnded;
-  useEffect(() => {
-    if (!isDesktop()) return;
-    let cancelled = false;
-    let unlisten: (() => void) | null = null;
-    void (async () => {
-      try {
-        const dispose = await getHost().media.onNativeScreenShareEnded(
-          (rawPayload) => {
-            handleNativeShareEnded(rawPayload, sfuRef.current, "backend");
-          },
-        );
-        if (cancelled) dispose();
-        else unlisten = dispose;
-      } catch {
-        // Event API unavailable (non-Tauri); nothing to do.
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (unlisten) unlisten();
-    };
-  }, [handleNativeShareEnded]);
-
   // ── Toggle local preview capture ───────────────────────────────────────────
   // Stops or restarts the CEF preview MediaStream entirely for performance.
   // The native hardware share pipeline is NOT touched — only the local tile feed.
@@ -4440,7 +4334,7 @@ export function useVoiceChannel({
       !!currentScreenSource?.sourceId && isScreenSharing;
     if (!isPreviewHidden) {
       const hideDecision = resolvePreviewHideState({
-        isHookActive,
+        isHookActive: false,
         hasReusablePreviewSource,
       });
       if (hideDecision.preserveStream) {
@@ -4450,10 +4344,6 @@ export function useVoiceChannel({
           stream: capture?.stream ?? localScreenStream,
         });
         return;
-      }
-      // Tear down the loopback PC if active (hook shares).
-      if (isHookActive && client) {
-        await client.stopPreviewLoopback();
       }
       // Stop all preview tracks to release the WGC session.
       if (capture) {
@@ -4472,22 +4362,9 @@ export function useVoiceChannel({
     }
 
     const resumeMechanism = resolvePreviewResumeMechanism({
-      isHookActive,
+      isHookActive: false,
       hasReusablePreviewSource,
     });
-    // When the hook is the active capture backend, feed the local preview
-    // from the hook's existing encode via a loopback PeerConnection — no
-    // second WGC capture, no border, no extra encode cost.
-    if (resumeMechanism === "desktop-loopback" && client) {
-      const stream = await client.startPreviewLoopback();
-      if (stream) {
-        if (capture) attachScreenPreview(capture, stream, null);
-        voiceDispatch({ type: "SET_PREVIEW_HIDDEN", payload: false, stream });
-      } else {
-        previewLog.warn("Loopback preview failed to connect");
-      }
-      return;
-    }
     // Re-open preview only when the selected desktop source is reusable.
     const src = currentScreenSource;
     const outcome = await resolvePreviewResume({
@@ -4527,7 +4404,6 @@ export function useVoiceChannel({
     isScreenSharing,
     currentScreenSource,
     currentScreenQuality,
-    isHookActive,
     localScreenStream,
   ]);
 

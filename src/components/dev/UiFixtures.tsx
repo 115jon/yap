@@ -13,7 +13,6 @@ import { isSearchFixture } from "@/components/dev/search-fixture-surfaces";
 import { PublicFixture } from "@/components/dev/public-fixtures";
 import { FoundationFixture } from "@/components/dev/foundation-fixtures";
 import { SoundFixture } from "@/components/dev/sound-fixtures";
-import { StandaloneUpdaterView } from "@/components/StandaloneUpdater";
 import { DitherMockupsFixture } from "@/components/dev/dither-mockups";
 import { ChunkedUploadFixture } from "@/components/dev/chunked-upload-fixtures";
 import { SiteBannerFixture } from "@/components/dev/site-banner-fixture";
@@ -73,7 +72,6 @@ import { MobileMessagesTab } from "@/components/chat/mobile/MobileMessagesTab";
 import { DeleteMessageDialog } from "@/components/chat/DeleteMessageDialog";
 import { RemoveEmbedsDialog } from "@/components/chat/RemoveEmbedsDialog";
 import { DeleteSoundDialog } from "@/components/chat/DeleteSoundDialog";
-import { RestartAppDialog } from "@/components/chat/settings/RestartAppDialog";
 import ReactionDetailsModal from "@/components/chat/ReactionDetailsModal";
 import { UploadSoundModal } from "@/components/chat/UploadSoundModal";
 import CreateServerModal from "@/components/chat/CreateServerModal";
@@ -1903,7 +1901,7 @@ function VolumeBoostRows({ initial }: { initial: string }) {
   );
 }
 
-/** Extra fixture query params the route doesn't validate (row, desktop). */
+/** Extra fixture query params the route doesn't validate (row). */
 function fixtureParam(name: string): string | null {
   if (typeof window === "undefined") return null;
   return new URLSearchParams(window.location.search).get(name);
@@ -1927,11 +1925,6 @@ function SettingsFixture({ tab }: { tab?: string }) {
         onClose={() => {}}
         initialTab={(tab as never) ?? "appearance"}
         initialRow={fixtureParam("row") ?? undefined}
-        environment={
-          tab === "desktop" || fixtureParam("desktop") === "1"
-            ? { desktop: true }
-            : undefined
-        }
       />
     </div>
   );
@@ -2698,17 +2691,6 @@ function OverlaySurface({ surface }: { surface: string }) {
           />
         </OverShell>
       );
-    case "ov-desktop-restart":
-      return (
-        <OverShell>
-          <RestartAppDialog
-            open
-            onOpenChange={noop}
-            onConfirm={noop}
-            title="Turn off hardware acceleration?"
-          />
-        </OverShell>
-      );
     case "ov-pins":
     case "ov-pins-empty":
     case "ov-pins-loading":
@@ -3201,23 +3183,6 @@ export default function UiFixtures() {
       break;
     case "sounds":
       content = <SoundFixture />;
-      break;
-    case "updater":
-    case "updater-downloading":
-    case "updater-error":
-      // The desktop updater window's screen, without Tauri.
-      content = (
-        <StandaloneUpdaterView
-          status={
-            surfaceName === "updater-downloading"
-              ? "downloading"
-              : surfaceName === "updater-error"
-                ? "error"
-                : "checking"
-          }
-          progress={42}
-        />
-      );
       break;
     case "dither-mockups":
       content = <DitherMockupsFixture />;

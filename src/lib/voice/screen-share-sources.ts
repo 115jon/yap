@@ -1,7 +1,6 @@
-// The web client's screen capture sources for the @ralph/voice ScreenShare
-// module: the native Rust hardware publisher (desktop) and the browser
-// paths (CEF desktop capture of a picked source, or getDisplayMedia). The
-// module decides when each runs; see packages/voice/SCREEN_SHARE.md.
+// The web client's screen capture source for the @ralph/voice ScreenShare
+// module: getDisplayMedia (the web has no native publisher). See
+// packages/voice/SCREEN_SHARE.md.
 
 import {
   ScreenShare,
@@ -11,12 +10,6 @@ import {
   type ScreenShareSources,
 } from "@ralph/voice";
 import { clog } from "@/lib/console-logger";
-import { getHost } from "@/lib/host";
-import {
-  getCapturePolicy,
-  isDesktop,
-  isWgcCaptureAllowed,
-} from "@/lib/platform";
 import type {
   ScreenShareOptions,
   ScreenShareSourceState,
@@ -24,7 +17,6 @@ import type {
 import type { SFUClient } from "@/lib/sfu-client";
 
 const screenLog = clog("ScreenShare");
-const previewLog = clog("Preview");
 
 const SCREEN_QUALITY_MAP: Record<
   string,
@@ -222,22 +214,6 @@ export function logScreenShare(message: string, details?: unknown) {
   }
 }
 
-async function probeNativeHardwareEncoders() {
-  if (!isDesktop()) return null;
-  try {
-    return await getHost().media.probeHardwareVideoEncoders();
-  } catch (error) {
-    return { error };
-  }
-}
-
-function hasNativeH264HardwareEncoder(probe: unknown) {
-  return (
-    Array.isArray((probe as { h264?: unknown[] } | null)?.h264) &&
-    ((probe as { h264?: unknown[] }).h264?.length ?? 0) > 0
-  );
-}
-
 type QualityClient = Pick<SFUClient, "updateSenderEncoding">;
 
 async function applyScreenTrackQuality(
@@ -382,14 +358,7 @@ export function attachScreenPreview(
   }
 }
 
-type ShareClient = Pick<
-  SFUClient,
-  | "publishNativeScreenShare"
-  | "stopNativeScreenShare"
-  | "updateNativeScreenQuality"
-  | "updateSenderEncoding"
-  | "isNativeScreenShareActive"
->;
+type ShareClient = Pick<SFUClient, "updateSenderEncoding">;
 
 export interface WebScreenShareSourcesOptions {
   readonly sfu: ShareClient;
@@ -402,127 +371,13 @@ export interface WebScreenShareSourcesOptions {
 export function createWebScreenShareSources({
   sfu,
   participantId,
-  alwaysShowPreview,
   onCaptureEnded,
 }: WebScreenShareSourcesOptions): ScreenShareSources<
   WebScreenSource,
   WebScreenCapture
 > {
-  const isDesktopSource = (request: WebScreenShareRequest) =>
-    isDesktop() && !!request.source.sourceId;
-
   return {
-    native: {
-      async eligible(request) {
-        const { source } = request;
-        if (!isDesktopSource(request)) return false;
-        const capturePolicy = getCapturePolicy();
-        logScreenShare("Discord-style capture summary", {
-          sourceId: source.captureId ?? source.sourceId,
-          sourceName: source.sourceName ?? null,
-          type:
-            source.sourceKind === "monitor"
-              ? "screen"
-              : (source.sourceKind ?? null),
-          capturePolicy,
-          mayAttemptVideoHook: source.sourceKind === "window",
-          useGraphicsCapture: true,
-          useCaptureDeviceForEncode: "native-wmf-hardware-first",
-          requestedHardwareEncode: true,
-          note:
-            capturePolicy === "hook-exclusive"
-              ? "Hook-exclusive policy forces the native hook for eligible windows; WGC/CEF fallback is disabled."
-              : "Window shares may speculatively try the native hook first, but must fall back quickly to WGC/CEF if no frames arrive.",
-        });
-        const probe = await probeNativeHardwareEncoders();
-        logScreenShare("Native hardware encoder probe", probe);
-        return (
-          source.sourceKind !== "device" && hasNativeH264HardwareEncoder(probe)
-        );
-      },
-      async start(request) {
-        const { source } = request;
-        const startedAt = performance.now();
-        const elapsed = () => Math.round(performance.now() - startedAt);
-        logScreenShare("Calling native hardware screen publisher", {
-          sourceId: source.sourceId,
-          sourceKind: source.sourceKind,
-          sourceName: source.sourceName ?? null,
-          quality: request.quality,
-          withAudio: request.audio,
-        });
-        await sfu.publishNativeScreenShare({
-          sourceId: source.sourceId!,
-          sourceName: source.sourceName ?? null,
-          quality: request.quality,
-          withAudio: request.audio,
-        });
-        if (!sfu.isNativeScreenShareActive) {
-          return {
-            path: "native",
-            video: null,
-            audio: null,
-            stream: null,
-            previewHidden: true,
-          };
-        }
-        logScreenShare("Native hardware screen publisher connected", {
-          elapsedMs: elapsed(),
-          sourceId: source.sourceId,
-          sourceKind: source.sourceKind,
-          sourceName: source.sourceName ?? null,
-        });
-
-        // Native capture already runs a WGC session on the source; a second
-        // CEF preview on it adds capture overhead, so the local preview
-        // starts paused unless the user always shows it.
-        const decision = resolvePreviewStartState(
-          "native",
-          alwaysShowPreview(),
-        );
-        let preview: MediaStream | null = null;
-        if (decision.openCefPreview) {
-          const { browserVideoConstraints, desktopMandatoryConstraints } =
-            screenShareVideoConstraints(request.quality);
-          try {
-            preview = await getCustomPickerDesktopStream({
-              sourceId: source.sourceId ?? undefined,
-              captureId: source.captureId ?? undefined,
-              sourceKind: source.sourceKind ?? undefined,
-              withAudio: false,
-              videoConstraints: browserVideoConstraints,
-              desktopMandatoryConstraints,
-            });
-          } catch (error) {
-            previewLog.warn(
-              "Failed to open native share preview on start",
-              error,
-            );
-          }
-        }
-        const capture: WebScreenCapture = {
-          path: "native",
-          video: null,
-          audio: null,
-          stream: null,
-          previewHidden: decision.openCefPreview
-            ? !preview
-            : decision.isPreviewHidden,
-        };
-        attachScreenPreview(capture, preview, onCaptureEnded);
-        return capture;
-      },
-      isActive: () => sfu.isNativeScreenShareActive,
-      stop: () => sfu.stopNativeScreenShare(),
-      async updateQuality(quality) {
-        const applied = await sfu.updateNativeScreenQuality(quality);
-        if (applied) {
-          logScreenShare("Applied in-place native quality switch", { quality });
-        }
-        return applied;
-      },
-      fallbackAllowed: () => isWgcCaptureAllowed(),
-    },
+    native: null,
     browser: {
       async capture(request) {
         const { source, quality, audio } = request;
@@ -530,10 +385,8 @@ export function createWebScreenShareSources({
           screenShareVideoConstraints(quality);
         const startedAt = performance.now();
         const elapsed = () => Math.round(performance.now() - startedAt);
-        const selectedDesktopSource = isDesktopSource(request);
         logScreenShare("Starting capture", {
           elapsedMs: 0,
-          selectedDesktopSource,
           sourceId: source.sourceId ?? null,
           captureId: source.captureId ?? null,
           sourceKind: source.sourceKind ?? null,
@@ -548,71 +401,46 @@ export function createWebScreenShareSources({
           desktopMandatoryConstraints,
         });
 
-        let stream: MediaStream | null = null;
-        if (selectedDesktopSource) {
-          stream = await getCustomPickerDesktopStream({
-            sourceId: source.sourceId ?? undefined,
-            captureId: source.captureId ?? undefined,
-            sourceKind: source.sourceKind ?? undefined,
-            withAudio: audio,
-            videoConstraints: browserVideoConstraints,
-            desktopMandatoryConstraints,
-          });
-          if (!stream) {
-            throw new Error(
-              `Selected desktop source could not be captured: ${source.sourceName || source.sourceId}`,
-            );
-          }
-          logScreenShare("Captured selected desktop source", {
+        let stream: MediaStream;
+        const audioConstraints = audio
+          ? {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            }
+          : false;
+        const displayMediaOptions: any = {
+          video: browserVideoConstraints,
+          audio: audioConstraints as any,
+          monitorTypeSurfaces: "include",
+          selfBrowserSurface: "exclude",
+          surfaceSwitching: "include",
+          systemAudio: audio ? "include" : "exclude",
+          windowAudio: audio ? "window" : "exclude",
+        };
+        try {
+          logScreenShare("Calling getDisplayMedia", {
             elapsedMs: elapsed(),
-            sourceId: source.sourceId,
-            captureId: source.captureId,
-            sourceKind: source.sourceKind,
-            sourceName: source.sourceName,
-            track: describeVideoTrack(stream.getVideoTracks()[0]),
-            audioTracks: stream.getAudioTracks().map(describeAudioTrack),
+            options: displayMediaOptions,
           });
-        } else {
-          const audioConstraints = audio
-            ? {
-                echoCancellation: false,
-                noiseSuppression: false,
-                autoGainControl: false,
-              }
-            : false;
-          const displayMediaOptions: any = {
-            video: browserVideoConstraints,
-            audio: audioConstraints as any,
-            monitorTypeSurfaces: "include",
-            selfBrowserSurface: "exclude",
-            surfaceSwitching: "include",
-            systemAudio: audio ? "include" : "exclude",
-            windowAudio: audio ? "window" : "exclude",
-          };
-          try {
-            logScreenShare("Calling getDisplayMedia", {
-              elapsedMs: elapsed(),
-              options: displayMediaOptions,
-            });
-            stream =
-              await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
-          } catch (err: any) {
-            if (!audio || err?.name === "NotAllowedError") throw err;
-            logScreenShare(
-              "getDisplayMedia with audio failed; retrying video-only",
-              { elapsedMs: elapsed(), error: err },
-            );
-            stream = await navigator.mediaDevices.getDisplayMedia({
-              video: browserVideoConstraints as any,
-              audio: false,
-            });
-          }
-          logScreenShare("getDisplayMedia returned", {
-            elapsedMs: elapsed(),
-            videoTracks: stream.getVideoTracks().map(describeVideoTrack),
-            audioTracks: stream.getAudioTracks().map(describeAudioTrack),
+          stream =
+            await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
+        } catch (err: any) {
+          if (!audio || err?.name === "NotAllowedError") throw err;
+          logScreenShare(
+            "getDisplayMedia with audio failed; retrying video-only",
+            { elapsedMs: elapsed(), error: err },
+          );
+          stream = await navigator.mediaDevices.getDisplayMedia({
+            video: browserVideoConstraints as any,
+            audio: false,
           });
         }
+        logScreenShare("getDisplayMedia returned", {
+          elapsedMs: elapsed(),
+          videoTracks: stream.getVideoTracks().map(describeVideoTrack),
+          audioTracks: stream.getAudioTracks().map(describeAudioTrack),
+        });
 
         const video = stream.getVideoTracks()[0];
         if (!video) {
@@ -657,14 +485,10 @@ export function createWebScreenShareSources({
         );
       },
     },
-    // A picked desktop source cannot be captured twice (WGC, the native
-    // hook): the old capture goes first. A getDisplayMedia restart keeps
-    // the old one until the picker returns, so cancelling keeps the share.
-    releaseBeforeRestart: (request) => isDesktopSource(request),
-    isLive: (capture) =>
-      capture.path === "native"
-        ? sfu.isNativeScreenShareActive
-        : capture.video?.readyState === "live",
+    // A getDisplayMedia restart keeps the old capture until the picker
+    // returns, so cancelling keeps the share.
+    releaseBeforeRestart: () => false,
+    isLive: (capture) => capture.video?.readyState === "live",
     release(capture) {
       stopStream(capture.stream);
       for (const track of [capture.video, capture.audio]) {
@@ -692,14 +516,7 @@ export function createWebScreenShare(
     publication: options.publication,
     sources,
     onError: (step, error) => {
-      if (step === "native-start") {
-        logScreenShare(
-          "Native hardware publisher failed; falling back to CEF capture",
-          { error },
-        );
-      } else {
-        screenLog.warn(`Screen share step failed: ${step}`, error);
-      }
+      screenLog.warn(`Screen share step failed: ${step}`, error);
     },
   });
   return share;

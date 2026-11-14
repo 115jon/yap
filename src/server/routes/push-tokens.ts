@@ -23,6 +23,7 @@ const registerSchema = Schema.Struct({
   app_variant: Schema.optional(
     Schema.NullOr(Schema.String.check(Schema.isMaxLength(32))),
   ),
+  // Every client sends "native"; the server stores it for every token.
   push_format: Schema.optional(Schema.NullOr(Schema.Literals(["native"]))),
 });
 
@@ -51,7 +52,6 @@ const registerToken = Effect.fn("pushTokens.register")(function* (
       token: body.token,
       platform: body.platform,
       appVariant: body.app_variant ?? null,
-      pushFormat: body.push_format ?? null,
       sessionId: session.id || null,
     }),
   );

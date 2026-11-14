@@ -6,7 +6,11 @@ import {
   mediaProxyKey,
   signMediaUrl,
 } from "@/server/media-proxy/signing";
-import { authorizeGenericMediaRequest, handleProxyMedia } from "../proxy-media";
+import {
+  authorizeGenericMediaRequest,
+  handleProxyMedia,
+  SUSPENDED_BEARER,
+} from "../proxy-media";
 
 const SECRET = "route-test-secret";
 const key = mediaProxyKey({ MEDIA_PROXY_SECRET: SECRET })!;
@@ -260,9 +264,117 @@ describe("authorizeGenericMediaRequest", () => {
       expect(checkPendingDeletion).not.toHaveBeenCalled();
     });
   });
+
+  describe("a suspended account", () => {
+    const notPending = async () => null;
+    const suspendedIs =
+      (...ids: string[]) =>
+      async (userId: string) =>
+        ids.includes(userId);
+
+    it("gets nothing from a pass issued before the suspension", async () => {
+      const pass = issueMediaPass(key, "user-1").value;
+      const request = new Request(proxyUrl({ url: target }), {
+        headers: { Cookie: `${MEDIA_PASS_COOKIE}=${pass}` },
+      });
+      const checkSuspended = vi.fn(suspendedIs("user-1"));
+      expect(
+        await authorizeGenericMediaRequest(
+          request,
+          target,
+          key,
+          noBearer,
+          notPending,
+          checkSuspended,
+        ),
+      ).toEqual({ via: "suspended" });
+      expect(checkSuspended).toHaveBeenCalledWith("user-1");
+    });
+
+    it("gets nothing from its bearer, remembered or refused by requireAuth", async () => {
+      const request = new Request(proxyUrl({ url: target }), {
+        headers: { Authorization: "Bearer session" },
+      });
+      expect(
+        await authorizeGenericMediaRequest(
+          request,
+          target,
+          key,
+          async () => "user-2",
+          notPending,
+          suspendedIs("user-2"),
+        ),
+      ).toEqual({ via: "suspended" });
+      expect(
+        await authorizeGenericMediaRequest(
+          request,
+          target,
+          key,
+          async () => SUSPENDED_BEARER,
+          notPending,
+          suspendedIs(),
+        ),
+      ).toEqual({ via: "suspended" });
+    });
+
+    it("leaves another account's bearer and a signature alone", async () => {
+      const pass = issueMediaPass(key, "user-1").value;
+      const withBoth = new Request(proxyUrl({ url: target }), {
+        headers: {
+          Cookie: `${MEDIA_PASS_COOKIE}=${pass}`,
+          Authorization: "Bearer session",
+        },
+      });
+      expect(
+        await authorizeGenericMediaRequest(
+          withBoth,
+          target,
+          key,
+          async () => "user-2",
+          notPending,
+          suspendedIs("user-1"),
+        ),
+      ).toEqual({ via: "bearer", userId: "user-2" });
+
+      const checkSuspended = vi.fn(suspendedIs("user-1"));
+      const signedRequest = new Request(proxyUrl(signed(target)), {
+        headers: { Cookie: `${MEDIA_PASS_COOKIE}=${pass}` },
+      });
+      expect(
+        await authorizeGenericMediaRequest(
+          signedRequest,
+          target,
+          key,
+          noBearer,
+          notPending,
+          checkSuspended,
+        ),
+      ).toEqual({ via: "signature" });
+      expect(checkSuspended).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe("handleProxyMedia", () => {
+  it("answers a suspended account's pass with 403 ACCOUNT_SUSPENDED", async () => {
+    const fetchMock = stubNetwork({});
+    const pass = issueMediaPass(key, "user-1").value;
+    const response = await handleProxyMedia(
+      new Request(proxyUrl({ url: "https://cdn.example.com/og.png" }), {
+        headers: { Cookie: `${MEDIA_PASS_COOKIE}=${pass}` },
+      }),
+      true,
+      false,
+      { user: allow, suspended: async () => true },
+    );
+    expect(response.status).toBe(403);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    await expect(response.json()).resolves.toMatchObject({
+      code: "ACCOUNT_SUSPENDED",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("serves a proxy URL wrapped in another (clients built before rewriting)", async () => {
     const target = "https://cdn.example.com/og.png";
     stubNetwork({

@@ -16,7 +16,7 @@ describe("getShareableUrl", () => {
       "/api/attachments/c1/a1/f.png?token=session-token",
       `${ORIGIN}/api/attachments/c1/a1/f.png?token=session-token`,
       `${ORIGIN}/api/attachments/c1/a1/f.png?cap=m1.dXNlcg.1.sig`,
-      "http://tauri.localhost/api/emojis/assets/e1?token=session-token&cap=m1.a.b.c",
+      "http://localhost/api/emojis/assets/e1?token=session-token&cap=m1.a.b.c",
       `${ORIGIN}/api/listen-together/stream?videoId=v&roomSlug=r&token=session-token`,
       "api/voice-status-media/s/a/f.gif?token=session-token",
     ]) {

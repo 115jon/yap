@@ -19,7 +19,7 @@ import { getSectionPosition } from "../schema";
 const context = (
   overrides: Partial<SettingsContextValue> = {},
 ): SettingsContextValue => ({
-  env: { desktop: false },
+  env: {},
   query: "",
   target: null,
   registerEscape: () => () => {},
@@ -71,13 +71,14 @@ describe("SettingsCard", () => {
 
   it("counts sections a host leaves out of the index", () => {
     // Voice has five sections; rooms render it without the camera card.
-    expect(getSectionPosition("screen-share", { desktop: false })).toEqual({
+    expect(getSectionPosition("screen-share", {})).toEqual({
       index: 5,
       total: 5,
     });
-    expect(
-      getSectionPosition("screen-share", { desktop: false }, ["camera"]),
-    ).toEqual({ index: 4, total: 4 });
+    expect(getSectionPosition("screen-share", {}, ["camera"])).toEqual({
+      index: 4,
+      total: 4,
+    });
   });
 
   it("hides a section none of whose rows match the search", () => {

@@ -13,12 +13,10 @@
 // renew (behind) or renew on every check (ahead).
 
 import {
-  getDesktopToken,
   getStoredKovaAuthSessionToken,
   subscribeDesktopTokenChanges,
 } from "@/lib/desktop-auth";
-import { KOVA_AUTH_PUBLISHABLE_KEY } from "@/lib/kova-auth-config";
-import { getApiBaseUrl, isTauri } from "@/lib/platform";
+import { getApiBaseUrl } from "@/lib/platform";
 
 const EXPIRY_STORAGE_KEY = "yap.mediaPass.expiresAt";
 /** Renew once less than this is left on the cookie (it lasts an hour). */
@@ -27,7 +25,7 @@ const CHECK_INTERVAL_MS = 10 * 60 * 1000;
 
 function currentToken(): string | null {
   try {
-    return getDesktopToken() ?? getStoredKovaAuthSessionToken();
+    return getStoredKovaAuthSessionToken();
   } catch {
     return null;
   }
@@ -56,9 +54,6 @@ function writeExpiry(expiresAtMs: number | null): void {
 function requestHeaders(token: string | null): Headers {
   const headers = new Headers();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (isTauri() && KOVA_AUTH_PUBLISHABLE_KEY) {
-    headers.set("X-Publishable-Key", KOVA_AUTH_PUBLISHABLE_KEY);
-  }
   return headers;
 }
 

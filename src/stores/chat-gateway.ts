@@ -2,22 +2,7 @@ import { recheckAppSession } from "@/lib/app-session-recovery";
 import { emitProfileBoardUpdate } from "@/lib/profile-board-events";
 import type { ChatAction, ChatState } from "@/lib/chat-reducer";
 import { clog } from "@/lib/console-logger";
-import { getDisplayName } from "@/lib/display-name";
-import {
-  getUnreadChannelState,
-  shouldNativeNotifyForChannelActivity,
-  shouldNativeNotifyForMessage,
-} from "@/lib/desktop-notifications";
-import {
-  MOBILE_ACTION_TYPE_ID,
-  showNativeDesktopToast,
-  syncDesktopNotificationState,
-} from "@/lib/desktop-native-sync";
-import {
-  getCurrentPresencePlatform,
-  isTauri as _isTauri,
-  wsUrl,
-} from "@/lib/platform";
+import { getCurrentPresencePlatform, wsUrl } from "@/lib/platform";
 import {
   normalizePresencePlatforms,
   type PresencePlatform,
@@ -65,7 +50,6 @@ import type { ChatRestActions } from "./chat-actions";
 import { toast } from "@/components/ui/toast";
 import { CALL_BLOCKED_COPY, hasBlocked } from "@/lib/blocks";
 import { useCallStore } from "./useCallStore";
-import { useDesktopSettingsStore } from "./useDesktopSettingsStore";
 
 const chatLog = clog("ChatGW");
 
@@ -129,7 +113,6 @@ export function createChatGateway(
   actions: ChatRestActions,
 ): ChatGatewayActions {
   const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  const recentlyToastedMessageIds = new Map<string, number>();
   /** Identify was sent on the current socket. */
   let identified = false;
   let appUserId: string | null | undefined = null;
@@ -241,57 +224,6 @@ export function createChatGateway(
     socket.sendJson(msg);
   };
 
-  const noteToastedMessage = (messageId: string) => {
-    recentlyToastedMessageIds.set(messageId, Date.now());
-    if (recentlyToastedMessageIds.size < 200) return;
-
-    const cutoff = Date.now() - 60_000;
-    for (const [id, timestamp] of recentlyToastedMessageIds) {
-      if (timestamp < cutoff) {
-        recentlyToastedMessageIds.delete(id);
-      }
-    }
-  };
-
-  const syncDesktopState = async () => {
-    const state = get();
-    const { unreadDmChannelIds, unreadServerChannelIds } =
-      getUnreadChannelState({
-        lastMessageAt: state.lastMessageAt,
-        readStates: state.readStates,
-        dmChannelIds: state.dmChannels.map((dm) => dm.id),
-      });
-
-    await syncDesktopNotificationState({
-      notifications: state.notifications,
-      unreadDmChannelIds,
-      unreadServerChannelIds,
-    });
-  };
-
-  const messageTargetsCurrentUser = (message: Message) => {
-    const state = get();
-    const currentUser = state.user;
-    if (!currentUser) return false;
-
-    if (message.reply_to?.author_id === currentUser.id) {
-      return true;
-    }
-
-    const username = currentUser.username?.trim().toLowerCase();
-    if (!username) return false;
-
-    const mentionRegex = /@(\w+)/g;
-    let match: RegExpExecArray | null;
-    while ((match = mentionRegex.exec(message.content ?? "")) !== null) {
-      if (match[1]?.toLowerCase() === username) {
-        return true;
-      }
-    }
-
-    return false;
-  };
-
   const handleDispatch = (d: { event: string; data?: any; seq?: number }) => {
     if (import.meta.env.DEV) chatLog.info(`Event: ${d.event}`, d.data);
     if (typeof window !== "undefined") {
@@ -326,69 +258,6 @@ export function createChatGateway(
           actions.markChannelRead(msg.channel_id, msg.created_at);
         }
 
-        const isDmChannel = state.dmChannels.some(
-          (dm) => dm.id === msg.channel_id,
-        );
-        if (
-          !isDmChannel &&
-          msg.author_id !== state.user?.id &&
-          !hasBlocked(state.relationships, msg.author_id) &&
-          !messageTargetsCurrentUser(msg) &&
-          shouldNativeNotifyForChannelActivity({
-            channelId: msg.channel_id,
-            activeChannelId: state.activeChannelId,
-            focused: document.hasFocus(),
-            desktopNotificationsEnabled:
-              useDesktopSettingsStore.getState().desktopNotifications,
-          })
-        ) {
-          const channel =
-            state.channels.find(
-              (candidate) => candidate.id === msg.channel_id,
-            ) ??
-            Object.values(state.channelsByServerId)
-              .flat()
-              .find((candidate) => candidate.id === msg.channel_id);
-          const server = channel?.server_id
-            ? state.servers.find(
-                (candidate) => candidate.id === channel.server_id,
-              )
-            : null;
-          const title = channel?.name
-            ? `${getDisplayName(msg.author, "Someone")} in #${channel.name}`
-            : `${getDisplayName(msg.author, "Someone")} sent a message`;
-          const imageAttachment = msg.attachments?.find((attachment) =>
-            attachment.content_type?.startsWith("image/"),
-          );
-          const body = msg.content?.trim()
-            ? server?.name
-              ? `${server.name}\n${msg.content.slice(0, 200)}`
-              : msg.content.slice(0, 200)
-            : imageAttachment
-              ? "Sent a photo"
-              : (server?.name ?? "New server message");
-          void showNativeDesktopToast({
-            title,
-            body,
-            largeBody: msg.content?.trim()
-              ? msg.content.slice(0, 1000)
-              : undefined,
-            summary: server?.name,
-            group: channel?.server_id ?? msg.channel_id,
-            icon: msg.author?.avatar_url ?? undefined,
-            actionTypeId: MOBILE_ACTION_TYPE_ID,
-            autoCancel: true,
-            extra: {
-              channelId: msg.channel_id,
-              messageId: msg.id,
-              serverId: channel?.server_id ?? null,
-              authorId: msg.author_id,
-            },
-          });
-          noteToastedMessage(msg.id);
-        }
-
-        void syncDesktopState();
         break;
       }
       case "MESSAGE_UPDATE":
@@ -688,7 +557,6 @@ export function createChatGateway(
         break;
       case "DM_CHANNEL_CREATE":
         dispatch({ type: "ADD_DM_CHANNEL", dmChannel: d.data });
-        void syncDesktopState();
         break;
       case "READ_STATE_UPDATE":
         dispatch({
@@ -696,7 +564,6 @@ export function createChatGateway(
           channelId: d.data.channel_id,
           timestamp: d.data.last_read_at,
         });
-        void syncDesktopState();
         break;
       case "NOTIFICATIONS_READ":
         dispatch({
@@ -704,7 +571,6 @@ export function createChatGateway(
           ids: Array.isArray(d.data.ids) ? d.data.ids : undefined,
           all: !!d.data.all,
         });
-        void syncDesktopState();
         break;
       case "NOTIFICATIONS_CLEAR":
         dispatch({
@@ -714,7 +580,6 @@ export function createChatGateway(
               ? d.data.cleared_at
               : undefined,
         });
-        void syncDesktopState();
         break;
       case "MESSAGE_PIN":
         dispatch({
@@ -779,47 +644,6 @@ export function createChatGateway(
         // Play notification sound
         if (!areReconnectSoundsSuppressed()) playNotification();
 
-        void syncDesktopState();
-
-        // Fire a native OS toast when desktop notifications are enabled and
-        // the user is not actively looking at the same channel.
-        if (
-          !recentlyToastedMessageIds.has(notif.message_id) &&
-          shouldNativeNotifyForMessage({
-            notification: notif,
-            activeChannelId: get().activeChannelId,
-            focused: document.hasFocus(),
-            desktopNotificationsEnabled:
-              useDesktopSettingsStore.getState().desktopNotifications,
-          })
-        ) {
-          const authorName = getDisplayName(notif.from_user, "Someone");
-          const title =
-            notif.type === "mention"
-              ? `${authorName} mentioned you`
-              : notif.type === "reply"
-                ? `${authorName} replied to you`
-                : `${authorName} sent you a direct message`;
-
-          void showNativeDesktopToast({
-            title,
-            body: notif.content?.slice(0, 200) ?? "New notification",
-            largeBody: notif.content?.slice(0, 1000),
-            summary: notif.server_name ?? notif.channel_name ?? undefined,
-            group: notif.server_id ?? notif.channel_id,
-            icon: notif.from_user?.avatar_url ?? undefined,
-            attachments: notif.type === "dm" ? undefined : undefined,
-            actionTypeId: MOBILE_ACTION_TYPE_ID,
-            autoCancel: true,
-            extra: {
-              channelId: notif.channel_id,
-              messageId: notif.message_id,
-              serverId: notif.server_id ?? null,
-              type: notif.type,
-            },
-          });
-          noteToastedMessage(notif.message_id);
-        }
         break;
       }
 
@@ -871,30 +695,6 @@ export function createChatGateway(
           voiceRoomId,
         });
 
-        if (
-          shouldNativeNotifyForChannelActivity({
-            channelId: channel_id,
-            activeChannelId: get().activeChannelId,
-            focused: document.hasFocus(),
-            desktopNotificationsEnabled:
-              useDesktopSettingsStore.getState().desktopNotifications,
-          })
-        ) {
-          void showNativeDesktopToast({
-            title: `Incoming call from ${caller_display_name ?? caller_username ?? caller_name}`,
-            body: "Open Yap to answer.",
-            summary: "Incoming call",
-            icon: caller_avatar ?? undefined,
-            actionTypeId: MOBILE_ACTION_TYPE_ID,
-            autoCancel: true,
-            extra: {
-              channelId: channel_id,
-              callerId: caller_id,
-              callId: call_id,
-              type: "incoming-call",
-            },
-          });
-        }
         break;
       }
       case "CALL_RINGING": {

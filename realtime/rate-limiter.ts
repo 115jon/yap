@@ -42,8 +42,7 @@ const RATE_LIMITS: Record<string, RateLimitConfig> = {
   // One per join, plus prefetches on hover/press and the reconnects; a
   // join's own request must not be starved by those.
   "POST:/api/voice/admission": { limit: 120, windowMs: 60_000 },
-  // The chat socket's tickets, and (deprecated, see socket-ticket.ts) two
-  // per join for clients up to v3.12.0 / mobile-v0.5.1.
+  // The chat socket's tickets.
   "POST:/api/voice/socket-ticket": { limit: 120, windowMs: 60_000 },
   DEFAULT: { limit: 60, windowMs: 60_000 },
 };

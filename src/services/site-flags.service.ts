@@ -12,7 +12,6 @@
 
 import { env } from "cloudflare:workers";
 
-import { getCorsHeaders } from "@/lib/api-helpers";
 import {
   activeAnnouncement,
   FEATURE_PAUSED,
@@ -75,14 +74,17 @@ export async function isFeatureEnabled(
 }
 
 /** The 503 a switched-off path answers with. Clients show `error`. */
-export function featurePausedResponse(flag: SiteFlag, req?: Request): Response {
+export function featurePausedResponse(
+  flag: SiteFlag,
+  _req?: Request,
+): Response {
   return Response.json(
     {
       error: SITE_FLAG_INFO[flag].pausedMessage,
       code: FEATURE_PAUSED,
       feature: flag,
     },
-    { status: 503, headers: getCorsHeaders(req) },
+    { status: 503 },
   );
 }
 

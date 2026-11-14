@@ -1,9 +1,5 @@
-import {
-  getDesktopToken,
-  getStoredKovaAuthSessionToken,
-} from "@/lib/desktop-auth";
-import { KOVA_AUTH_PUBLISHABLE_KEY } from "@/lib/kova-auth-config";
-import { apiUrl, isTauri } from "@/lib/platform";
+import { getStoredKovaAuthSessionToken } from "@/lib/desktop-auth";
+import { apiUrl } from "@/lib/platform";
 
 export interface VoiceDisconnectBeaconPayload {
   channelId: string;
@@ -14,7 +10,7 @@ export interface VoiceDisconnectBeaconPayload {
 
 function getAuthToken(): string | null {
   try {
-    return getDesktopToken() ?? getStoredKovaAuthSessionToken();
+    return getStoredKovaAuthSessionToken();
   } catch {
     return null;
   }
@@ -30,10 +26,6 @@ function buildVoiceDisconnectBeaconHeaders(
   const token = getAuthToken();
   if (token) {
     headers.Authorization = `Bearer ${token}`;
-  }
-
-  if (isTauri() && KOVA_AUTH_PUBLISHABLE_KEY) {
-    headers["X-Publishable-Key"] = KOVA_AUTH_PUBLISHABLE_KEY;
   }
 
   if (payload.gatewaySessionId) {
@@ -62,8 +54,7 @@ export function sendVoiceDisconnectBeacon(
   });
 
   const token = getAuthToken();
-  const needsExplicitAuthHeaders =
-    !!token || (isTauri() && !!KOVA_AUTH_PUBLISHABLE_KEY);
+  const needsExplicitAuthHeaders = !!token;
 
   if (
     !needsExplicitAuthHeaders &&

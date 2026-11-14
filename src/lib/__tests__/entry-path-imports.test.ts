@@ -62,7 +62,6 @@ const ENTRY_PATH_ROOTS = [
   "src/lib/dither-painters.ts",
   // The persisted-state readers every store and storage helper uses.
   "src/lib/persisted-guard.ts",
-  "src/stores/useDesktopSettingsStore.ts",
   "src/stores/useListenTogetherAudioSettingsStore.ts",
   "src/stores/useMediaPlaybackSettingsStore.ts",
   "src/stores/useMediaSafetySettingsStore.ts",

@@ -245,7 +245,7 @@ describe("DeviceActivation", () => {
     expect(bars[0]!.style.width).toBe("42%");
   });
 
-  it("does not open any app for the Tauri desktop app", async () => {
+  it("does not open any app for a device that is not the native app", async () => {
     mocks.getDeviceRequest.mockResolvedValue({ ok: true, request: REQUEST });
     mocks.approveDeviceRequest.mockResolvedValue({
       ok: true,

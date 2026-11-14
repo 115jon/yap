@@ -3,10 +3,8 @@ import { readMap, readStoredJson, readString } from "@/lib/persisted-guard";
 import type { VoiceSessionStreamState } from "@/components/chat/VoiceChannelView";
 import {
   getDesktopAuthHandoffToken,
-  getDesktopToken,
   subscribeDesktopTokenChanges,
 } from "@/lib/desktop-auth";
-import { isTauri } from "@/lib/platform";
 import { prewarmAudioContext } from "@/lib/voice/audio-pipeline";
 import { useChatActions, useChatStore } from "@/stores/chat-store";
 import { useCallStore } from "@/stores/useCallStore";
@@ -254,7 +252,7 @@ export function useChatPageLogic() {
     if (authReady) return;
 
     const check = () => {
-      if (getDesktopAuthHandoffToken() || (isTauri() && getDesktopToken())) {
+      if (getDesktopAuthHandoffToken()) {
         setAuthReady(true);
         return true;
       }

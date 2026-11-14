@@ -183,7 +183,7 @@ export const GET = async ({ request, params }: any) => {
     headers.set("Content-Length", length.toString());
   } else {
     // Media types (video/audio) need range-request support for seeking.
-    // In Tauri/CEF, a cached 200 with `immutable` prevents the browser from
+    // A cached 200 with `immutable` can keep the browser from
     // issuing fresh Range requests, so scrubbing/seeking breaks (always goes
     // back to the beginning). Use `no-store` for media to ensure every seek
     // hits the server with a proper Range header. Images and other static

@@ -1,7 +1,6 @@
 import { AUTH_CARD_APPEARANCE } from "@/components/auth/auth-card-appearance";
 import { AuthSplitLayout } from "@/components/auth/AuthSplitLayout";
 import { DeviceWaitingNotice } from "@/components/auth/DeviceWaitingNotice";
-import { LazyDesktopLogin } from "@/components/LazyDesktopLogin";
 import { SplashScreen } from "@/components/SplashScreen";
 import {
   consumeAuthLogoutIntent,
@@ -16,7 +15,6 @@ import {
 } from "@/lib/auth-route-urls";
 import { useAuthCodeExchangePending } from "@/lib/auth-code-exchange";
 import { deviceCodeFromReturnPath } from "@/lib/device-code-format";
-import { isTauri } from "@/lib/platform";
 import { SignIn, useAuth } from "@kova/react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
@@ -38,7 +36,7 @@ export const Route = createFileRoute("/sign-in")({
       ralph_auth_code: search.ralph_auth_code as string | undefined,
     };
   },
-  component: SignInPage,
+  component: WebSignInPage,
   head: () => ({
     meta: [
       { title: "Sign In — Yap" },
@@ -49,14 +47,6 @@ export const Route = createFileRoute("/sign-in")({
     ],
   }),
 });
-
-function SignInPage() {
-  if (isTauri()) {
-    return <LazyDesktopLogin />;
-  }
-
-  return <WebSignInPage />;
-}
 
 function WebSignInPage() {
   const { redirect_url, kova_auth_code, ralph_auth_code } = Route.useSearch();

@@ -31,7 +31,6 @@ import { PRESS } from "@/components/ui/interaction";
 import { Kbd } from "@/components/ui/kbd";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/useMediaQuery";
-import { isDesktop } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { useUser } from "@kova/react";
 import {
@@ -53,7 +52,6 @@ import AccountPanel from "./settings/AccountPanel";
 import ConnectionsPanel from "./settings/ConnectionsPanel";
 import LoudPanel from "./settings/LoudPanel";
 import AppearancePanel from "./settings/AppearancePanel";
-import DesktopPanel from "./settings/DesktopPanel";
 import KeybindsPanel from "./settings/KeybindsPanel";
 import NotificationsPanel from "./settings/NotificationsPanel";
 import PrivacyPanel from "./settings/PrivacyPanel";
@@ -118,7 +116,6 @@ const PANEL_COMPONENTS: Record<SettingsPanelId, ComponentType> = {
   keybinds: KeybindsPanel,
   appearance: AppearancePanel,
   notifications: NotificationsPanel,
-  desktop: DesktopPanel,
 };
 
 /** The rail sits beside the cards once the page is this wide (wide dialog). */
@@ -182,10 +179,9 @@ export default function SettingsModal({
   const touchOnly = useTouchOnly();
   const env = useMemo<SettingsEnvironment>(
     () => ({
-      desktop: environment?.desktop ?? isDesktop(),
       touch: environment?.touch ?? touchOnly,
     }),
-    [environment?.desktop, environment?.touch, touchOnly],
+    [environment?.touch, touchOnly],
   );
   const narrow = useIsMobile();
 

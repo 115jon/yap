@@ -20,40 +20,6 @@ export { genId } from "@/lib/id";
 const authLog = clog("requireAuth");
 const voiceSessionLog = clog("voice-session");
 
-// ── Desktop CORS origins ─────────────────────────────────────────────────────
-// The Tauri desktop app runs at http://tauri.localhost (useHttpsScheme: false)
-// or https://tauri.localhost. Both must be allowed to call the deployed Worker.
-const DESKTOP_ORIGINS = new Set([
-  "http://tauri.localhost",
-  "https://tauri.localhost",
-]);
-
-/** True for the desktop (Tauri) webview's origin. */
-export function isDesktopOrigin(origin: string | null | undefined): boolean {
-  return !!origin && DESKTOP_ORIGINS.has(origin);
-}
-
-export function getCorsHeaders(req?: Request): HeadersInit {
-  const origin = req?.headers.get("origin") ?? "";
-  if (!DESKTOP_ORIGINS.has(origin)) return {};
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers":
-      "Authorization, Content-Type, X-Publishable-Key, X-Voice-Session-Id, X-Gateway-Session-Id",
-    "Access-Control-Allow-Credentials": "true",
-  };
-}
-
-/** Handle OPTIONS preflight requests from the desktop Tauri webview. */
-export function handleCorsPreflightIfNeeded(req: Request): Response | null {
-  const origin = req.headers.get("origin") ?? "";
-  if (req.method === "OPTIONS" && DESKTOP_ORIGINS.has(origin)) {
-    return new Response(null, { status: 204, headers: getCorsHeaders(req) });
-  }
-  return null;
-}
-
 export function getDB(): CloudflareEnv["DB"] {
   return env.DB;
 }
@@ -448,11 +414,9 @@ export function pendingDeletionResponse(
 const AUTH_RETRY_AFTER_SECONDS = 5;
 
 /** The 401 for a request with no session. Clients read it as "sign in again". */
-export function unauthorizedResponse(req?: Request): Response {
-  return Response.json(
-    { error: "Unauthorized" },
-    { status: 401, headers: getCorsHeaders(req) },
-  );
+/** `_req` is unused; kept so callers need not change. */
+export function unauthorizedResponse(_req?: Request): Response {
+  return Response.json({ error: "Unauthorized" }, { status: 401 });
 }
 
 /** The 503 for "Kova could not answer". Clients retry it; it is not a sign-out. */
@@ -468,8 +432,8 @@ export function authUnavailableResponse(req?: Request): Response {
 }
 
 /** Standardized successful API response — returns data directly */
-export function apiSuccess<T>(data: T, status = 200, req?: Request): Response {
-  return Response.json(data, { status, headers: getCorsHeaders(req) });
+export function apiSuccess<T>(data: T, status = 200, _req?: Request): Response {
+  return Response.json(data, { status });
 }
 
 /** Standardized error API response */
@@ -477,12 +441,9 @@ export function apiError(
   message: string,
   status = 400,
   code?: string,
-  req?: Request,
+  _req?: Request,
 ): Response {
-  return Response.json(
-    { error: message, code },
-    { status, headers: getCorsHeaders(req) },
-  );
+  return Response.json({ error: message, code }, { status });
 }
 
 /** Who a broadcast is for, as the global gateway's `/broadcast` reads it. */

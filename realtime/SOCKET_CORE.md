@@ -17,9 +17,8 @@ lists below.
 | voice  | `VoiceRoom` named by its slug    | `/api/channels/:slug/voice` | `voice`         | `POST /api/voice/admission` (`voice_ticket`) |
 
 One admission request returns both call tickets and the participant's voice
-credentials; [ADMISSION.md](./ADMISSION.md) is the contract. The room and
-voice audiences of `/api/voice/socket-ticket` still work for clients up to
-v3.12.0 and mobile-v0.5.1 and are deprecated.
+credentials; [ADMISSION.md](./ADMISSION.md) is the contract.
+`/api/voice/socket-ticket` issues only the `global` ticket.
 
 The room's slug decides a `MeetingRoom`'s role. A room that has not learned
 its slug yet (no socket admitted since its storage was written) accepts both

@@ -1,8 +1,7 @@
 // The one-request admission (realtime/ADMISSION.md) as the Durable Objects
 // see it: a room ticket's `media` claim decides whether Identify and Resume
 // mint voice credentials, and a voice ticket's `participant` claim binds the
-// voice socket to one participant. Tickets without either claim are the
-// deprecated two-request flow, which keeps its old behaviour.
+// voice socket to one participant.
 
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
@@ -157,7 +156,7 @@ describe("room Identify and Resume by admission", () => {
     socket.close(1000, "done");
   });
 
-  it("keeps minting for deprecated two-request clients (no media claim)", async () => {
+  it("mints on Identify without a media claim, and never on Resume", async () => {
     const roomName = crypto.randomUUID();
     const socket = await openRoomSocket(roomName, "old-client");
 
@@ -167,12 +166,12 @@ describe("room Identify and Resume by admission", () => {
     expect(typeof ready.voice_token).toBe("string");
     expect(Array.isArray(ready.ice_servers)).toBe(true);
 
-    // ...and on Resume, as before.
+    // Resume keeps the credentials the client holds (op 40 refreshes them).
     await dropAndWait(socket);
     const again = await openRoomSocket(roomName, "old-client");
     const resumed = await resume(again, String(ready.participant_id));
-    expect(typeof resumed.voice_token).toBe("string");
-    expect(Array.isArray(resumed.ice_servers)).toBe(true);
+    expect(resumed).not.toHaveProperty("voice_token");
+    expect(resumed).not.toHaveProperty("ice_servers");
     again.close(1000, "done");
   });
 

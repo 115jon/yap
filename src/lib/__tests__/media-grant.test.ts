@@ -14,21 +14,21 @@ import {
   seedMediaGrantForTests,
   signMediaUrl,
 } from "../media-grant";
+import { KOVA_AUTH_PUBLISHABLE_KEY } from "@/lib/kova-auth-config";
+
+/** Where the signed-in session's token lives (lib/desktop-auth). */
+const SESSION_KEY = `kova-auth:${KOVA_AUTH_PUBLISHABLE_KEY}:session-token`;
 
 const SECRET = "test-secret";
 const URL_A = "https://yap.test/api/attachments/c1/a1/f.png";
 
 function signIn(token: string) {
-  Object.defineProperty(window, "__TAURI_INTERNALS__", {
-    configurable: true,
-    value: {},
-  });
-  window.localStorage.setItem("desktop_auth_token", token);
+  window.localStorage.setItem(SESSION_KEY, token);
 }
 
 function announceToken(token: string | null) {
   window.dispatchEvent(
-    new CustomEvent("ralphmeet:desktop-token-change", { detail: token }),
+    new CustomEvent("yap:session-token-change", { detail: token }),
   );
 }
 
@@ -40,7 +40,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   window.localStorage.clear();
-  delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   resetMediaGrantForTests();
 });
 
@@ -111,7 +110,7 @@ describe("media grant", () => {
     );
     expect(getMediaGrant()).not.toBeNull();
 
-    window.localStorage.removeItem("desktop_auth_token");
+    window.localStorage.removeItem(SESSION_KEY);
     announceToken(null);
 
     expect(window.localStorage.getItem("yap:media-grant")).toBeNull();
@@ -125,7 +124,7 @@ describe("media grant", () => {
     );
     mocks.apiPost.mockReturnValue(new Promise(() => undefined));
 
-    window.localStorage.setItem("desktop_auth_token", "session-b");
+    window.localStorage.setItem(SESSION_KEY, "session-b");
 
     expect(getMediaGrant()).toBeNull();
     expect(signMediaUrl(new URL(URL_A))).toBeNull();
