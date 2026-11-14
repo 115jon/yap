@@ -39,6 +39,8 @@ public final class VoiceShim {
     static native boolean nativeInit(Context context);
     static native void nativeMute(boolean muted);
     static native void nativeDeafen(boolean deafened);
+    /** The app's own speaker (soundboard, UI sounds) is silent while set. */
+    static native void nativeSpeakerMuted(boolean muted);
     static native void nativeLeave();
     static native void nativeQuit();
     static native void nativeRoutes(String json);
@@ -271,6 +273,9 @@ public final class VoiceShim {
 
     private static void onInterrupted(boolean interrupted) {
         if (!active || !ready) return;
+        // Whatever the user did with deafen meanwhile, the app's sounds
+        // stay off the phone's ear for exactly as long as it is taken.
+        nativeSpeakerMuted(interrupted);
         if (interrupted) {
             if (deafened) return;
             interruptDeafened = true;

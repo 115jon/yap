@@ -44,6 +44,11 @@ libc = "0.2"
 # media, the store's driver) on rustls. Android only: the iOS build is a
 # compile and link check without voice.
 yap-voice = { path = "../../rust/crates/yap-voice", default-features = false, features = ["store", "rustls"] }
+# The desktop's local player (soundboard clips, UI sounds) on the app's
+# speaker, whose Android output is AAudio. Opus through the libopus in
+# libwebrtc, which voice links.
+yap-audio = { path = "../../rust/crates/yap-audio", default-features = false, features = ["rustls", "store", "libopus"] }
+yap-speaker = { path = "../../rust/crates/yap-speaker" }
 
 [build-dependencies]
 cxx-qt-build = "0.10"
