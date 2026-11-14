@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/115jon/yap/compare/qt-android-v0.9.0...qt-android-v0.10.0) (2026-11-14)
+
+
+### Features
+
+* **account:** delete your account with a 30-day grace period ([53cc511](https://github.com/115jon/yap/commit/53cc511d3c7ad30c2eaffe185e7ec59f80739328))
+
 ## [0.9.0](https://github.com/115jon/yap/compare/qt-android-v0.8.1...qt-android-v0.9.0) (2026-11-14)
 
 
