@@ -56,6 +56,7 @@ import {
   blockBetween,
   dmBlockState,
 } from "../src/services/block.service";
+import { CALL_STOP_BETWEEN_PATH } from "../src/services/user-sockets.service";
 import {
   parseVoiceMoveGrantRecord,
   parseVoiceMoveGrantUse,
@@ -1211,12 +1212,30 @@ export class MeetingRoom extends DurableObject<Env> {
       }
       const result =
         url.pathname === "/call-accept"
-          ? this.acceptCallFromRest(callId, userId)
+          ? await this.acceptCallFromRest(callId, userId)
           : this.declineCallFromRest(callId, userId);
       this.flushDirtyStorage();
       return Response.json(result === "ok" ? { ok: true } : { error: result }, {
         status: REST_ANSWER_STATUS[result],
       });
+    }
+
+    // PUT /api/friends (block), via endCallsBetween: one of the two blocked
+    // the other, so any ring between them ends.
+    if (url.pathname === CALL_STOP_BETWEEN_PATH && request.method === "POST") {
+      const body: unknown = await request.json().catch(() => null);
+      const users =
+        this.isPlainObject(body) && Array.isArray(body.user_ids)
+          ? body.user_ids.filter(
+              (id): id is string => typeof id === "string" && id.length > 0,
+            )
+          : [];
+      if (users.length !== 2 || users[0] === users[1]) {
+        return Response.json({ error: "invalid" }, { status: 400 });
+      }
+      const stopped = this.stopCallsBetween(users[0], users[1]);
+      this.flushDirtyStorage();
+      return Response.json({ stopped });
     }
 
     // POST /api/voice/move (src/server/routes/voice-move.ts), on the source
@@ -1561,7 +1580,7 @@ export class MeetingRoom extends DurableObject<Env> {
         break;
 
       case Op.CallAccept:
-        this.handleCallAccept(ws, msg.d);
+        await this.handleCallAccept(ws, msg.d);
         break;
 
       case Op.CallDecline:
@@ -6529,21 +6548,22 @@ export class MeetingRoom extends DurableObject<Env> {
 
   // ── Op 37: CallAccept ────────────────────────────────────────────────
 
-  private handleCallAccept(ws: WebSocket, d: MainClientPayload<Op.CallAccept>) {
+  private async handleCallAccept(
+    ws: WebSocket,
+    d: MainClientPayload<Op.CallAccept>,
+  ) {
     const session = this.requireSession(ws);
     if (!session || !session.user_id || !d.call_id) return;
 
     const calleeId = session.user_id;
-
-    if (this.acceptedCalls.has(d.call_id)) {
+    const alreadyAccepted = () => {
+      if (!this.acceptedCalls.has(d.call_id)) return false;
       log.info(
         `Ignored Op 37 for ${d.call_id} — call was already implicitly/recently accepted.`,
       );
-      return;
-    }
-
-    const pending = this.pendingCalls.get(calleeId);
-    if (!pending || pending.callId !== d.call_id) {
+      return true;
+    };
+    const expired = () => {
       // If we are already in the correct voice channel but there's no pending call,
       // it might have been implicitly accepted and timed out of acceptedCalls cache.
       // But just to be safe, we just send "expired" if we really can't find it.
@@ -6554,6 +6574,36 @@ export class MeetingRoom extends DurableObject<Env> {
           data: { call_id: d.call_id, reason: "expired" },
         },
       });
+    };
+
+    if (alreadyAccepted()) return;
+    const ringing = this.pendingCalls.get(calleeId);
+    if (!ringing || ringing.callId !== d.call_id) {
+      expired();
+      return;
+    }
+
+    // A block made while it rang (either way) ends the ring instead. A
+    // failed lookup lets the answer through: the call room's admission
+    // checks the block again.
+    const blocked = await blockBetween(
+      this.env.DB,
+      ringing.callerId,
+      ringing.calleeId,
+    ).catch((err: unknown) => {
+      log.error("Call block check failed:", err);
+      return null;
+    });
+    // The ring may have been answered or ended during the lookup.
+    if (alreadyAccepted()) return;
+    const pending = this.pendingCalls.get(calleeId);
+    if (pending !== ringing) {
+      expired();
+      return;
+    }
+    if (blocked) {
+      this.stopPendingCall(pending, "blocked");
+      log.info(`Call ended by a block on answer: ${pending.callId}`);
       return;
     }
 
@@ -6667,6 +6717,44 @@ export class MeetingRoom extends DurableObject<Env> {
   }
 
   // ── Call helpers ──────────────────────────────────────────────────────
+
+  /**
+   * Ends a ring that is still in pendingCalls for `reason`: both people's
+   * clients stop ringing (CALL_RING_STOP), and settleRing stops the callee's
+   * phones.
+   */
+  private stopPendingCall(pending: PendingCall, reason: CallRingStopReason) {
+    clearTimeout(pending.timeout);
+    this.pendingCalls.delete(pending.calleeId);
+    this.persistPendingCalls();
+    const stop = {
+      op: Op.Dispatch,
+      d: {
+        event: "CALL_RING_STOP",
+        data: { call_id: pending.callId, reason },
+      },
+    };
+    this.broadcastToUser(pending.callerId, stop);
+    this.broadcastToUser(pending.calleeId, stop);
+    this.settleRing(pending, reason);
+  }
+
+  /**
+   * One of the two blocked the other (the block route, CALL_STOP_BETWEEN_PATH):
+   * ends any ring between them, either way. Returns how many it ended.
+   */
+  private stopCallsBetween(userA: string, userB: string): number {
+    const between = [...this.pendingCalls.values()].filter(
+      (call) =>
+        (call.callerId === userA && call.calleeId === userB) ||
+        (call.callerId === userB && call.calleeId === userA),
+    );
+    for (const call of between) {
+      this.stopPendingCall(call, "blocked");
+      log.info(`Call ended by a block: ${call.callId}`);
+    }
+    return between.length;
+  }
 
   /** Find a pending call where the user is the caller */
   private findPendingCallForUser(userId: string): PendingCall | null {
@@ -6788,6 +6876,9 @@ export class MeetingRoom extends DurableObject<Env> {
       this.startActiveCall(call);
       return;
     }
+    // A block ended it: no call record (it would read as a missed call
+    // from someone the callee may have just blocked).
+    if (reason === "blocked") return;
     this.ctx.waitUntil(
       this.recordCall(call.channelId, {
         call_id: call.callId,
@@ -6867,10 +6958,23 @@ export class MeetingRoom extends DurableObject<Env> {
   }
 
   /** POST /api/calls/:id/accept: the callee answered without a socket. */
-  private acceptCallFromRest(
+  private async acceptCallFromRest(
     callId: string,
     userId: string,
-  ): "ok" | "not_callee" | "not_found" {
+  ): Promise<"ok" | "not_callee" | "not_found"> {
+    const ringing = this.findPendingCallById(callId);
+    if (ringing && ringing.calleeId === userId) {
+      // A block made while it rang ends the ring (as op 37 does).
+      const blocked = await blockBetween(
+        this.env.DB,
+        ringing.callerId,
+        ringing.calleeId,
+      ).catch(() => null);
+      if (blocked && this.pendingCalls.get(ringing.calleeId) === ringing) {
+        this.stopPendingCall(ringing, "blocked");
+        return "not_found";
+      }
+    }
     const pending = this.findPendingCallById(callId);
     if (!pending) {
       // Answered already (the phone's notification, then the app): fine

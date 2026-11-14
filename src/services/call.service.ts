@@ -125,11 +125,13 @@ export type CallRingStopReason =
   | "timeout"
   | "cancelled"
   | "abandoned"
-  | "disconnected";
+  | "disconnected"
+  /** One of the two blocked the other mid-ring: no missed call. */
+  | "blocked";
 
 /** The callee never picked up: the ring becomes a missed call. */
 export function isMissedRingStop(reason: CallRingStopReason): boolean {
-  return reason !== "accepted" && reason !== "declined";
+  return reason !== "accepted" && reason !== "declined" && reason !== "blocked";
 }
 
 /**

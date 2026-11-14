@@ -1,11 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Schema } from "effect";
 
-import { apiError, apiSuccess, getDB, requireAuth } from "@/lib/api-helpers";
+import {
+  apiError,
+  apiSuccess,
+  getDB,
+  getEnv,
+  requireAuth,
+} from "@/lib/api-helpers";
 import { looseStruct, withDefault } from "@/lib/schema";
 import { ServiceError } from "@/lib/service-error";
 import { validateBody } from "@/lib/validate-body";
 import { executeBroadcast } from "@/services/service-helpers";
+import { endCallsBetween } from "@/services/user-sockets.service";
 import {
   acceptFriendRequest,
   blockUser,
@@ -108,6 +115,13 @@ export const PUT = async ({ request, params: _params }: any) => {
       for (const b of result.broadcasts) {
         await executeBroadcast(b);
       }
+      // A ring between them stops, and a DM call running ends for both.
+      const env = getEnv();
+      await endCallsBetween(
+        { meetingRooms: env.MEETING_ROOM, voiceRooms: env.VOICE_ROOM },
+        userId,
+        body.target_user_id,
+      );
       return apiSuccess({ success: true, type: result.type });
     }
 
