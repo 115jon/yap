@@ -3,6 +3,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  androidSignInLink,
+  appSignInLink,
   canOfferNativeApp,
   isNativeAppDevice,
   launchNativeApp,
@@ -47,6 +49,47 @@ describe("native app links", () => {
   });
 });
 
+describe("the sign-in link for the app that asked", () => {
+  it("brings back the Android app with an intent naming it", () => {
+    expect(androidSignInLink("abcd-efgh")).toBe(
+      "intent://signin?code=ABCD-EFGH#Intent;scheme=yap;package=dev.yap.app;end",
+    );
+    expect(androidSignInLink("ABCD")).toBe(
+      "intent://signin#Intent;scheme=yap;package=dev.yap.app;end",
+    );
+  });
+
+  it("picks the link by the platform the app runs on", () => {
+    expect(
+      appSignInLink({ label: "Yap", platform: "windows" }, "ABCDEFGH"),
+    ).toBe("yap-native://signin?code=ABCD-EFGH");
+    expect(
+      appSignInLink({ label: "Yap", platform: " Android " }, "ABCDEFGH"),
+    ).toBe(
+      "intent://signin?code=ABCD-EFGH#Intent;scheme=yap;package=dev.yap.app;end",
+    );
+  });
+
+  it("has no link for iOS, an unknown platform, or another app", () => {
+    expect(
+      appSignInLink({ label: "Yap", platform: "ios" }, "ABCDEFGH"),
+    ).toBeNull();
+    expect(
+      appSignInLink({ label: "Yap", platform: "linux" }, "ABCDEFGH"),
+    ).toBeNull();
+    expect(
+      appSignInLink({ label: "Yap", platform: null }, "ABCDEFGH"),
+    ).toBeNull();
+    expect(appSignInLink({ label: "Yap" }, "ABCDEFGH")).toBeNull();
+    expect(
+      appSignInLink({ label: "Yap Desktop", platform: "windows" }, "ABCDEFGH"),
+    ).toBeNull();
+    expect(
+      appSignInLink({ label: "Yap Mobile", platform: "android" }, "ABCDEFGH"),
+    ).toBeNull();
+  });
+});
+
 describe("native app links for web pages", () => {
   it("builds invite links only for codes the app takes", () => {
     expect(nativeInviteLink("quiet-pro_7")).toBe(
@@ -63,14 +106,18 @@ describe("native app links for web pages", () => {
 describe("launching the native app", () => {
   afterEach(() => setNativeAppLauncherForTests(null));
 
-  it("hands over only yap-native links", () => {
+  it("hands over only yap-native links and the Android app's intent", () => {
     const launch = vi.fn();
     setNativeAppLauncherForTests(launch);
     launchNativeApp("https://yap.example.com/invite/abc");
     launchNativeApp("yap://invite/abc");
+    launchNativeApp("intent://signin#Intent;scheme=yap;package=com.other;end");
     expect(launch).not.toHaveBeenCalled();
     launchNativeApp("yap-native://invite/abc");
     expect(launch).toHaveBeenCalledWith("yap-native://invite/abc");
+    const android = androidSignInLink("ABCD-EFGH");
+    launchNativeApp(android);
+    expect(launch).toHaveBeenLastCalledWith(android);
   });
 });
 

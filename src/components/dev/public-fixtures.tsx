@@ -4,8 +4,8 @@
  * or a stubbed fetch. Nothing here ships.
  *
  *   pub-activate-{enter,enter-error,auth-loading,loading,review,review-long,
- *     deny-busy,decide-error,approved,approved-native,expired,rate-limited,
- *     mfa,network}
+ *     deny-busy,decide-error,approved,approved-native,approved-android,
+ *     approved-ios,expired,rate-limited,mfa,network}
  *   pub-sign-in-device    sign-in reached from /activate (device waiting)
  *   pub-desktop-{idle,starting,pending,expiring,open-failed,verifying,
  *     rejected,unreachable,denied,expired,error,mfa}
@@ -101,11 +101,10 @@ const REQUEST = {
   expiresAt: new Date(Date.now() + 4 * 60_000 + 12_000).toISOString(),
 };
 
-/** The native Windows client's request (its own label, its own link). */
-const NATIVE_REQUEST = {
-  ...REQUEST,
-  device: { ...REQUEST.device, label: "Yap" },
-};
+/** The native client's request (its own label, its own link per platform). */
+function nativeRequest(platform: string) {
+  return { ...REQUEST, device: { ...REQUEST.device, label: "Yap", platform } };
+}
 
 const LONG_REQUEST = {
   ...REQUEST,
@@ -147,8 +146,12 @@ function activationDeps(
         request: long
           ? LONG_REQUEST
           : surface.endsWith("-native")
-            ? NATIVE_REQUEST
-            : REQUEST,
+            ? nativeRequest("windows")
+            : surface.endsWith("-android")
+              ? nativeRequest("android")
+              : surface.endsWith("-ios")
+                ? nativeRequest("ios")
+                : REQUEST,
       }),
       approveDeviceRequest: async () => ({
         ok: true as const,
@@ -196,7 +199,7 @@ function ActivateFixture({ surface }: { surface: string }) {
               }
             : {};
   const [deps] = useState(() => activationDeps(surface, overrides));
-  // The approval hands yap-native:// to the browser; keep the fixture put.
+  // The approval hands the app's link to the browser; keep the fixture put.
   useEffect(() => {
     setNativeAppLauncherForTests(() => {});
     return () => setNativeAppLauncherForTests(null);
@@ -204,9 +207,7 @@ function ActivateFixture({ surface }: { surface: string }) {
   useAutoClick(
     step === "deny-busy"
       ? "Deny"
-      : step === "decide-error" ||
-          step === "approved" ||
-          step === "approved-native"
+      : step === "decide-error" || step.startsWith("approved")
         ? "Approve sign-in"
         : null,
     600,

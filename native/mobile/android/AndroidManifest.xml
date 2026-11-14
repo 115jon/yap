@@ -152,6 +152,10 @@
                 <data android:scheme="yap" />
                 <data android:host="invite" />
                 <data android:host="chat" />
+                <!-- /activate's "Open Yap" after a device sign-in
+                     (yap://signin?code=…, sent as an intent link): it only
+                     brings the app forward; the app's own poll signs in. -->
+                <data android:host="signin" />
             </intent-filter>
         </activity>
 

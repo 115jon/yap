@@ -22,10 +22,11 @@
  * release fails it still signs out, but lands on a "Code in use" page that
  * asks for a fresh code from the device (`?release=failed`).
  *
- * A code from the native Windows client (Yap) ends on an "Open Yap"
- * key, and the page tries `yap-native://signin?code=…` once on its own, so
- * the browser offers to open the app (src/lib/native-app-link.ts). The link
- * carries no token: the app is already polling the code.
+ * A code from the native client (Yap) on Windows or Android ends on an
+ * "Open Yap" key, and the page tries that platform's link once on its own,
+ * so the browser offers to open the app (`appSignInLink` in
+ * src/lib/native-app-link.ts). Elsewhere it says to go back to the app. The
+ * link carries no token: the app is already polling the code.
  */
 
 import { Avatar } from "@/components/ui/avatar";
@@ -48,11 +49,7 @@ import {
 } from "@/lib/device-code-format";
 import { getKovaAuthUrl } from "@/lib/kova-auth-config";
 import { endKovaBrowserSession } from "@/lib/kova-sign-out";
-import {
-  isNativeAppDevice,
-  launchNativeApp,
-  nativeSignInLink,
-} from "@/lib/native-app-link";
+import { appSignInLink, launchNativeApp } from "@/lib/native-app-link";
 import {
   useAuth,
   useDeviceApproval,
@@ -99,7 +96,7 @@ type View =
       kind: "approved";
       code: string;
       deviceName?: string;
-      /** `yap-native://signin?…` when the native client asked. */
+      /** The app's sign-in link when the native client asked (`appSignInLink`). */
       appLink?: string;
     }
   | {
@@ -477,9 +474,8 @@ export function DeviceActivation({
     if (result.ok) {
       if (result.status === "approved") {
         const name = deviceName(request);
-        const appLink = isNativeAppDevice(request.device)
-          ? nativeSignInLink(request.userCode)
-          : undefined;
+        const appLink =
+          appSignInLink(request.device, request.userCode) ?? undefined;
         setView({
           kind: "approved",
           code: request.userCode,

@@ -12,6 +12,8 @@
  *   - a left-aligned column, 440px (720 for a shared message), top-aligned
  *     at a fixed offset so a state change grows downward instead of
  *     re-centring the whole column
+ *   - the page itself scrolls (the frame is min-h-dvh, never a fixed-height
+ *     scroll pane), so a tall column scrolls on a phone like any page
  *
  * The dither is decorative and still: aria-hidden, one painted frame (no
  * `animate`, so nothing ticks and reduced motion has nothing to stop),
@@ -81,9 +83,14 @@ export function PublicFrame({
             <span className="silkscreen text-ink-3">{label}</span>
           ) : null}
         </header>
+        {/* The document scrolls, not <main>: the frame is only min-h-dvh, so
+            <main> grows with its content and never overflows itself. As a
+            scroll container with contained overscroll it took every swipe
+            and wheel that started on it and passed none to the page, so a
+            column taller than the phone could not be scrolled. */}
         <main
           aria-busy={ariaBusy || undefined}
-          className="flex min-w-0 flex-1 justify-center overflow-y-auto overscroll-contain px-[max(24px,var(--safe-area-right,0px))] pt-10 md:pt-[clamp(32px,10vh,96px)] pb-[max(48px,var(--safe-area-bottom,0px))]"
+          className="flex min-w-0 flex-1 justify-center px-[max(24px,var(--safe-area-right,0px))] pt-10 md:pt-[clamp(32px,10vh,96px)] pb-[max(48px,var(--safe-area-bottom,0px))]"
         >
           <div
             className={cn(
