@@ -200,6 +200,11 @@ describe("blockUser", () => {
   });
 
   it("blocks user and removes reverse relationship", async () => {
+    // The blocked user had a friendship or request row pointing back.
+    db.mockQuery("DELETE FROM relationships", { meta: { changes: 1 } }, [
+      TARGET_ID,
+      USER_ID,
+    ]);
     const result = await blockUser(db as any, USER_ID, TARGET_ID);
     expect(result.type).toBe(1);
     // The blocker's row is written (1 = blocked); the blocked user's row
@@ -213,6 +218,28 @@ describe("blockUser", () => {
     db.assertCalledWith("DELETE FROM relationships", [TARGET_ID, USER_ID]);
     expect(result.broadcasts).toHaveLength(2);
   });
+
+  it("keeps the other user's block of us (mutual blocks)", async () => {
+    // No row of theirs was deleted: their block (type 1) is spared.
+    db.mockQuery("DELETE FROM relationships", { meta: { changes: 0 } }, [
+      TARGET_ID,
+      USER_ID,
+    ]);
+    const result = await blockUser(db as any, USER_ID, TARGET_ID);
+    const [reverse] = db.getCalls("DELETE FROM relationships");
+    expect(reverse.sql).toContain("type != 1");
+    // They keep their relationship list as it is: no REMOVE broadcast.
+    expect(result.broadcasts).toEqual([
+      expect.objectContaining({ target: USER_ID, event: "RELATIONSHIP_ADD" }),
+    ]);
+  });
+
+  it("refuses to block yourself", async () => {
+    await expect(blockUser(db as any, USER_ID, USER_ID)).rejects.toHaveProperty(
+      "status",
+      400,
+    );
+  });
 });
 
 // ─── removeRelationship ──────────────────────────────────────────────────────
@@ -225,10 +252,33 @@ describe("removeRelationship", () => {
   });
 
   it("removes both sides of relationship", async () => {
+    db.mockQuery("DELETE FROM relationships", { meta: { changes: 1 } }, [
+      TARGET_ID,
+      USER_ID,
+    ]);
     const result = await removeRelationship(db as any, USER_ID, TARGET_ID);
     db.assertCalledWith("DELETE FROM relationships", [USER_ID, TARGET_ID]);
     db.assertCalledWith("DELETE FROM relationships", [TARGET_ID, USER_ID]);
     expect(result.broadcasts).toHaveLength(2);
+  });
+
+  it("never lifts the other user's block", async () => {
+    // A blocked user "removing" the blocker deletes only their own row.
+    db.mockQuery("DELETE FROM relationships", { meta: { changes: 0 } }, [
+      TARGET_ID,
+      USER_ID,
+    ]);
+    const result = await removeRelationship(db as any, USER_ID, TARGET_ID);
+    const reverse = db
+      .getCalls("DELETE FROM relationships")
+      .find((call) => call.bindings[0] === TARGET_ID);
+    expect(reverse?.sql).toContain("type != 1");
+    expect(result.broadcasts).toEqual([
+      expect.objectContaining({
+        target: USER_ID,
+        event: "RELATIONSHIP_REMOVE",
+      }),
+    ]);
   });
 });
 

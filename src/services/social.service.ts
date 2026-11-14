@@ -256,9 +256,14 @@ export async function blockUser(
   userId: string,
   targetUserId: string,
 ): Promise<{ type: number; broadcasts: BroadcastDescriptor[] }> {
+  if (targetUserId === userId) {
+    throw ServiceError.badRequest("Cannot block yourself");
+  }
   const now = new Date().toISOString();
 
-  await db.batch([
+  // Their side of a friendship or request goes; their own block of us
+  // stays (both can block each other, and each unblocks on their own).
+  const [, reverse] = await db.batch([
     db
       .prepare(
         `INSERT OR REPLACE INTO relationships (user_id, target_user_id, type, created_at, updated_at)
@@ -267,7 +272,7 @@ export async function blockUser(
       .bind(userId, targetUserId, now, now),
     db
       .prepare(
-        `DELETE FROM relationships WHERE user_id = ? AND target_user_id = ?`,
+        `DELETE FROM relationships WHERE user_id = ? AND target_user_id = ? AND type != 1`,
       )
       .bind(targetUserId, userId),
   ]);
@@ -279,23 +284,23 @@ export async function blockUser(
     .bind(targetUserId)
     .first();
 
-  return {
-    type: 1,
-    broadcasts: [
-      {
-        type: "user",
-        target: userId,
-        event: "RELATIONSHIP_ADD",
-        data: { user: userB, type: 1, created_at: now },
-      },
-      {
-        type: "user",
-        target: targetUserId,
-        event: "RELATIONSHIP_REMOVE",
-        data: { user_id: userId },
-      },
-    ],
-  };
+  const broadcasts: BroadcastDescriptor[] = [
+    {
+      type: "user",
+      target: userId,
+      event: "RELATIONSHIP_ADD",
+      data: { user: userB, type: 1, created_at: now },
+    },
+  ];
+  if (Number(reverse?.meta?.changes ?? 0) > 0) {
+    broadcasts.push({
+      type: "user",
+      target: targetUserId,
+      event: "RELATIONSHIP_REMOVE",
+      data: { user_id: userId },
+    });
+  }
+  return { type: 1, broadcasts };
 }
 
 // ─── removeRelationship ──────────────────────────────────────────────────────
@@ -305,7 +310,10 @@ export async function removeRelationship(
   userId: string,
   targetUserId: string,
 ): Promise<{ broadcasts: BroadcastDescriptor[] }> {
-  await db.batch([
+  // Unfriending, cancelling and unblocking clear our row and their side of a
+  // friendship or request, never their block of us: a blocked user cannot
+  // lift a block by "removing" the blocker.
+  const [, reverse] = await db.batch([
     db
       .prepare(
         `DELETE FROM relationships WHERE user_id = ? AND target_user_id = ?`,
@@ -313,27 +321,28 @@ export async function removeRelationship(
       .bind(userId, targetUserId),
     db
       .prepare(
-        `DELETE FROM relationships WHERE user_id = ? AND target_user_id = ?`,
+        `DELETE FROM relationships WHERE user_id = ? AND target_user_id = ? AND type != 1`,
       )
       .bind(targetUserId, userId),
   ]);
 
-  return {
-    broadcasts: [
-      {
-        type: "user",
-        target: userId,
-        event: "RELATIONSHIP_REMOVE",
-        data: { user_id: targetUserId },
-      },
-      {
-        type: "user",
-        target: targetUserId,
-        event: "RELATIONSHIP_REMOVE",
-        data: { user_id: userId },
-      },
-    ],
-  };
+  const broadcasts: BroadcastDescriptor[] = [
+    {
+      type: "user",
+      target: userId,
+      event: "RELATIONSHIP_REMOVE",
+      data: { user_id: targetUserId },
+    },
+  ];
+  if (Number(reverse?.meta?.changes ?? 0) > 0) {
+    broadcasts.push({
+      type: "user",
+      target: targetUserId,
+      event: "RELATIONSHIP_REMOVE",
+      data: { user_id: userId },
+    });
+  }
+  return { broadcasts };
 }
 
 // ─── listDMs ─────────────────────────────────────────────────────────────────
