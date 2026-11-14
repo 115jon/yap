@@ -19,6 +19,7 @@ fn main() {
         QmlFile::from("qml/components/AccountMenuRow.qml"),
         QmlFile::from("qml/components/Avatar.qml"),
         QmlFile::from("qml/components/AvatarCropState.qml"),
+        QmlFile::from("qml/components/CallHealth.qml"),
         QmlFile::from("qml/components/CallStatusLine.qml"),
         QmlFile::from("qml/components/ChatScroll.qml"),
         QmlFile::from("qml/components/CollapseTracker.qml"),

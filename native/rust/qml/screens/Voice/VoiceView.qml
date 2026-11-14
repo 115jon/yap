@@ -201,55 +201,16 @@ Rectangle {
         width: parent.width
     }
 
-    // The audio sentinels (RoomVoiceView.tsx): nothing goes out from our
-    // unmuted mic, or nothing comes in while someone talks. Apart: a muted
-    // mic is silent on purpose, and does not change what we hear.
-    Column {
+    // The audio sentinels (RoomVoiceView.tsx, CallHealth): nothing goes out
+    // from our unmuted mic, or nothing comes in while someone talks. Apart:
+    // a muted mic is silent on purpose, and does not change what we hear.
+    CallHealth {
         id: strip
         readonly property var calls: JSON.parse(Calls.view)
         anchors.top: connection.bottom
         width: parent.width
-        Repeater {
-            model: [
-                {
-                    "shown": root.joined && !Voice.muted && strip.calls.micStalled === true,
-                    "icon": "micOff",
-                    "text": qsTr("We can't hear you. Your microphone isn't picking up any sound.")
-                },
-                {
-                    "shown": root.joined && strip.calls.inboundStalled === true,
-                    "icon": "deafen",
-                    "text": qsTr("You can't hear anyone. Check your output device.")
-                }
-            ]
-            Rectangle {
-                id: line
-                required property var modelData
-                width: strip.width
-                height: modelData.shown ? 32 : 0
-                visible: modelData.shown
-                color: Theme.dangerTint
-                Row {
-                    x: 16
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 8
-                    Icon {
-                        anchors.verticalCenter: parent.verticalCenter
-                        name: line.modelData.icon
-                        size: Theme.iconSm
-                        color: Theme.dangerInk
-                    }
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        textFormat: Text.PlainText
-                        text: line.modelData.text
-                        color: Theme.dangerInk
-                        font: Theme.type.caption
-                        Accessible.role: Accessible.AlertMessage
-                    }
-                }
-            }
-        }
+        micStalled: root.joined && !Voice.muted && strip.calls.micStalled === true
+        inboundStalled: root.joined && strip.calls.inboundStalled === true
     }
 
     // Landing.
