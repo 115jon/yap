@@ -7,7 +7,8 @@
  * Stored in D1 `site_settings` under key `nativeHandoff`
  * (services/site-settings-store.ts), written by the admin Worker. Unlike the
  * kill switches it defaults to off: a missing or unreadable row means no
- * handoff. The Tauri app (desktop/src-tauri/src/native_handoff) reads it from
+ * handoff. The Tauri app (desktop/src-tauri/src/native_handoff, on the
+ * archive/tauri-desktop branch) reads it from
  * GET /api/desktop/native-handoff and also hands off only when it gets a
  * readable answer.
  */

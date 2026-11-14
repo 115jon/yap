@@ -3,15 +3,19 @@
 Who decides whether the main window is visible, how `yap://` links reach the page, and
 where the desktop settings live. The frontend sends intents; Rust decides.
 
+The Tauri app was removed from `main`; its code (`desktop/`) is on the
+[`archive/tauri-desktop`](https://github.com/115jon/yap/tree/archive/tauri-desktop/desktop)
+branch, where the Rust modules below link. The web side (`src/`) is still here.
+
 ## Modules
 
-| module                                                                   | owns                                                                               |
-| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| [`main_window.rs`](../../desktop/src-tauri/src/main_window.rs)           | the launch handoff, reveal, close to tray, deep-link routing                       |
-| [`desktop_settings.rs`](../../desktop/src-tauri/src/desktop_settings.rs) | `desktop-settings.json`, `get_desktop_settings`, `set_desktop_settings`            |
-| [`window.rs`](../../desktop/src-tauri/src/window.rs)                     | the Win32 tray-state helpers (`make_window_invisible`, `restore_window_from_tray`) |
-| [`window_state.rs`](../../desktop/src-tauri/src/window_state.rs)         | size, position and maximized state (unchanged)                                     |
-| [`tray.rs`](../../desktop/src-tauri/src/tray.rs)                         | the tray icon and menu; calls `reveal`                                             |
+| module                                                                                                                      | owns                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| [`main_window.rs`](https://github.com/115jon/yap/blob/archive/tauri-desktop/desktop/src-tauri/src/main_window.rs)           | the launch handoff, reveal, close to tray, deep-link routing                       |
+| [`desktop_settings.rs`](https://github.com/115jon/yap/blob/archive/tauri-desktop/desktop/src-tauri/src/desktop_settings.rs) | `desktop-settings.json`, `get_desktop_settings`, `set_desktop_settings`            |
+| [`window.rs`](https://github.com/115jon/yap/blob/archive/tauri-desktop/desktop/src-tauri/src/window.rs)                     | the Win32 tray-state helpers (`make_window_invisible`, `restore_window_from_tray`) |
+| [`window_state.rs`](https://github.com/115jon/yap/blob/archive/tauri-desktop/desktop/src-tauri/src/window_state.rs)         | size, position and maximized state (unchanged)                                     |
+| [`tray.rs`](https://github.com/115jon/yap/blob/archive/tauri-desktop/desktop/src-tauri/src/tray.rs)                         | the tray icon and menu; calls `reveal`                                             |
 
 ## Tray state
 
@@ -133,7 +137,7 @@ localStorage copy for first paint and for the web build.
 
 Before this file existed the frontend owned the settings in localStorage and pushed them to Rust on every start.
 
-1. The main window calls `hydrateDesktopSettings()` on mount (`desktop/desktop-entry.tsx`).
+1. The main window calls `hydrateDesktopSettings()` on mount (`desktop/desktop-entry.tsx` on the archive branch).
 2. It calls `get_desktop_settings`. With `persisted: true` the store takes Rust's values. Done.
 3. With `persisted: false` it sends its localStorage values for `openOnStartup`, `startMinimized`, `closeToTray` and
    `desktopNotifications` in one `set_desktop_settings`. Rust writes the file and the store takes the answer.

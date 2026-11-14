@@ -23,7 +23,7 @@ grid multiples) are the sources for the shipped icons:
 - `public/favicon.ico`
 - `public/favicon-dev.ico`, the green dev-server variant, from
   `app-icon-dev-16/32/48.png`
-- `desktop-native/assets/app/yap.ico`, the Windows client's executable icon
+- `native/assets/app/yap.ico`, the Windows client's executable icon
 
 The script that generated them belonged to the Tauri app and was removed
 with it (it lives on the `archive/tauri-desktop` branch). Until a
@@ -46,5 +46,5 @@ if the art changes:
 - `src/assets/splash-logo.svg` (master) and `public/icons/home-*.svg`
   (24 px art, the rail home mark).
 - `src/components/ui/yap-bark.tsx`: the dithered, barking loader mark.
-- `desktop-native/mobile/qt/android/res/`: the Qt Android app's adaptive
+- `native/mobile/android/res/`: the Qt Android app's adaptive
   launcher layers.

@@ -12,7 +12,7 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/115jon/yap/ci.yml?branch=main&label=CI&style=flat-square&labelColor=000)](https://github.com/115jon/yap/actions/workflows/ci.yml)
 [![Deploy web](https://img.shields.io/github/actions/workflow/status/115jon/yap/deploy-web.yml?branch=main&label=deploy%20web&style=flat-square&labelColor=000)](https://github.com/115jon/yap/actions/workflows/deploy-web.yml)
-[![Desktop release](https://img.shields.io/github/actions/workflow/status/115jon/yap/desktop-native-release.yml?label=desktop%20release&style=flat-square&labelColor=000)](https://github.com/115jon/yap/actions/workflows/desktop-native-release.yml)
+[![Desktop release](https://img.shields.io/github/actions/workflow/status/115jon/yap/native-release.yml?label=desktop%20release&style=flat-square&labelColor=000)](https://github.com/115jon/yap/actions/workflows/native-release.yml)
 <br>
 [![Latest release](https://img.shields.io/github/v/release/115jon/yap?filter=v*&label=release&style=flat-square&labelColor=000&color=ff3d8b)](https://github.com/115jon/yap/releases/latest)
 [![Android](https://img.shields.io/github/v/release/115jon/yap?filter=qt-android-v*&include_prereleases&label=android&style=flat-square&labelColor=000&color=3ddc84)](https://github.com/115jon/yap/releases?q=qt-android-v&expanded=true)
@@ -126,13 +126,13 @@ All three sign in to the same account and the same rooms.
   [`migrations/`](migrations).
 - **Auth:** [Kova](https://github.com/115jon/kova), through `@kova/react` on
   every client.
-- **Desktop:** [`desktop-native/`](desktop-native) is a native Windows
+- **Desktop:** [`native/`](native) is a native Windows
   client: a Rust core behind a QML UI through
   [cxx-qt](https://github.com/KDAB/cxx-qt), linked against a static Qt into
   one `Yap.exe`, with libwebrtc for voice and video and native screen and
   game capture. It installs and updates through Velopack; `YapSetup.exe` is
   a copy of its `Yap.App-win-Setup.exe`.
-- **Android:** [`desktop-native/mobile/qt`](desktop-native/mobile/qt) runs
+- **Android:** [`native/mobile`](native/mobile) runs
   the same Rust core and QML on Android under a mobile shell.
 - The earlier Tauri desktop app and Expo Android app are archived on the
   `archive/tauri-desktop` and `archive/expo-mobile` branches.
@@ -143,9 +143,9 @@ The Windows client links Qt (LGPL-3.0) and libwebrtc statically and ships
 Microsoft's ONNX Runtime for camera backgrounds. Game capture uses OBS
 Studio's own signed hook and helper binaries, shipped unmodified under
 GPL-2.0 with their license text and a written source offer
-([`desktop-native/packaging/obs-capture`](desktop-native/packaging/obs-capture));
+([`native/packaging/obs-capture`](native/packaging/obs-capture));
 each release attaches the corresponding source. See the
-[native third-party notices](desktop-native/THIRD_PARTY_NOTICES.md).
+[native third-party notices](native/THIRD_PARTY_NOTICES.md).
 
 The capture component injects a graphics hook into a user-selected game process
 to capture that process. It is not a security scanner, exploit tool, or bypass
@@ -158,7 +158,7 @@ tool.
 - [Security Policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Native third-party notices](desktop-native/THIRD_PARTY_NOTICES.md)
+- [Native third-party notices](native/THIRD_PARTY_NOTICES.md)
 - [Deploying the web app](docs/deploy.md)
 - [Design system](DESIGN.md) and [product brief](PRODUCT.md)
 
@@ -219,8 +219,8 @@ The server never falls back to the next free port on its own, because the
 `http://127.0.0.1:5173` and `http://localhost:1420`. On any other port the
 app loads, but sign-in fails until that origin is added to the Kova app.
 
-The native clients build from [`desktop-native/`](desktop-native); see
-[desktop-native/README.md](desktop-native/README.md).
+The native clients build from [`native/`](native); see
+[native/README.md](native/README.md).
 
 ### Game catalog
 

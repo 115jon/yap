@@ -32,7 +32,7 @@
     "package-lock.json",
     "Cargo.lock",
     "*.lock",
-    "desktop-native/mobile/qt/qt-sdk.lock.json",
+    "native/mobile/qt-sdk.lock.json",
     "**/*.toml",
     "src/components/ui/icon/glyphs.generated.ts",
     "src/lib/ytdlp/assets/*.min.js",

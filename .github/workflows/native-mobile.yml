@@ -1,0 +1,343 @@
+name: "Desktop Native Mobile Prototype"
+
+# The mobile prototypes on the native core (native/mobile/README.md).
+#
+# The Compose + UniFFI baseline was archived at the tag
+# archive/compose-baseline and no longer builds here.
+#
+# - qt-android: the Qt Quick app (native/mobile) for x86_64 and
+#   arm64-v8a, signed with the public CI debug key, as artifacts (tester
+#   builds with the release key: qt-android-release.yml). Anyone can sign
+#   with that key, so these builds are their own app, dev.yap.app.ci ("Yap
+#   CI"), without push notifications: an APK signed with it can never
+#   update an installed dev.yap.app. Qt comes from download.qt.io, pinned by
+#   native/mobile/qt-sdk.lock.json. The session vault's tests run first.
+# - qt-android-smoke: the x86_64 APK cold-started on an emulator.
+# - qt-ios: the same CMake project for the iOS simulator, a compile and link
+#   check (no signing, no run). It runs when native/mobile changes, by hand, and
+#   weekly, not for every core change.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/native-mobile.yml"
+      - "native/mobile/**"
+      - "native/rust/Cargo.toml"
+      - "native/rust/Cargo.lock"
+      - "native/rust/crates/**"
+      # The Qt app's voice builds the patched LiveKit crates (vendor.ps1).
+      - "native/patches/**"
+      # The Qt app embeds the desktop's fonts and icons; its iOS check scans
+      # the desktop QML for the QML plugins to link.
+      - "native/rust/qml/**"
+      - "native/assets/**"
+  workflow_dispatch:
+  schedule:
+    - cron: "41 5 * * 1"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: native-mobile-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  # The Qt app's id for CI builds (never the release app's dev.yap.app).
+  YAP_CI_APP_ID: dev.yap.app.ci
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      # Manual and scheduled runs build everything.
+      qt: ${{ steps.filter.outputs.qt || 'true' }}
+      ios: ${{ steps.filter.outputs.ios || 'true' }}
+    steps:
+      - name: Detect what changed
+        id: filter
+        if: ${{ github.event_name == 'pull_request' }}
+        # dorny/paths-filter v3.0.4
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad
+        with:
+          filters: |
+            qt:
+              - '.github/workflows/native-mobile.yml'
+              - 'native/mobile/**'
+              - 'native/rust/Cargo.toml'
+              - 'native/rust/Cargo.lock'
+              # The crates include yap-ui (the shared Yap.Ui QML and C++).
+              - 'native/rust/crates/**'
+              - 'native/patches/**'
+              - 'native/rust/qml/**'
+              - 'native/assets/**'
+            ios:
+              - '.github/workflows/native-mobile.yml'
+              - 'native/mobile/**'
+              - 'native/rust/crates/yap-ui/**'
+              - 'native/patches/**'
+
+  qt-android:
+    name: qt-android (${{ matrix.abi }})
+    needs: changes
+    if: ${{ needs.changes.outputs.qt == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The ABI digit of the version code (run * 10 + digit), so each
+          # ABI's APK of one run has its own code, arm64 below x86_64.
+          - abi: arm64-v8a
+            rust: aarch64-linux-android
+            qt: android-arm64_v8a
+            qt_dir: android_arm64_v8a
+            digit: 2
+          - abi: x86_64
+            rust: x86_64-linux-android
+            qt: android-x86_64
+            qt_dir: android_x86_64
+            digit: 4
+    env:
+      YAPM: ${{ github.workspace }}/.yapm
+      QT_HOST_PATH: ${{ github.workspace }}/.yapm/qt/gcc_64
+      QT_TARGET_ROOT: ${{ github.workspace }}/.yapm/qt/${{ matrix.qt_dir }}
+      # The NDK Qt 6.11.3 for Android was built with (r27c).
+      NDK_VERSION: 27.2.12479018
+      BUILD_TOOLS: 36.0.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
+        with:
+          targets: ${{ matrix.rust }}
+
+      - name: JDK 17
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Ninja and 7-Zip
+        # Skipped when the image has both. Otherwise retried: an unreachable
+        # mirror (security.ubuntu.com has failed to resolve on the runners)
+        # must not fail the build when the main archive answers.
+        run: |
+          if command -v ninja >/dev/null && command -v 7z >/dev/null; then
+            ninja --version; exit 0
+          fi
+          for attempt in 1 2 3 4; do
+            sudo apt-get update -qq -o Acquire::Retries=3 || true
+            if sudo apt-get install -y -qq -o Acquire::Retries=3 ninja-build p7zip-full; then
+              exit 0
+            fi
+            sleep $((attempt * 15))
+          done
+          exit 1
+
+      - name: Android NDK, platform and build tools
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "ndk;$NDK_VERSION" "platforms;android-36" "build-tools;$BUILD_TOOLS" >/dev/null
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >>"$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VERSION" >>"$GITHUB_ENV"
+
+      # The archives only (about 50 MB per set); unpacking them is quick.
+      - name: Cache the Qt archives
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .yapm/qt-download
+          key: qt-sdk-${{ matrix.qt }}-host-linux-${{ hashFiles('native/mobile/qt-sdk.lock.json') }}
+
+      - name: Qt 6.11.3 (host and target)
+        shell: pwsh
+        run: |
+          ./native/mobile/fetch-qt.ps1 -Dest .yapm/qt -DownloadDir .yapm/qt-download `
+            -Set host-linux,${{ matrix.qt }}
+
+      # Swatinem/rust-cache v2.9.3. Corrosion's target folder is inside the
+      # CMake build tree (build.sh: $YAPM/build/qt-<abi>-Release).
+      - name: Cargo cache
+        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          # A re-pinned Qt invalidates cxx-qt's compiled objects too.
+          key: qt-${{ matrix.abi }}-${{ hashFiles('native/mobile/qt-sdk.lock.json') }}
+          workspaces: native/mobile/rust -> ../../../.yapm/build/qt-${{ matrix.abi }}-Release/cargo/build
+
+      # The session token's sealed file and its migration (no Qt needed).
+      - name: Session vault tests
+        if: ${{ matrix.abi == 'x86_64' }}
+        run: cargo test --locked --manifest-path native/mobile/vault/Cargo.toml
+
+      # No Firebase configuration (YAP_GOOGLE_SERVICES_JSON unset): the
+      # Firebase project knows dev.yap.app only, and a CI build is not a
+      # tester's app. Pushes are tested with local and release builds.
+      - name: Build the APK (${{ matrix.abi }}, release)
+        env:
+          RUN: ${{ github.run_number }}
+          # The commit actually built: on a pull request, the merge ref.
+          SHA: ${{ github.sha }}
+        run: |
+          # Below every release build's code (qt-android-release.yml); the
+          # name marks a CI build of native/mobile/VERSION.
+          code=$(( RUN * 10 + ${{ matrix.digit }} ))
+          base="$(head -n 1 native/mobile/VERSION)"
+          bash native/mobile/build.sh ${{ matrix.abi }} Release \
+            -DYAP_ANDROID_APP_ID="$YAP_CI_APP_ID" \
+            -DYAP_ANDROID_APP_NAME="Yap CI" \
+            -DYAP_ANDROID_VERSION_CODE="$code" \
+            -DYAP_ANDROID_VERSION_NAME="$base-ci.$RUN+${SHA::7}" \
+            -DYAP_ANDROID_COMPILE_SDK=android-36 \
+            -DYAP_ANDROID_BUILD_TOOLS="$BUILD_TOOLS"
+
+      # The public CI debug key (native/mobile/ci/README.md): one run's APK
+      # installs over another's (dev.yap.app.ci only). Not a release key.
+      - name: Sign
+        run: |
+          mkdir -p out
+          YAP_KEYSTORE=native/mobile/ci/debug.keystore YAP_BUILD_TOOLS="$BUILD_TOOLS" \
+            bash native/mobile/sign.sh \
+            "$YAPM/build/qt-${{ matrix.abi }}-Release/android-build/build/outputs/apk/release/android-build-release-unsigned.apk" \
+            "out/yap-qt-${{ matrix.abi }}.apk"
+
+      - name: Sizes
+        run: |
+          apk="out/yap-qt-${{ matrix.abi }}.apk"
+          echo "APK $(stat -c %s "$apk") bytes, gzip -9 $(gzip -9 -c "$apk" | wc -c) bytes"
+          unzip -lv "$apk" | awk 'NR > 3 && $8 ~ /\.(so|dex)$/ { printf "%10d %10d  %s\n", $1, $3, $8 }' | sort -rn
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: yap-qt-${{ matrix.abi }}
+          path: |
+            out/yap-qt-${{ matrix.abi }}.apk
+            out/yap-qt-${{ matrix.abi }}.apk.sha256
+          retention-days: 14
+
+  # The x86_64 APK cold-started on an emulator (API 35): it must log
+  # "[startup] first frame" (Qt, the QML and the core loaded). No network.
+  qt-android-smoke:
+    needs: qt-android
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EMULATOR_API: 35
+      EMULATOR_TARGET: google_apis
+      EMULATOR_ARCH: x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Download the x86_64 APK
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: yap-qt-x86_64
+          path: out
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # The emulator's system image (about 1 GB) comes from dl.google.com,
+      # which sometimes drops the download ("Premature EOF"), and
+      # android-emulator-runner does not retry it. So the image is cached
+      # (keyed on the API level, target and architecture the action is asked
+      # for), and a miss downloads it here with retries; the action then
+      # finds it installed. The AVD is not cached: the smoke is a cold boot
+      # (-no-snapshot), which a cached AVD would not speed up. The same two
+      # steps are in native-mobile.yml and qt-android-release.yml.
+      - name: Cache the emulator system image
+        id: system-image
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: /usr/local/lib/android/sdk/system-images/android-${{ env.EMULATOR_API }}/${{ env.EMULATOR_TARGET }}/${{ env.EMULATOR_ARCH }}
+          key: android-system-image-v1-${{ env.EMULATOR_API }}-${{ env.EMULATOR_TARGET }}-${{ env.EMULATOR_ARCH }}
+
+      - name: Download the emulator system image
+        if: steps.system-image.outputs.cache-hit != 'true'
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          image="system-images;android-$EMULATOR_API;$EMULATOR_TARGET;$EMULATOR_ARCH"
+          for attempt in 1 2 3 4; do
+            # `yes` accepts the licence prompt (as the action does).
+            if "$sdkmanager" --install "$image" < <(yes); then
+              exit 0
+            fi
+            echo "::warning::sdkmanager could not install $image (attempt $attempt of 4)"
+            sleep $((attempt * 15))
+          done
+          echo "::error::the emulator system image could not be downloaded"
+          exit 1
+
+      - name: Cold start on an emulator
+        # ReactiveCircus/android-emulator-runner v2.38.0
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: ${{ env.EMULATOR_API }}
+          arch: ${{ env.EMULATOR_ARCH }}
+          target: ${{ env.EMULATOR_TARGET }}
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: YAP_ANDROID_APP_ID=${{ env.YAP_CI_APP_ID }} bash native/mobile/smoke.sh out/yap-qt-x86_64.apk 180
+
+  qt-ios:
+    needs: changes
+    if: ${{ needs.changes.outputs.ios == 'true' }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      YAPM: ${{ github.workspace }}/.yapm
+      QT_HOST_PATH: ${{ github.workspace }}/.yapm/qt/macos
+      QT_TARGET_ROOT: ${{ github.workspace }}/.yapm/qt/ios
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Qt for iOS has arm64 device and x86_64 simulator slices only, so the
+      # simulator build is x86_64.
+      - name: Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
+        with:
+          targets: x86_64-apple-ios
+
+      - name: Ninja and 7-Zip
+        run: |
+          command -v ninja >/dev/null || brew install ninja
+          command -v 7z >/dev/null || command -v 7zz >/dev/null || brew install sevenzip
+
+      - name: Cache the Qt archives
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .yapm/qt-download
+          key: qt-sdk-ios-host-mac-${{ hashFiles('native/mobile/qt-sdk.lock.json') }}
+
+      - name: Qt 6.11.3 (host and iOS)
+        shell: pwsh
+        run: |
+          ./native/mobile/fetch-qt.ps1 -Dest .yapm/qt -DownloadDir .yapm/qt-download -Set host-mac,ios
+
+      - name: Cargo cache
+        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: qt-ios-simulator-${{ hashFiles('native/mobile/qt-sdk.lock.json') }}
+          workspaces: native/mobile/rust -> ../../../.yapm/build/qt-ios-simulator-Release/cargo/build
+
+      - name: Build for the iOS simulator (x86_64, release)
+        run: bash native/mobile/build.sh ios-simulator Release
+
+      # The static plugins linked in (Q_IMPORT_PLUGIN's initializers): the
+      # platform, image formats and the QML modules' plugins.
+      - name: Size and linked plugins
+        run: |
+          app="$YAPM/build/qt-ios-simulator-Release/yapqt.app"
+          du -sh "$app"
+          nm "$app/yapqt" | grep -oE 'qt_static_plugin_[A-Za-z0-9_]+' | sort -u

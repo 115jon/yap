@@ -1,0 +1,215 @@
+<?xml version="1.0"?>
+<!-- Qt 6.11's template (src/android/templates) with these changes:
+     the predictive back gesture on (the shim registers its callback while
+     there is a page to go back to; at the root the system plays its own
+     back-to-home preview when it keeps the task alive, see
+     NativeShim.keepsTaskAtRoot), the keyboard left to the app (adjustNothing:
+     the composer follows the IME inset itself, frame by frame), the
+     sealed session file kept out of cloud backup and device-to-device transfer,
+     the adaptive icon, and the splash: the theme's (system splash on
+     Android 12+, window background before) hands over to Qt's, which stays
+     until main.cpp hides it at the first frame; push notifications
+     (the FCM service, the Reply and Mark as read receiver, the permission);
+     and voice calls (the mic, the audio route, the call's service);
+     and links into the app (LinkActivity's filters); the composer's Camera
+     (CaptureProvider, where the camera app writes the photo; no camera
+     permission: the system camera takes it).
+     No package attribute: the application id is CMake's YAP_ANDROID_APP_ID
+     (Gradle's namespace); the label is YAP_ANDROID_APP_NAME ("Yap", CI's
+     "Yap CI"). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:installLocation="auto"
+    android:versionCode="-- %%INSERT_VERSION_CODE%% --"
+    android:versionName="-- %%INSERT_VERSION_NAME%% --">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Whether the device has a network while the app's own is blocked in
+         the background (NetworkState: the connection strip says
+         Reconnecting there, not Offline). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Message notifications (API 33+ asks; push/PushShim, Native). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Voice calls (voice/VoiceShim): the mic (asked at the first join);
+         the communication mode and the speaker, earpiece or headset route;
+         the call's foreground service, which keeps the call with the screen
+         off or the app in the background; and the proximity sensor's screen
+         lock while the earpiece plays. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- The image viewer's Save image into Pictures/Yap (NativeShim
+         saveToGallery): MediaStore needs no permission for the app's own
+         pictures from API 29; API 28 (the minimum) needs this one. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <!-- DM calls ringing this phone (push/IncomingCalls): the ringing
+         notification's full-screen intent wakes the phone into the app
+         over the lock screen (granted at install below Android 14; from
+         14 the user allows it, else the ring is a heads-up), and the
+         in-app ring's vibration. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <!-- The shim asks which app is the home screen (was this start the
+         launcher's? NativeShim.keepsTaskAtRoot). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+        <!-- The composer's Camera: is there a camera app to take the photo
+             (NativeShim.takePhotoIntent)? -->
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
+    <!-- %%INSERT_PERMISSIONS -->
+    <!-- %%INSERT_FEATURES -->
+    <supports-screens
+        android:anyDensity="true"
+        android:largeScreens="true"
+        android:normalScreens="true"
+        android:smallScreens="true" />
+    <application
+        android:name="org.qtproject.qt.android.bindings.QtApplication"
+        android:hardwareAccelerated="true"
+        android:label="-- %%INSERT_APP_NAME%% --"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true">
+        <activity
+            android:name="dev.yap.qtproto.YapActivity"
+            android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
+            android:label="-- %%INSERT_APP_NAME%% --"
+            android:launchMode="singleTop"
+            android:screenOrientation="unspecified"
+            android:theme="@style/YapTheme"
+            android:windowSoftInputMode="adjustNothing"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="-- %%INSERT_APP_LIB_NAME%% --" />
+
+            <meta-data
+                android:name="android.app.arguments"
+                android:value="-- %%INSERT_APP_ARGUMENTS%% --" />
+
+            <meta-data
+                android:name="android.app.splash_screen_drawable"
+                android:resource="@drawable/splash" />
+            <meta-data
+                android:name="android.app.splash_screen_sticky"
+                android:value="true" />
+            <!-- Qt's event loops keep running while the app is in the
+                 background. Without it Qt stops them there (QtLoader sets
+                 QT_BLOCK_EVENT_LOOPS_WHEN_SUSPENDED, read once at start, so
+                 it cannot be turned on for a call only), and the core's view
+                 updates wait for the Qt thread: over a call with the screen
+                 off they pile up and are all applied on return (README,
+                 "Voice calls"). Nothing draws meanwhile (the window is not
+                 exposed), and outside a call the gateway closes after its
+                 grace as before. -->
+            <meta-data
+                android:name="android.app.background_running"
+                android:value="true" />
+        </activity>
+
+        <!-- Links into the app (LinkActivity hands them to YapActivity):
+             the web's invite and chat links, as the Expo app took them
+             (apps/mobile app.config.ts, branch archive/expo-mobile), on the web origin the core uses
+             (yap-core config.rs `api_base`), and the yap:// links the core
+             reads (yap-core links.rs). Not autoVerify: the web serves no
+             Digital Asset Links statement for this app yet, so on Android
+             12+ an https link opens in the browser until the user turns on
+             "Open supported links" for it. -->
+        <activity
+            android:name="dev.yap.qtproto.LinkActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="yap.115jon.com" />
+                <data android:pathPrefix="/invite/" />
+                <data android:pathPrefix="/chat/" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="yap" />
+                <data android:host="invite" />
+                <data android:host="chat" />
+            </intent-filter>
+        </activity>
+
+        <!-- Yap's data-only pushes, drawn natively (push/MessageNotifier),
+             also with the app killed. -->
+        <service
+            android:name="dev.yap.qtproto.push.YapMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <!-- The call in progress: the ongoing notification with Mute and
+             Leave. Not restarted by the system: the call lives in the
+             process, and ends with it. -->
+        <service
+            android:name="dev.yap.qtproto.voice.VoiceService"
+            android:exported="false"
+            android:foregroundServiceType="microphone"
+            android:stopWithTask="false" />
+        <!-- A notification's Reply and Mark as read. -->
+        <receiver
+            android:name="dev.yap.qtproto.push.NotificationActionReceiver"
+            android:exported="false" />
+        <!-- An incoming call notification's Decline, also with the app
+             killed. -->
+        <receiver
+            android:name="dev.yap.qtproto.push.CallActionReceiver"
+            android:exported="false" />
+        <!-- What FCM uses for a push it draws itself (none of Yap's do). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="other" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/yap_notify_small" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/yap_accent" />
+
+        <!-- The composer's Camera writes its photo here (cache/capture). -->
+        <provider
+            android:name="dev.yap.qtproto.CaptureProvider"
+            android:authorities="${applicationId}.capture"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/yap_capture_paths"/>
+        </provider>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.qtprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/qtprovider_paths"/>
+        </provider>
+    </application>
+</manifest>

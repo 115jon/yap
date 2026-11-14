@@ -279,7 +279,8 @@ releases send the same set):
   (Answer, IceRestart, ResetPullSession). They are outside every table, as
   before.
 
-**Mobile** (`apps/mobile/src`, mobile-v0.1.0 through main):
+**Mobile** (the Expo app, `apps/mobile/src`, mobile-v0.1.0 until its removal;
+the code is on the `archive/expo-mobile` branch):
 
 - global (`features/realtime/gateway.ts`): 0, 3, 15, 26, 27, 28, 33, 34, 35,
   36, 39. Main no longer sends 15 (the mute/deafen mirror) and sends 33 once
@@ -288,7 +289,7 @@ releases send the same set):
 - voice (`features/voice/gateways.ts`, `features/voice/connection.ts`): 100,
   3, 5, 11, 12, 13, 106, 109.
 
-**Native client spec** (`desktop-native/VOICE_PROTOCOL.md` on
+**Native client spec** (`native/VOICE_PROTOCOL.md` on
 `spike/qt-desktop`):
 
 - global: 0, 3, 33, 34 (optional sidebar presence).

@@ -5,7 +5,8 @@
 .DESCRIPTION
   Runs on a throwaway hosted Windows runner only: it installs the real
   Tauri app, updates it, runs the 3.14 bridge (desktop/src-tauri/src/
-  native_handoff) headless and lets the native app replace it. Never run it
+  native_handoff on the archive/tauri-desktop branch) headless and lets the
+  native app replace it. Never run it
   on a machine you care about.
 
   Every case starts the same way:
@@ -567,7 +568,7 @@ function Assert-Cutover([object] $run) {
   $runDetail = "Run\Yap -> $runValue (Run key present before seeding: $($script:RunKeyBefore), as the bridge started: $($script:RunKeyAtBridge))"
   if ($Case -eq 'native-installed' -and -not $runOk -and -not $script:RunKeyAtBridge -and $NativeMajor -lt 4) {
     # KNOWN BUG in native releases before 4.0.0: DesktopShell::setAutostart
-    # (desktop-native/cpp/desktopshell.cpp) opened the Run key with
+    # (native/cpp/desktopshell.cpp) opened the Run key with
     # RegOpenKeyExW, which fails when the key does not exist, so open on
     # startup was never written there. 4.0.0 creates the key
     # (RegCreateKeyExW), so from 4.0.0 this is the hard check below.

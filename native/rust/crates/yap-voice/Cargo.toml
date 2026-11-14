@@ -1,0 +1,74 @@
+[package]
+name = "yap-voice"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Yap voice calls: a pure call state machine with its roster and track table, a media engine trait (libwebrtc or fake), the SFU client and the async driver. No Qt."
+
+[features]
+default = ["libwebrtc", "native-tls", "store"]
+# The production media engine. Off, the crate builds and tests without
+# linking WebRTC (`cargo test -p yap-voice --no-default-features`).
+libwebrtc = ["dep:libwebrtc", "dep:webrtc-sys", "dep:cc", "dep:webrtc-sys-build", "dep:futures-util"]
+# The TLS backend, as yap-core picks it: native-tls (SChannel) on the
+# desktop, rustls on Android (native/mobile).
+native-tls = ["reqwest/native-tls", "yap-realtime/native-tls", "yap-core?/native-tls"]
+rustls = ["reqwest/rustls-no-provider", "yap-realtime/rustls", "yap-core?/rustls"]
+# The call plugged into yap-core's store (src/call.rs): what the desktop
+# and the mobile app both run behind `Realtime::spawn_voice`.
+store = ["libwebrtc", "dep:yap-core", "dep:yap-cache", "dep:serde"]
+
+[dependencies]
+anyhow = "1.0.104"
+futures-util = { version = "0.3.34", optional = true }
+# Pinned: cpp/track_audio.cpp relies on the webrtc-sys track layout, so the
+# crate that defines it is pinned itself, next to the libwebrtc that brings
+# it in. Upgrade both together and re-check the shim.
+libwebrtc = { version = "=0.3.55", optional = true }
+webrtc-sys = { version = "=0.3.52", optional = true }
+# RNNoise on the mic (src/dsp/denoise.rs): the pure-Rust port of Xiph's
+# RNNoise with its original model, the one the web's WASM build carries.
+# Without its CLI (`bin`) and resampling (`dasp`) features.
+nnnoiseless = { version = "0.5.2", default-features = false }
+reqwest.workspace = true
+serde = { workspace = true, optional = true }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid = { version = "1.29.0", features = ["v4"] }
+yap-cache = { workspace = true, optional = true }
+# Path dependencies, not the workspace ones: those keep their default
+# (native-tls, desktop) features, and the mobile app builds this crate on
+# rustls without them.
+yap-core = { path = "../yap-core", default-features = false, optional = true }
+yap-protocol.workspace = true
+yap-realtime = { path = "../yap-realtime", default-features = false }
+yap-speaker.workspace = true
+
+# The call's own audio devices (src/engine/wasapi.rs): WASAPI capture and
+# render, as yap-capture's loopback uses them (same version, so one build).
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = [
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Media_MediaFoundation",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Ole",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+# `#[implement]` (the hardware encoder's event callback) expands to paths
+# through it.
+windows-core = "0.62"
+
+[build-dependencies]
+cc = { version = "1.11.0", optional = true }
+webrtc-sys-build = { version = "=0.3.21", optional = true }
+
+[lints]
+workspace = true

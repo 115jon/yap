@@ -2,8 +2,8 @@
 // (GET /api/sessions). Kova keeps one User-Agent per session: the browser's
 // for a web sign-in, the app's HTTP client's for a device sign-in (the Qt
 // apps send `YapNative/<version>` and `YapMobile/<version>`, see
-// desktop-native/rust/crates/yap-core/src/api.rs and
-// desktop-native/mobile/common/platform.rs). When Kova also stores what the
+// native/rust/crates/yap-core/src/api.rs and
+// native/mobile/rust/src/platform.rs). When Kova also stores what the
 // device sign-in reported (platform, hostname), that wins over the guess.
 //
 // The shape is the one the clients already read (`deviceType`,

@@ -9,8 +9,9 @@ the channel's access once. This document is the contract; native clients
 build from it. Code: `src/server/routes/voice-admission.ts` (endpoint),
 `src/server/routes/socket-admission.ts` (the checks), `realtime/voice-media.ts`
 (the only place voice tokens and TURN are minted), and the clients
-`src/lib/voice/voice-admission-client.ts` (web and desktop) and
-`apps/mobile/src/features/voice/tickets.ts` (mobile).
+`src/lib/voice/voice-admission-client.ts` (web) and the native core's
+`yap-core`. The removed Expo app used `apps/mobile/src/features/voice/tickets.ts`
+(on the `archive/expo-mobile` branch).
 
 The chat socket (`/api/gateway`) is not part of this. It keeps
 `POST /api/voice/socket-ticket` with `{"audience":"global"}`.

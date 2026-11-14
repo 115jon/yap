@@ -7,10 +7,9 @@
 // this isolate served, then to the deployment default. The proxy signature
 // covers only the target URL, so any origin of this deployment serves it.
 
-// Server only. The desktop SPA build replaces src/server/media-proxy with a
-// stub (tools/vite/server-only-stub.ts); the namespace import also keeps any
-// other client bundle that reaches it building against Vite's empty
-// browser stub of the built-in, where a named import fails.
+// Server only. The namespace import keeps any client bundle that reaches it
+// building against Vite's empty browser stub of the built-in, where a named
+// import fails.
 import * as asyncHooks from "node:async_hooks";
 import { DEFAULT_PUBLIC_WEB_URL } from "@/lib/site-defaults";
 

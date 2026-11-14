@@ -1,5 +1,5 @@
 /**
- * The native Windows client ("Yap", desktop-native/; "Yap Native" until it
+ * The native Windows client ("Yap", native/; "Yap Native" until it
  * replaced the Tauri desktop app) and the link scheme only it reads,
  * `yap-native://`. The native app owns `yap://` too now, but the Tauri app
  * still has `yap://` on a PC that has not moved over yet, so the web keeps
@@ -18,7 +18,7 @@
  * code that is already in the web URL. Other links are left to the browser's
  * own "Open Yap?" prompt.
  *
- * The native parser (desktop-native/rust/crates/yap-core/src/links.rs) is
+ * The native parser (native/rust/crates/yap-core/src/links.rs) is
  * strict: invite codes of letters, digits, `-` and `_`. A link it would
  * refuse is never built here; the builder returns null instead.
  */
@@ -34,7 +34,7 @@ export const NATIVE_APP_SCHEME = "yap-native";
 
 /**
  * The label the native client sends when it starts a device sign-in
- * (desktop-native/rust/crates/yap-core/src/auth.rs `DEVICE_LABEL`). The
+ * (native/rust/crates/yap-core/src/auth.rs `DEVICE_LABEL`). The
  * Tauri app sends "Yap Desktop", the mobile app "Yap Mobile".
  */
 export const NATIVE_APP_DEVICE_LABEL = "Yap";

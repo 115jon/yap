@@ -1,0 +1,805 @@
+name: "Desktop Native Release"
+
+# Builds the native client (native/), signs it, packs it with
+# Velopack and publishes it as a GitHub release that the in-app updater reads
+# (native/docs/INSTALLER.md, "Updates" and "Publishing a release").
+#
+# Two modes:
+#
+# - Release (release_tag set): the stable release of the release-please line.
+#   release-please.yml creates v<x.y.z> (x >= 4), marks it a draft and calls
+#   this workflow with release_tag. The run builds that tag, uploads into the
+#   existing draft (release-please's changelog is the release notes), carries
+#   the Tauri bridge's latest.json (native/packaging/tauri-bridge.json,
+#   repo variable TAURI_BRIDGE_TAG) so Tauri installs still find the bridge,
+#   and publishes it as GitHub's "latest". A manual dispatch with release_tag
+#   rebuilds a release whose call failed (it must still be a draft).
+# - Manual (no release_tag, dispatch only): betas, tagged
+#   desktop-native-v<x.y.z-pre> (a pre-release, never latest), and stable
+#   desktop-native-v0.x builds from before the cutover (make_latest=false).
+#   From 4.0.0 a stable release comes only from release-please: v* tags and
+#   the version line are release-please's, and a manual vX.Y.Z would take a
+#   version its next release PR proposes.
+#
+# Signing uses the OIDC federated credentials on AZURE_CLIENT_ID, which
+# trust refs/heads/main and v* tags only. The OIDC subject is the ref the run
+# starts from: main for release-please.yml's call and for a dispatch from
+# main. dry_run skips signing (so it works from any branch) and leaves the
+# release as a draft, which never creates the tag.
+#
+# Toolchain: the static, patched Qt 6.11.3 and LiveKit's libwebrtc come from
+# the release named in native/tools/toolchain.lock.json
+# (tools/package-toolchain.ps1 makes it; tools/fetch-toolchain.ps1 checks
+# and unpacks it).
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: "The release-please tag to build and publish (v4.0.0 or later); its release must be a draft"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Rebuild a release-please release whose run failed: its tag (v4.0.0 or later; the release must still be a draft). Set, the other inputs are ignored."
+        required: false
+        default: ""
+        type: string
+      version:
+        description: "Manual: version, e.g. 4.1.0-beta.1 (beta) or 0.2.27 (pre-4.0 stable). Its x.y.z must equal [workspace.package] in native/rust/Cargo.toml. Empty: that version."
+        required: false
+        default: ""
+        type: string
+      channel:
+        description: "Manual: update channel, beta, or win (stable; before 4.0.0 only)"
+        required: true
+        default: beta
+        type: choice
+        options:
+          - win
+          - beta
+      notes:
+        description: "Manual: release notes (Markdown; shown in Settings > Desktop app). Empty: a default line."
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: "Manual: dry run, no signing, publish only a draft release (any branch)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # One native release at a time: each one reads the previous release's feed.
+  group: native-release
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  # Signer common name on the Artifact Signing public-trust certificate.
+  ARTIFACT_SIGNING_SIGNER: "Jonathan Martinez"
+  PACK_ID: Yap.App
+  # Manual releases; release mode publishes release-please's v<x.y.z>.
+  TAG_PREFIX: desktop-native-v
+
+jobs:
+  # Checks the inputs and works out the version and tag; no build yet.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # Write only so the release list includes drafts (release-please's
+      # draft in release mode, a dry run's in manual mode); this job runs
+      # only this repository's scripts.
+      contents: write
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      channel: ${{ steps.plan.outputs.channel }}
+      dry_run: ${{ steps.plan.outputs.dry_run }}
+    steps:
+      # Release mode builds the tag release-please made; manual runs the
+      # commit they were started on.
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
+
+      - name: Plan the release
+        id: plan
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_CHANNEL: ${{ inputs.channel || 'win' }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run || false }}
+          EVENT_NAME: ${{ github.event_name }}
+          GIT_REF: ${{ github.ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          $cargo = Get-Content -Raw native/rust/Cargo.toml
+          $base = [regex]::Match($cargo, '(?m)^version = "(\d+\.\d+\.\d+)"').Groups[1].Value
+          if (-not $base) { throw "No [workspace.package] version in native/rust/Cargo.toml" }
+          $releases = @(gh api "repos/$env:REPO/releases?per_page=100" --paginate --jq '.[] | {tag_name, draft, prerelease}' | ConvertFrom-Json)
+          if ($LASTEXITCODE) { throw "Could not list the releases ($LASTEXITCODE)" }
+
+          if ($env:RELEASE_TAG) {
+            # Release mode: release-please's tag and draft release.
+            $tag = $env:RELEASE_TAG.Trim()
+            $m = [regex]::Match($tag, '^v((\d+)\.\d+\.\d+)$')
+            if (-not $m.Success) { throw "release_tag '$tag' is not v<x.y.z>" }
+            if ([int]$m.Groups[2].Value -lt 4) {
+              throw "release_tag $tag is below v4.0.0: the native updater (yap_core::update::release_tag_version) ignores v3.x and older tags."
+            }
+            $version = $m.Groups[1].Value
+            if ($version -ne $base) {
+              throw "release_tag $tag does not match native/rust/Cargo.toml's $base at that tag (release-please-config.json's extra-files bump it)."
+            }
+            if ($env:EVENT_NAME -eq "workflow_dispatch" -and $env:INPUT_DRY_RUN -eq "true") {
+              throw "dry_run with release_tag is not supported: it would upload unsigned files into the real release."
+            }
+            if ($env:GIT_REF -ne "refs/heads/main") {
+              throw "A signed release must run from main (the Artifact Signing credential trusts main and v* tags only); this run is on $env:GIT_REF."
+            }
+            git ls-remote --exit-code --tags origin "refs/tags/$tag" | Out-Null
+            if ($LASTEXITCODE) { throw "Tag $tag does not exist." }
+            $release = @($releases | Where-Object tag_name -eq $tag)
+            if ($release.Count -ne 1) { throw "Expected one release for $tag, found $($release.Count)." }
+            if (-not $release[0].draft) {
+              throw "Release $tag is already published. To rebuild it, make it a draft first (gh release edit $tag --draft=true)."
+            }
+            if ($release[0].prerelease) { throw "Release $tag is a pre-release; a release-please release is stable." }
+            # The build runs cargo --locked.
+            node native/tools/sync-cargo-lock-version.mjs --check
+            if ($LASTEXITCODE) { throw "native/rust/Cargo.lock at $tag is out of date with Cargo.toml (release-please.yml syncs it on the release PR)." }
+            $mode = "release"; $channel = "win"; $pre = $false; $dryRun = "false"
+          } else {
+            # Manual mode.
+            if ($env:EVENT_NAME -ne "workflow_dispatch") { throw "Without release_tag this workflow runs only by hand." }
+            $dryRun = $env:INPUT_DRY_RUN
+            $version = if ($env:INPUT_VERSION) { $env:INPUT_VERSION.Trim() } else { $base }
+            $m = [regex]::Match($version, '^((\d+)\.\d+\.\d+)(-[0-9A-Za-z.-]+)?$')
+            if (-not $m.Success) { throw "Version '$version' is not x.y.z or x.y.z-pre" }
+            if ($m.Groups[1].Value -ne $base) {
+              throw "Version $version does not match Cargo.toml's $base (the exe embeds Cargo.toml's version); bump it first."
+            }
+            $pre = $m.Groups[3].Success
+            $channel = $env:INPUT_CHANNEL
+            if ($channel -eq "win" -and $pre) { throw "The win channel takes a plain x.y.z; use beta for $version." }
+            if ($channel -eq "beta" -and -not $pre) { throw "The beta channel takes a pre-release version (x.y.z-beta.N)." }
+            if ($channel -eq "win" -and [int]$m.Groups[2].Value -ge 4) {
+              throw "Stable $version comes from release-please (v$version, published as latest), not a manual run. Merge the release PR, or rerun a failed release with release_tag."
+            }
+            if ($dryRun -ne "true" -and $env:GIT_REF -ne "refs/heads/main") {
+              throw "A signed release must run from main (the Artifact Signing credential trusts main and v* tags only). Use dry_run elsewhere."
+            }
+            $tag = "$env:TAG_PREFIX$version"
+            # Drafts count: a dry run's draft must be deleted before the next run.
+            if ($releases.tag_name -contains $tag) { throw "A release (or draft) $tag already exists." }
+            git ls-remote --exit-code --tags origin "refs/tags/$tag" | Out-Null
+            if ($LASTEXITCODE -eq 0) { throw "Tag $tag already exists." }
+            $mode = "manual"
+          }
+          "mode=$mode", "version=$version", "tag=$tag", "prerelease=$($pre.ToString().ToLowerInvariant())",
+            "channel=$channel", "dry_run=$dryRun" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "==> $mode $tag (channel $channel, dry run $dryRun)"
+          exit 0
+
+      # Fails before the long build if the latest.json that Tauri installs
+      # will read is missing or wrong. The release job fetches and checks it
+      # again before it uploads it.
+      - name: Check the Tauri bridge
+        if: steps.plan.outputs.mode == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRIDGE_TAG: ${{ vars.TAURI_BRIDGE_TAG }}
+        run: ./native/tools/tauri-bridge.ps1 -Mode Fetch -BridgeTag "$env:BRIDGE_TAG" -OutFile "$env:RUNNER_TEMP/bridge/latest.json"
+
+  # The dependency audit (native/rust/deny.toml; LIBRARIES.md §18),
+  # with cargo-deny's release binary rather than a 4-minute `cargo install`.
+  # The [patch] path crates must exist for cargo metadata (vendor.ps1).
+  deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
+
+      - name: cargo-deny
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-deny@0.20.2
+
+      - name: Dependency audit (cargo deny)
+        run: |
+          ./native/patches/vendor.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Push-Location native/rust
+          cargo deny check
+          $code = $LASTEXITCODE
+          Pop-Location
+          exit $code
+
+  # The workspace tests that run headless (README, "Testing"): not the app
+  # crate (Qt) or yap-audio (an audio device). Beside the build, not before it.
+  test:
+    # Visual Studio 2022, as the build.
+    runs-on: windows-2022
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      TOOLCHAIN_DIR: ${{ github.workspace }}\..\toolchain
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_IDLE_TIMEOUT: "0"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
+
+      - name: sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.19.0
+
+      - name: Toolchain (static Qt, libwebrtc)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir "$env:TOOLCHAIN_DIR-download"
+
+      - name: Cargo test
+        run: |
+          ./native/patches/vendor.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64" | Out-Null
+          Push-Location native/rust
+          cargo test --workspace --locked --exclude yap_native --exclude yap-ui --exclude yap-audio --target-dir ../build/test-target
+          $code = $LASTEXITCODE
+          Pop-Location
+          exit $code
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  # Builds Yap.exe. Read-only token, no OIDC: build scripts run here. Like
+  # deny and test it starts without waiting for plan; release waits for all.
+  build:
+    # Visual Studio 2022 (MSVC 14.44), which Qt's LTCG libraries need:
+    # windows-2025 is now the VS 2026 image.
+    runs-on: windows-2022
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      YAP_NATIVE_BUILD_DIR: ${{ github.workspace }}\native\build\ci
+      YAP_ORT_DIR: ${{ github.workspace }}\native\build\onnxruntime
+      TOOLCHAIN_DIR: ${{ github.workspace }}\..\toolchain
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_IDLE_TIMEOUT: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
+
+      - name: sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.19.0
+
+      # While the toolchain downloads and unpacks: the patched crates
+      # (vendor.ps1, about 50 s of `cargo fetch`) and the rustc wrapper
+      # (tools/ci/sccache-wrapper.rs, which keeps yap_native's over-long
+      # command line away from sccache).
+      - name: Toolchain (static Qt, libwebrtc), patched crates, sccache wrapper
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $wrapper = "$env:RUNNER_TEMP\sccache-wrapper"
+          New-Item -ItemType Directory -Force $wrapper | Out-Null
+          $jobs = @(
+            @{ Name = "vendor.ps1"; File = "pwsh"; Args = @("-NoProfile", "-File", "native/patches/vendor.ps1") }
+            @{ Name = "sccache-wrapper.rs"; File = "rustc"; Args = @("-O", "--edition", "2021", "native/tools/ci/sccache-wrapper.rs", "-o", "$wrapper\sccache.exe") }
+          ) | ForEach-Object {
+            $log = Join-Path $env:RUNNER_TEMP $_.Name
+            $p = Start-Process $_.File -ArgumentList $_.Args -NoNewWindow -PassThru -RedirectStandardOutput "$log.out" -RedirectStandardError "$log.err"
+            $null = $p.Handle
+            [pscustomobject]@{ Name = $_.Name; Process = $p; Log = $log }
+          }
+          ./native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir "$env:TOOLCHAIN_DIR-download"
+          foreach ($j in $jobs) {
+            $j.Process.WaitForExit()
+            Write-Host "==> $($j.Name)"
+            Get-Content "$($j.Log).out", "$($j.Log).err" | Write-Host
+            if ($j.Process.ExitCode) { throw "$($j.Name) failed ($($j.Process.ExitCode))" }
+          }
+          "RUSTC_WRAPPER=$wrapper\sccache.exe", "YAP_SCCACHE=$env:SCCACHE_PATH" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # Qt's libraries are link-time code (-ltcg), which links only with the
+      # MSVC that compiled them (toolchain.lock.json's msvc).
+      - name: MSVC
+        run: |
+          $want = (Get-Content -Raw native/tools/toolchain.lock.json | ConvertFrom-Json).msvc
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
+          if (-not $vs) { throw "No Visual Studio 2022 with the x64 C++ tools on this runner" }
+          $have = (Get-Content "$vs\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt").Trim()
+          Write-Host "==> Visual Studio $vs, MSVC $have (Qt was built with $want)"
+          if ($have -ne $want) {
+            Write-Warning "MSVC $have differs from the toolchain's $want; the LTCG link may fail."
+          }
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { choco install ninja --no-progress -y }
+          ninja --version
+
+      # ONNX Runtime 1.24.4, DirectML build (camera backgrounds;
+      # docs/LIBRARIES.md §12.3), from nuget.org, checked by hash. Its DLL
+      # keeps Microsoft's signature.
+      - name: ONNX Runtime
+        run: |
+          $nupkg = "$env:RUNNER_TEMP\ort.nupkg"
+          Invoke-WebRequest https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime.DirectML/1.24.4 -OutFile $nupkg
+          $sha = (Get-FileHash -Algorithm SHA256 $nupkg).Hash.ToLowerInvariant()
+          if ($sha -ne "57e9f11b73437bef7a309496135d4c1f96b1a8e9ddba60013fa27bfc1d788681") { throw "ORT package hash $sha" }
+          $tmp = "$env:RUNNER_TEMP\ort"
+          7z x -y -bso0 "-o$tmp" $nupkg runtimes/win-x64/native/onnxruntime.dll LICENSE ThirdPartyNotices.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force $env:YAP_ORT_DIR | Out-Null
+          Copy-Item "$tmp\runtimes\win-x64\native\onnxruntime.dll" $env:YAP_ORT_DIR
+          Copy-Item "$tmp\LICENSE" "$env:YAP_ORT_DIR\LICENSE-onnxruntime.txt"
+          Copy-Item "$tmp\ThirdPartyNotices.txt" "$env:YAP_ORT_DIR\ThirdPartyNotices-onnxruntime.txt"
+
+      # sccache caches rustc (RUSTC_WRAPPER, the wrapper above), the C++
+      # that build scripts compile with `cc` (which takes a RUSTC_WRAPPER
+      # named sccache as its own wrapper) and CMake's cl.exe (the launcher):
+      # docs/INSTALLER.md, "CI". The cargo --timings report and Ninja's log
+      # are uploaded below.
+      - name: Build Yap.exe
+        env:
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+          YAP_CARGO_FLAGS: --timings
+        run: |
+          ./native/build.ps1 -QtDir $env:YAP_QT_DIR -BuildDir $env:YAP_NATIVE_BUILD_DIR
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $exe = Get-Item "$env:YAP_NATIVE_BUILD_DIR\Yap.exe"
+          Write-Host "==> Yap.exe $([math]::Round($exe.Length / 1MB, 1)) MB"
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
+      - name: Upload the unsigned build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: yap-native-build
+          path: |
+            native/build/ci/Yap.exe
+            native/build/onnxruntime/
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload the build timings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: yap-native-timings
+          path: |
+            native/build/ci/cargo/build/cargo-timings/cargo-timing.html
+            native/build/ci/.ninja_log
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7
+
+  # Signs, packs and publishes. The only job with OIDC and a write token.
+  release:
+    needs: [plan, deny, test, build]
+    runs-on: windows-2025
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      # OIDC token for azure/login (Artifact Signing). No Azure secret is stored.
+      id-token: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+      CHANNEL: ${{ needs.plan.outputs.channel }}
+      DRY_RUN: ${{ needs.plan.outputs.dry_run }}
+      GH_TOKEN: ${{ github.token }}
+      BUILD: ${{ github.workspace }}\_release\build
+      OUT: ${{ github.workspace }}\_release\out
+      OBS_SOURCES: ${{ github.workspace }}\_release\obs-signed-sources
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
+
+      - name: Download the build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: yap-native-build
+          path: ${{ env.BUILD }}
+
+      - name: Setup .NET (vpk only)
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 8.0.x
+
+      # The splash Setup.exe shows (tools/build-splash.py).
+      - name: Pillow
+        run: python -m pip install --disable-pip-version-check pillow==12.1.1
+
+      # The previous release of this channel, so vpk merges its feed and
+      # builds a delta against its full package (the same files
+      # `vpk download` fetches). A native release is tagged
+      # desktop-native-v<semver> (the legacy form) or v<semver> with major
+      # >= 4 (the native app's from 4.0.0); the Tauri app's v3.x and older
+      # never count. This is yap_core::update::release_tag_version. Stable
+      # never reads a pre-release.
+      - name: Previous release
+        run: |
+          New-Item -ItemType Directory -Force $env:OUT | Out-Null
+          $feed = "releases.$env:CHANNEL.json"
+          $json = gh api "repos/${{ github.repository }}/releases?per_page=100" --paginate
+          if ($LASTEXITCODE) { throw "Could not list the releases ($LASTEXITCODE)" }
+          $releases = $json | ConvertFrom-Json
+          function Get-NativeVersion([string]$tag) {
+            $text = if ($tag.StartsWith($env:TAG_PREFIX)) { $tag.Substring($env:TAG_PREFIX.Length) }
+                    elseif ($tag -match '^v(?:[4-9]|[1-9]\d+)\.') { $tag.Substring(1) }
+                    else { return $null }
+            $v = $null
+            if ([System.Management.Automation.SemanticVersion]::TryParse($text, [ref]$v)) { return $v }
+            return $null
+          }
+          $native = $releases | Where-Object { -not $_.draft } |
+            ForEach-Object { [pscustomobject]@{ Release = $_; Version = Get-NativeVersion $_.tag_name } } |
+            Where-Object Version
+          $previous = $native |
+            Where-Object { $env:CHANNEL -eq "beta" -or -not $_.Release.prerelease } |
+            Where-Object { $_.Release.assets.name -contains $feed } |
+            Sort-Object Version -Descending |
+            Select-Object -First 1 -ExpandProperty Release
+          if (-not $previous) { Write-Host "==> no earlier ${feed}: the first release of this channel, no delta"; exit 0 }
+          gh release download $previous.tag_name --repo ${{ github.repository }} --pattern $feed --dir $env:OUT
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $assets = (Get-Content -Raw "$env:OUT\$feed" | ConvertFrom-Json).Assets
+          $full = $assets | Where-Object Type -eq "Full" |
+            Sort-Object { [System.Management.Automation.SemanticVersion]$_.Version } -Descending | Select-Object -First 1
+          if ([System.Management.Automation.SemanticVersion]$full.Version -ge [System.Management.Automation.SemanticVersion]$env:VERSION) {
+            throw "$env:VERSION is not newer than the published $($full.Version)."
+          }
+          $source = $native | Where-Object { $_.Release.assets.name -contains $full.FileName } |
+            Select-Object -First 1 -ExpandProperty Release
+          if (-not $source) { throw "No native release carries $($full.FileName)" }
+          gh release download $source.tag_name --repo ${{ github.repository }} --pattern $full.FileName --dir $env:OUT
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $sha = (Get-FileHash -Algorithm SHA256 "$env:OUT\$($full.FileName)").Hash
+          if ($sha -ne $full.SHA256) { throw "$($full.FileName) does not match its feed entry" }
+          Write-Host "==> delta base $($full.FileName) from $($source.tag_name)"
+
+      # Release mode: release-please's changelog section (the draft's body)
+      # is both the GitHub release text and Velopack's --releaseNotes (shown
+      # in Settings > Desktop app). The part this workflow appends below
+      # NATIVE_MARKER is dropped, so a rerun does not append it twice.
+      # Manual mode: the notes input.
+      - name: Release notes
+        env:
+          NOTES: ${{ inputs.notes }}
+          MODE: ${{ needs.plan.outputs.mode }}
+          NATIVE_MARKER: "<!-- desktop-native-release -->"
+        run: |
+          # gh prints UTF-8 (the changelog has emoji); read it as such.
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+          $changelog = ""
+          if ($env:MODE -eq "release") {
+            $draft = @(gh api "repos/${{ github.repository }}/releases?per_page=100" --paginate --jq ".[] | select(.draft and .tag_name == `"$env:TAG`")" | ConvertFrom-Json)
+            if ($LASTEXITCODE -or $draft.Count -ne 1) { throw "Could not read the draft release $env:TAG" }
+            $changelog = [string]$draft[0].body
+            $cut = $changelog.IndexOf($env:NATIVE_MARKER)
+            if ($cut -ge 0) { $changelog = $changelog.Substring(0, $cut) }
+            $changelog = $changelog.Trim()
+            Set-Content -Encoding utf8NoBOM "$env:RUNNER_TEMP\changelog.md" $changelog
+          }
+          $notes = if ($changelog) { $changelog } elseif ("$env:NOTES".Trim()) { "$env:NOTES".Trim() } else { "Yap $env:VERSION." }
+          # vpk stores the notes (Markdown and HTML) in the feed, which keeps
+          # every version's: a long changelog is cut at a line, with a link.
+          $limit = 8000
+          if ($changelog -and $notes.Length -gt $limit) {
+            $cut = $notes.LastIndexOf("`n", $limit)
+            $notes = $notes.Substring(0, [math]::Max($cut, 0)).TrimEnd() +
+              "`n`n[The full changelog](${{ github.server_url }}/${{ github.repository }}/releases/tag/$env:TAG)"
+          }
+          Set-Content -Encoding utf8NoBOM "$env:RUNNER_TEMP\notes.md" $notes
+          Write-Host "==> release notes ($($notes.Length) chars):"
+          Write-Host $notes
+
+      # OIDC federated credential on AZURE_CLIENT_ID: main and v* tags only.
+      # The service principal holds only Artifact Signing Certificate Profile
+      # Signer (native/docs/code-signing.md).
+      - name: Azure login for Artifact Signing
+        if: needs.plan.outputs.dry_run != 'true'
+        uses: azure/login@053f7285eb20bf5469ef084617b0b24d3cec53fc # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      # Yap.exe is signed here first; vpk then signs what it adds
+      # (Update.exe, the root stub, Setup.exe) through the same account.
+      # OBS's and Microsoft's files keep their own signatures (package.ps1
+      # --signExclude).
+      - name: Sign Yap.exe
+        if: needs.plan.outputs.dry_run != 'true'
+        uses: azure/artifact-signing-action@208f8af4bf26cf2af8597424e3cb5582801523ba # v2.0.0
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files: ${{ env.BUILD }}\ci\Yap.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Yap
+          description-url: https://yap.115jon.com
+
+      - name: Pack with vpk
+        env:
+          ARTIFACT_SIGNING_ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          ARTIFACT_SIGNING_ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          ARTIFACT_SIGNING_PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+        run: |
+          $pack = @{
+            SkipBuild = $true
+            BuildDir = "$env:BUILD\ci"
+            OrtDir = "$env:BUILD\onnxruntime"
+            OutDir = $env:OUT
+            Version = $env:VERSION
+            Channel = $env:CHANNEL
+            ReleaseNotes = "$env:RUNNER_TEMP\notes.md"
+            ObsCacheDir = "$env:RUNNER_TEMP\obs-signed-hook"
+            # The hook's GPL-2.0 corresponding source (OBS, Detours,
+            # obs-deps), checked against the lock; uploaded to the release.
+            ObsSourcesDir = $env:OBS_SOURCES
+          }
+          if ($env:DRY_RUN -ne "true") { $pack.Sign = $true }
+          ./native/tools/package.ps1 @pack
+
+      - name: Verify signatures
+        if: needs.plan.outputs.dry_run != 'true'
+        run: |
+          $nupkg = "$env:OUT\$env:PACK_ID-$env:VERSION-full.nupkg"
+          $x = "$env:RUNNER_TEMP\nupkg-check"
+          # Ours only (the OBS hook and ONNX Runtime keep their vendors').
+          7z x -y -bso0 "-o$x" $nupkg "lib/app/Yap.exe" "lib/app/Squirrel.exe" "lib/app/Yap_ExecutionStub.exe"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $files = @("$env:OUT\$env:PACK_ID-$env:CHANNEL-Setup.exe") + (Get-ChildItem "$x\lib\app" -Filter *.exe).FullName
+          if ($files.Count -ne 4) { throw "Expected Setup.exe and three exes in the package, found $($files.Count)" }
+          ./native/tools/verify-authenticode.ps1 -ExpectedSigner $env:ARTIFACT_SIGNING_SIGNER -Path $files
+
+      # Manual mode. A draft first, so nothing is visible while files
+      # upload; packages and the OBS source archives before the feed file, so
+      # a client never sees an entry whose package is missing. Then publish
+      # with make_latest=false and check that the "latest" release did not
+      # move.
+      - name: Publish the GitHub release
+        if: needs.plan.outputs.mode == 'manual'
+        run: |
+          $repo = "${{ github.repository }}"
+          $files = @(
+            Get-ChildItem $env:OUT -Filter "$env:PACK_ID-$env:VERSION-*.nupkg"
+            Get-Item "$env:OUT\$env:PACK_ID-$env:CHANNEL-Setup.exe"
+            Get-ChildItem $env:OUT -Filter "$env:PACK_ID-$env:CHANNEL-Portable.zip"
+            # GPL-2.0 corresponding source for the OBS capture binaries in the
+            # package (obs-capture/SOURCE-OFFER.md points here), as the Tauri
+            # release attaches it. package.ps1 -ObsSourcesDir fetched and
+            # checked them.
+            Get-ChildItem -LiteralPath $env:OBS_SOURCES -File
+          ) | Where-Object { $_ }
+          if (@(Get-ChildItem -LiteralPath $env:OBS_SOURCES -File).Count -eq 0) { throw "No OBS source archives in $env:OBS_SOURCES" }
+          $feed = Get-Item "$env:OUT\releases.$env:CHANNEL.json"
+
+          $sums = ($files + $feed | ForEach-Object { "$((Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant())  $($_.Name)" }) -join "`n"
+          $kind = if ($env:CHANNEL -eq "beta") { "beta" } else { "stable" }
+          $body = @(
+            (Get-Content -Raw "$env:RUNNER_TEMP\notes.md").Trim(), "",
+            "---", "",
+            "Native Windows app ($kind channel, ``$env:CHANNEL``), built from ${{ github.sha }} by [run ${{ github.run_id }}](${{ github.server_url }}/$repo/actions/runs/${{ github.run_id }}).",
+            "Install with ``$env:PACK_ID-$env:CHANNEL-Setup.exe``; installed copies update from this release's ``releases.$env:CHANNEL.json``.",
+            "The OBS Studio game-capture files in the package are GPL-2.0; their corresponding source (OBS, Detours, obs-deps archives) is attached to this release.",
+            "", '```text', $sums, '```'
+          ) -join "`n"
+          if ($env:DRY_RUN -eq "true") { $body += "`n`n**Dry run: unsigned, never to be published.**" }
+          Set-Content -Encoding utf8NoBOM "$env:RUNNER_TEMP\body.md" $body
+
+          $latest = {
+            foreach ($try in 1..3) {
+              $tag = gh api "repos/$repo/releases/latest" --jq .tag_name 2>$null
+              if (-not $LASTEXITCODE -and $tag) { return $tag }
+              Start-Sleep -Seconds 5
+            }
+            throw "Could not read the latest release"
+          }
+          $latestBefore = & $latest
+          $create = @("release", "create", $env:TAG, "--repo", $repo, "--draft", "--latest=false",
+                      "--target", "${{ github.sha }}", "--title", "Yap native $env:VERSION",
+                      "--notes-file", "$env:RUNNER_TEMP\body.md")
+          if ($env:PRERELEASE -eq "true") { $create += "--prerelease" }
+          gh @create
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          gh release upload $env:TAG --repo $repo @($files.FullName)
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          gh release upload $env:TAG --repo $repo $feed.FullName
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+          $id = gh api "repos/$repo/releases" --paginate --jq ".[] | select(.draft and .tag_name == `"$env:TAG`") | .id" | Select-Object -First 1
+          if ($env:DRY_RUN -eq "true") {
+            Write-Host "==> dry run: left as draft release $id ($env:TAG)"
+            "Draft release ``$env:TAG`` (id $id), unsigned." | Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+            exit 0
+          }
+          gh api -X PATCH "repos/$repo/releases/$id" -F draft=false -f make_latest=false | Out-Null
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $latestAfter = & $latest
+          if ($latestAfter -ne $latestBefore) {
+            Write-Warning "latest moved from $latestBefore to $latestAfter; restoring"
+            $prev = gh api "repos/$repo/releases/tags/$latestBefore" --jq .id
+            gh api -X PATCH "repos/$repo/releases/$prev" -f make_latest=true | Out-Null
+            throw "The native release became latest; restored $latestBefore."
+          }
+          Write-Host "==> published $env:TAG; latest is still $latestAfter"
+          "Published [$env:TAG](${{ github.server_url }}/$repo/releases/tag/$env:TAG) ($env:CHANNEL)." |
+            Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+
+      # Release mode. Tauri installs read releases/latest/download/latest.json,
+      # so the release that becomes latest must carry the bridge release's
+      # latest.json byte for byte (its url names the bridge's YapSetup.exe by
+      # tag). Fetched and checked again here: version, url, the minisign key
+      # id against packaging/tauri-bridge.json's pubkey, and a 200 on the url.
+      - name: Tauri bridge latest.json
+        if: needs.plan.outputs.mode == 'release'
+        env:
+          BRIDGE_TAG: ${{ vars.TAURI_BRIDGE_TAG }}
+        run: ./native/tools/tauri-bridge.ps1 -Mode Fetch -BridgeTag "$env:BRIDGE_TAG" -OutFile "$env:RUNNER_TEMP\bridge\latest.json"
+
+      # Release mode: into release-please's draft (it made the tag and the
+      # changelog). Everything but the feed first, the feed last, --clobber so
+      # a rerun replaces a partial upload. Setup.exe is also attached as
+      # YapSetup.exe, the name README and the website's fallback link use
+      # (releases/latest/download/YapSetup.exe): Velopack's Setup finds its
+      # package in its own file (current_exe), whatever it is called. Then
+      # published as latest, with the native footer after the changelog.
+      - name: Publish the release-please release
+        if: needs.plan.outputs.mode == 'release'
+        env:
+          BRIDGE_TAG: ${{ vars.TAURI_BRIDGE_TAG }}
+          NATIVE_MARKER: "<!-- desktop-native-release -->"
+        run: |
+          $repo = "${{ github.repository }}"
+          $commit = (git rev-parse HEAD).Trim()
+          $draft = @(gh api "repos/$repo/releases?per_page=100" --paginate --jq ".[] | select(.draft and .tag_name == `"$env:TAG`") | {id, tag_name}" | ConvertFrom-Json)
+          if ($LASTEXITCODE -or $draft.Count -ne 1) { throw "Expected one draft release $env:TAG, found $($draft.Count)" }
+          $id = $draft[0].id
+          $bridgeTag = if ($env:BRIDGE_TAG) { $env:BRIDGE_TAG } else { (Get-Content -Raw native/packaging/tauri-bridge.json | ConvertFrom-Json).tag }
+
+          $setup = Get-Item "$env:OUT\$env:PACK_ID-$env:CHANNEL-Setup.exe"
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\alias" | Out-Null
+          $alias = Copy-Item $setup.FullName "$env:RUNNER_TEMP\alias\YapSetup.exe" -PassThru
+          $files = @(
+            Get-ChildItem $env:OUT -Filter "$env:PACK_ID-$env:VERSION-*.nupkg"
+            $setup
+            $alias
+            Get-ChildItem $env:OUT -Filter "$env:PACK_ID-$env:CHANNEL-Portable.zip"
+            # GPL-2.0 corresponding source for the OBS capture binaries in the
+            # package (obs-capture/SOURCE-OFFER.md points here).
+            Get-ChildItem -LiteralPath $env:OBS_SOURCES -File
+            # The Tauri updater manifest, the bridge's bytes.
+            Get-Item "$env:RUNNER_TEMP\bridge\latest.json"
+          ) | Where-Object { $_ }
+          if (@(Get-ChildItem -LiteralPath $env:OBS_SOURCES -File).Count -eq 0) { throw "No OBS source archives in $env:OBS_SOURCES" }
+          $feed = Get-Item "$env:OUT\releases.$env:CHANNEL.json"
+
+          $sums = ($files + $feed | ForEach-Object { "$((Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant())  $($_.Name)" }) -join "`n"
+          $body = @(
+            "$(Get-Content -Raw "$env:RUNNER_TEMP\changelog.md")".Trim(), "",
+            $env:NATIVE_MARKER, "",
+            "---", "",
+            "Native Windows app (stable channel, ``$env:CHANNEL``), built from $commit by [run ${{ github.run_id }}](${{ github.server_url }}/$repo/actions/runs/${{ github.run_id }}).",
+            "Install with ``$env:PACK_ID-$env:CHANNEL-Setup.exe`` (the same file as ``YapSetup.exe``); installed copies update from this release's ``releases.$env:CHANNEL.json``.",
+            "``latest.json`` is the Tauri app's updater manifest from [$bridgeTag](${{ github.server_url }}/$repo/releases/tag/$bridgeTag): it moves Tauri installs to that release, which replaces them with this app.",
+            "The OBS Studio game-capture files in the package are GPL-2.0; their corresponding source (OBS, Detours, obs-deps archives) is attached to this release.",
+            "", '```text', $sums, '```'
+          ) -join "`n"
+
+          gh release upload $env:TAG --repo $repo --clobber @($files.FullName)
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          gh release upload $env:TAG --repo $repo --clobber $feed.FullName
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+          # Every file is on the draft, at its size, before it goes public.
+          $assets = gh api "repos/$repo/releases/$id" --jq '.assets[] | {name, size}' | ConvertFrom-Json
+          foreach ($f in $files + $feed) {
+            $a = $assets | Where-Object name -eq $f.Name
+            if (-not $a -or $a.size -ne $f.Length) { throw "$($f.Name) is missing from the draft or the wrong size" }
+          }
+
+          $payload = "$env:RUNNER_TEMP\publish.json"
+          @{ draft = $false; make_latest = "true"; body = $body } | ConvertTo-Json | Set-Content -Encoding utf8NoBOM $payload
+          gh api -X PATCH "repos/$repo/releases/$id" --input $payload | Out-Null
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Write-Host "==> published $env:TAG (release $id) as latest"
+          "Published [$env:TAG](${{ github.server_url }}/$repo/releases/tag/$env:TAG) as latest, carrying $bridgeTag's latest.json." |
+            Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+
+      # Release mode: what the world now sees. latest must be this tag,
+      # latest/download/latest.json the bridge's bytes, and latest/download/
+      # must serve Yap.App-win-Setup.exe, YapSetup.exe and releases.win.json.
+      # .github/workflows/release-watchdog.yml repeats this daily.
+      - name: Check releases/latest
+        if: needs.plan.outputs.mode == 'release'
+        env:
+          BRIDGE_TAG: ${{ vars.TAURI_BRIDGE_TAG }}
+        run: |
+          try {
+            ./native/tools/tauri-bridge.ps1 -Mode VerifyLatest -BridgeTag "$env:BRIDGE_TAG" -ExpectedLatest $env:TAG
+          } catch {
+            $msg = $_.Exception.Message
+            Write-Host "::error title=releases/latest is wrong after publishing $env:TAG::$($msg -replace "`r?`n", ' ')"
+            @("## releases/latest is wrong after publishing $env:TAG", "", '```text', $msg, '```', "",
+              "Tauri installs may not reach the bridge. Fix the release's assets, or mark the previous good release latest (gh release edit <tag> --latest).") -join "`n" |
+              Out-File -Encoding utf8 -Append $env:GITHUB_STEP_SUMMARY
+            throw
+          }
+
+      # Manual mode: a failed upload leaves a draft that would block the next
+      # run (the plan job refuses an existing tag). Only ever a draft is
+      # deleted. Never in release mode: that draft is release-please's
+      # release, which a rerun (release_tag) uploads into again.
+      - name: Delete the draft after a failure
+        if: failure() && needs.plan.outputs.mode == 'manual'
+        run: |
+          $repo = "${{ github.repository }}"
+          $draft = gh api "repos/$repo/releases" --paginate --jq ".[] | select(.draft and .tag_name == `"$env:TAG`") | .id" | Select-Object -First 1
+          if ($draft) {
+            gh api -X DELETE "repos/$repo/releases/$draft"
+            Write-Host "==> deleted draft $draft ($env:TAG)"
+          }
+          exit 0

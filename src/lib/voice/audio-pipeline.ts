@@ -23,7 +23,7 @@ import { vadWorkletUrl } from "@/lib/voice/vad";
 // after their gain and pan and before the shared mix limiter, so a boosted
 // shout is held at the ceiling instead of driving the mix limiter (which
 // would duck everyone else). The limiter is the "rm-boost-limiter"
-// AudioWorklet (boost-limiter.worklet.js: native parity with desktop-native
+// AudioWorklet (boost-limiter.worklet.js: native parity with native/docs/
 // LIBRARIES.md §11.1, a 1.5 ms look-ahead, 5 ms hold, 60 ms release, ceiling
 // -3 dBFS). Until its module has loaded, or where AudioWorklet is missing, a
 // DynamicsCompressorNode set as a limiter stands in; it is stereo linked too

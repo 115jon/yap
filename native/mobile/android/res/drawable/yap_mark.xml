@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Yap mark (native/assets/svg/splash-logo.svg), at the size
+     the Android 12 splash draws its icon (splash_icon.xml), for Qt's splash
+     (splash.xml) and the pre-12 window background. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="128dp"
+    android:height="128dp"
+    android:viewportWidth="32"
+    android:viewportHeight="32">
+    <path
+        android:fillColor="#ff3d8b"
+        android:pathData="M2,0L12,10L2,10ZM2,10L21,10L21,24L2,24ZM21,12L32,12L32,19L21,19ZM17,22L28,22L28,26L17,26ZM4,24L18,24L18,32L4,32Z" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M4,5L8,9L4,9ZM13,13L17,13L17,17L13,17ZM29,12L32,12L32,15L29,15Z" />
+</vector>

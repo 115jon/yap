@@ -31,7 +31,7 @@
    gradient and flickers its glow; Wave and the emoji-name bob translate.
 
    Native spec of every value: name-styles-spec.md (scratchpad), mirrored
-   by desktop-native.
+   by the native app (native/).
    ============================================================ */
 
 @property --nm-sweep {

@@ -1,0 +1,249 @@
+name: "Desktop Native Validation"
+
+# Builds and tests the native desktop app (native/) on pull requests,
+# so a change to code it shares with the Qt mobile app (the yap-ui crate, the
+# core crates, the patched crates) cannot break the desktop unnoticed.
+#
+# - test: `cargo test` for the workspace, the app crate (yap_native) and
+#   yap-ui included: their build scripts need Qt, which the pinned toolchain
+#   provides. yap-audio stays out (it needs an audio device), as in the
+#   release workflow.
+# - build: build.ps1's Release Yap.exe, unsigned; its size goes to the job
+#   summary and the exe to a short-lived artifact.
+#
+# The steps follow native-release.yml's test and build jobs: the
+# same toolchain (tools/fetch-toolchain.ps1, tools/toolchain.lock.json), the
+# same runner image (Visual Studio 2022, whose MSVC Qt's LTCG libraries
+# need) and the same sccache setup. sccache's GitHub cache is scoped by ref,
+# so the push run on main warms it for every pull request after.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/native-validation.yml"
+      - "native/**"
+      # The mobile apps build in native-mobile.yml; the crates they
+      # share with the desktop are under native/rust and stay in.
+      - "!native/mobile/**"
+      - "!native/**/*.md"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/native-validation.yml"
+      - "native/**"
+      - "!native/mobile/**"
+      - "!native/**/*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  # The toolchain's archives (about 790 MB) are cached by lock file; the
+  # unpacked copy is not (unpacking and checking it takes under a minute).
+  TOOLCHAIN_DIR: D:\yap-toolchain
+  TOOLCHAIN_DOWNLOAD_DIR: D:\yap-toolchain-download
+  SCCACHE_GHA_ENABLED: "true"
+  SCCACHE_IDLE_TIMEOUT: "0"
+
+jobs:
+  test:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
+
+      - name: sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.19.0
+
+      - name: Cargo registry cache
+        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: native/rust -> ../build/test-target
+          # sccache keeps the compiled crates; this keeps the registry.
+          cache-targets: false
+          cache-bin: false
+
+      - name: Toolchain archive cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ env.TOOLCHAIN_DOWNLOAD_DIR }}
+          key: native-toolchain-${{ hashFiles('native/tools/toolchain.lock.json') }}
+
+      # As the release build: the patched crates and the rustc wrapper
+      # (tools/ci/sccache-wrapper.rs keeps yap_native's over-long command
+      # line away from sccache) while the toolchain unpacks.
+      - name: Toolchain (static Qt, libwebrtc), patched crates, sccache wrapper
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $wrapper = "$env:RUNNER_TEMP\sccache-wrapper"
+          New-Item -ItemType Directory -Force $wrapper | Out-Null
+          $jobs = @(
+            @{ Name = "vendor.ps1"; File = "pwsh"; Args = @("-NoProfile", "-File", "native/patches/vendor.ps1") }
+            @{ Name = "sccache-wrapper.rs"; File = "rustc"; Args = @("-O", "--edition", "2021", "native/tools/ci/sccache-wrapper.rs", "-o", "$wrapper\sccache.exe") }
+          ) | ForEach-Object {
+            $log = Join-Path $env:RUNNER_TEMP $_.Name
+            $p = Start-Process $_.File -ArgumentList $_.Args -NoNewWindow -PassThru -RedirectStandardOutput "$log.out" -RedirectStandardError "$log.err"
+            $null = $p.Handle
+            [pscustomobject]@{ Name = $_.Name; Process = $p; Log = $log }
+          }
+          ./native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir $env:TOOLCHAIN_DOWNLOAD_DIR
+          foreach ($j in $jobs) {
+            $j.Process.WaitForExit()
+            Write-Host "==> $($j.Name)"
+            Get-Content "$($j.Log).out", "$($j.Log).err" | Write-Host
+            if ($j.Process.ExitCode) { throw "$($j.Name) failed ($($j.Process.ExitCode))" }
+          }
+          "RUSTC_WRAPPER=$wrapper\sccache.exe", "YAP_SCCACHE=$env:SCCACHE_PATH" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # QMAKE (fetch-toolchain.ps1 sets it) is the static Qt, for the build
+      # scripts of yap-ui and yap_native (cxx-qt-build).
+      - name: Cargo test
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
+          if (-not $vs) { throw "No Visual Studio 2022 with the x64 C++ tools on this runner" }
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64" | Out-Null
+          Write-Host "==> QMAKE $env:QMAKE"
+          Push-Location native/rust
+          cargo test --workspace --locked --exclude yap-audio --target-dir ../build/test-target
+          $code = $LASTEXITCODE
+          Pop-Location
+          exit $code
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      YAP_NATIVE_BUILD_DIR: ${{ github.workspace }}\native\build\ci
+      YAP_ORT_DIR: ${{ github.workspace }}\native\build\onnxruntime
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
+
+      - name: sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.19.0
+
+      - name: Cargo registry cache
+        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: native/rust -> ../build/ci/cargo/build
+          cache-targets: false
+          cache-bin: false
+
+      - name: Toolchain archive cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ env.TOOLCHAIN_DOWNLOAD_DIR }}
+          key: native-toolchain-${{ hashFiles('native/tools/toolchain.lock.json') }}
+
+      - name: Toolchain (static Qt, libwebrtc), patched crates, sccache wrapper
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $wrapper = "$env:RUNNER_TEMP\sccache-wrapper"
+          New-Item -ItemType Directory -Force $wrapper | Out-Null
+          $jobs = @(
+            @{ Name = "vendor.ps1"; File = "pwsh"; Args = @("-NoProfile", "-File", "native/patches/vendor.ps1") }
+            @{ Name = "sccache-wrapper.rs"; File = "rustc"; Args = @("-O", "--edition", "2021", "native/tools/ci/sccache-wrapper.rs", "-o", "$wrapper\sccache.exe") }
+          ) | ForEach-Object {
+            $log = Join-Path $env:RUNNER_TEMP $_.Name
+            $p = Start-Process $_.File -ArgumentList $_.Args -NoNewWindow -PassThru -RedirectStandardOutput "$log.out" -RedirectStandardError "$log.err"
+            $null = $p.Handle
+            [pscustomobject]@{ Name = $_.Name; Process = $p; Log = $log }
+          }
+          ./native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir $env:TOOLCHAIN_DOWNLOAD_DIR
+          foreach ($j in $jobs) {
+            $j.Process.WaitForExit()
+            Write-Host "==> $($j.Name)"
+            Get-Content "$($j.Log).out", "$($j.Log).err" | Write-Host
+            if ($j.Process.ExitCode) { throw "$($j.Name) failed ($($j.Process.ExitCode))" }
+          }
+          "RUSTC_WRAPPER=$wrapper\sccache.exe", "YAP_SCCACHE=$env:SCCACHE_PATH" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # Qt's libraries are link-time code (-ltcg), which links only with the
+      # MSVC that compiled them (toolchain.lock.json's msvc).
+      - name: MSVC
+        run: |
+          $want = (Get-Content -Raw native/tools/toolchain.lock.json | ConvertFrom-Json).msvc
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
+          if (-not $vs) { throw "No Visual Studio 2022 with the x64 C++ tools on this runner" }
+          $have = (Get-Content "$vs\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt").Trim()
+          Write-Host "==> Visual Studio $vs, MSVC $have (Qt was built with $want)"
+          if ($have -ne $want) {
+            Write-Warning "MSVC $have differs from the toolchain's $want; the LTCG link may fail."
+          }
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { choco install ninja --no-progress -y }
+          ninja --version
+
+      # ONNX Runtime 1.24.4, DirectML build, checked by hash (as the release
+      # build), so the build carries camera backgrounds.
+      - name: ONNX Runtime
+        run: |
+          $nupkg = "$env:RUNNER_TEMP\ort.nupkg"
+          Invoke-WebRequest https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime.DirectML/1.24.4 -OutFile $nupkg
+          $sha = (Get-FileHash -Algorithm SHA256 $nupkg).Hash.ToLowerInvariant()
+          if ($sha -ne "57e9f11b73437bef7a309496135d4c1f96b1a8e9ddba60013fa27bfc1d788681") { throw "ORT package hash $sha" }
+          $tmp = "$env:RUNNER_TEMP\ort"
+          7z x -y -bso0 "-o$tmp" $nupkg runtimes/win-x64/native/onnxruntime.dll LICENSE ThirdPartyNotices.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force $env:YAP_ORT_DIR | Out-Null
+          Copy-Item "$tmp\runtimes\win-x64\native\onnxruntime.dll" $env:YAP_ORT_DIR
+          Copy-Item "$tmp\LICENSE" "$env:YAP_ORT_DIR\LICENSE-onnxruntime.txt"
+          Copy-Item "$tmp\ThirdPartyNotices.txt" "$env:YAP_ORT_DIR\ThirdPartyNotices-onnxruntime.txt"
+
+      - name: Build Yap.exe
+        env:
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+        run: |
+          ./native/build.ps1 -QtDir $env:YAP_QT_DIR -BuildDir $env:YAP_NATIVE_BUILD_DIR
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $exe = Get-Item "$env:YAP_NATIVE_BUILD_DIR\Yap.exe"
+          $mb = [math]::Round($exe.Length / 1MB, 2)
+          Write-Host "==> Yap.exe $mb MB ($($exe.Length) bytes)"
+          "### Yap.exe (Release, unsigned)", "", "| Size | Bytes |", "| --- | --- |", "| $mb MB | $($exe.Length) |" |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
+      - name: Upload the unsigned build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: yap-native-pr-build
+          path: native/build/ci/Yap.exe
+          if-no-files-found: error
+          retention-days: 3

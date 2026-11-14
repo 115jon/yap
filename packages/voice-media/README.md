@@ -1,8 +1,9 @@
 # @ralph/voice-media
 
 The media layer every PartyTracks-based Yap client runs: the web app
-(`src/lib/sfu-client.ts`) and the Expo app (`apps/mobile`,
-`features/voice/connection.ts`). The session lifecycle that drives it is
+(`src/lib/sfu-client.ts`), and the Expo app (`apps/mobile`,
+`features/voice/connection.ts`) until it was removed (it is on the
+`archive/expo-mobile` branch). The session lifecycle that drives it is
 `@ralph/voice` (`packages/voice/STATE_MACHINE.md`).
 
 | file                           | what                                                                                                                                                    |
@@ -21,7 +22,8 @@ The media layer every PartyTracks-based Yap client runs: the web app
 ## Platform
 
 WebRTC comes from the platform: a browser, or react-native-webrtc after its
-`registerGlobals()` (`apps/mobile/src/features/voice/webrtc-runtime.ts`, which
+`registerGlobals()` (the archived Expo app's
+`apps/mobile/src/features/voice/webrtc-runtime.ts`, which
 must run before this package is first imported). The package uses no
 browser-only global (`src/__tests__/platform-free.test.ts`). What differs per
 platform is injected:

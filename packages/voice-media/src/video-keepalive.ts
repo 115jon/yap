@@ -9,8 +9,9 @@
  * hundred bytes per second, with no camera or capture held open.
  *
  * Platforms make the track: the web paints a canvas
- * (src/lib/voice/video-keepalive.ts); the Expo app opens a native black
- * frame source (apps/mobile, features/voice/keepalive.ts).
+ * (src/lib/voice/video-keepalive.ts); the Expo app (apps/mobile, now on the
+ * archive/expo-mobile branch) opened a native black frame source
+ * (features/voice/keepalive.ts).
  */
 export interface VideoKeepalive {
   readonly track: MediaStreamTrack;

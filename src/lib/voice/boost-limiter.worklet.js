@@ -10,7 +10,7 @@
 // A person turned up past 100 % plays through one of these, after their gain
 // and pan and before the shared mix limiter, so a boosted voice is held at the
 // ceiling instead of driving the mix limiter (which would duck everyone).
-// The same design as the native client (desktop-native LIBRARIES.md §11.1,
+// The same design as the native client (native/docs/LIBRARIES.md §11.1,
 // `dsp::mix::BoostLimiter`):
 //   - stereo linked: one gain from the louder channel, so a pan survives;
 //   - sample-peak detector; the need is the gain that brings a peak to the
