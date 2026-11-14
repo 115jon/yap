@@ -10,9 +10,9 @@ export interface MediaActionTarget {
   filename?: string;
 }
 
-/** Hosts that are Yap itself: the page, the web origin, the API, the desktop webview. */
+/** Hosts that are Yap itself: the page, the web origin, the API. */
 function isOwnHost(hostname: string): boolean {
-  const own = new Set(["localhost", "tauri.localhost"]);
+  const own = new Set(["localhost"]);
   for (const origin of [
     typeof window !== "undefined" ? window.location.origin : "",
     getWebOrigin(),

@@ -14,9 +14,7 @@ import { normalizeUserStatus } from "@/components/chat/UserStatusDot";
 import { Icon } from "@/components/ui/icon";
 import { LegendPlate } from "@/components/ui/plate";
 import { getDisplayName } from "@/lib/display-name";
-import { cn } from "@/lib/utils";
 import { useChatStore } from "@/stores/chat-store";
-import { useDesktopSettingsStore } from "@/stores/useDesktopSettingsStore";
 import type { CSSProperties, ReactNode } from "react";
 import { MicTestWidget } from "../MicTestWidget";
 import { THEME_CHOICES, useVisibleTheme } from "./AppearancePanel";
@@ -239,30 +237,14 @@ function AppearanceRail() {
 /* ------------------------------------------------------------------ */
 
 function NotificationsRail() {
-  const { env } = useSettings();
   const { soundSettings } = useSoundSettingsForSettings();
-  const desktopNotifications = useDesktopSettingsStore(
-    (s) => s.desktopNotifications,
-  );
   const soundOn = soundSettings.soundsEnabled && soundSettings.notifications;
-  const alertsOff = env.desktop && !desktopNotifications;
   return (
     <RailFrame
       title="Next mention"
-      note={
-        alertsOff
-          ? "Desktop notifications are off. Mentions still show unread badges."
-          : env.desktop
-            ? "Shows as a native notification for mentions, replies and DMs."
-            : "Mentions, replies and DMs show as unread badges in Yap."
-      }
+      note="Mentions, replies and DMs show as unread badges in Yap."
     >
-      <div
-        className={cn(
-          "flex gap-3 rounded-[2px] border border-line-strong bg-ply-0 p-3 shadow-float transition-opacity duration-200",
-          alertsOff && "opacity-50",
-        )}
-      >
+      <div className="flex gap-3 rounded-[2px] border border-line-strong bg-ply-0 p-3 shadow-float transition-opacity duration-200">
         <span className="relative flex size-9 shrink-0 items-center justify-center rounded-[2px] bg-primary-fill text-on-primary">
           <Icon name="bell" size="sm" />
         </span>

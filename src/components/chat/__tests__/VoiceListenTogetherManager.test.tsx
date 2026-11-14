@@ -11,6 +11,10 @@ import { useListenTogetherAudioSettingsStore } from "@/stores/useListenTogetherA
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VoiceListenTogetherManager } from "../VoiceListenTogetherManager";
+import { KOVA_AUTH_PUBLISHABLE_KEY } from "@/lib/kova-auth-config";
+
+/** Where the signed-in session's token lives (lib/desktop-auth). */
+const SESSION_KEY = `kova-auth:${KOVA_AUTH_PUBLISHABLE_KEY}:session-token`;
 
 class MockAudio extends EventTarget {
   public static instances: MockAudio[] = [];
@@ -133,10 +137,7 @@ describe("VoiceListenTogetherManager", () => {
         },
       },
     });
-    (
-      window as typeof window & { __TAURI_INTERNALS__?: unknown }
-    ).__TAURI_INTERNALS__ = {};
-    localStorage.setItem("desktop_auth_token", "desktop-token-1");
+    localStorage.setItem(SESSION_KEY, "desktop-token-1");
   });
 
   afterEach(() => {
@@ -145,8 +146,6 @@ describe("VoiceListenTogetherManager", () => {
     useListenTogetherStore.setState({ rooms: {} });
     localStorage.clear();
     resetMediaGrantForTests();
-    delete (window as typeof window & { __TAURI_INTERNALS__?: unknown })
-      .__TAURI_INTERNALS__;
   });
 
   it("signs the stream URL and keeps the playing track when the grant is refreshed", async () => {

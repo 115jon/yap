@@ -525,9 +525,8 @@
   }
 
   /*
-   * Safe-area insets for the web build (parity with mobile/index.html). The
-   * Tauri shells overwrite these inline on <html> with native values.
-   * Components read var(--safe-area-*, 0px).
+   * Safe-area insets for the web build. Components read
+   * var(--safe-area-*, 0px).
    */
   :root {
     --safe-area-top: env(safe-area-inset-top, 0px);

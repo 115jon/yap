@@ -32,13 +32,11 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/desktop-auth", () => ({
-  getDesktopToken: vi.fn(() => null),
   getDesktopAuthHandoffToken: vi.fn(() => "test-token"),
   getStoredKovaAuthSessionToken: vi.fn(() => "test-token"),
   subscribeDesktopTokenChanges: vi.fn(() => () => undefined),
 }));
 
-vi.mock("@/lib/platform", () => ({ isTauri: vi.fn(() => false) }));
 vi.mock("@/lib/media-pass", () => ({ startMediaPass: vi.fn(() => () => {}) }));
 
 vi.mock("@/stores/chat-store", () => ({

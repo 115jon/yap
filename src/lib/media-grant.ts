@@ -11,7 +11,6 @@ import { sha256 } from "@noble/hashes/sha2.js";
 
 import { clog } from "@/lib/console-logger";
 import {
-  getDesktopToken,
   getStoredKovaAuthSessionToken,
   subscribeDesktopTokenChanges,
 } from "@/lib/desktop-auth";
@@ -67,7 +66,7 @@ let watchingTokens = false;
 
 function sessionToken(): string | null {
   try {
-    return getDesktopToken() ?? getStoredKovaAuthSessionToken();
+    return getStoredKovaAuthSessionToken();
   } catch {
     return null;
   }

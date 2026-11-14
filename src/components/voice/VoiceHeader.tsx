@@ -1,6 +1,6 @@
 import { IconButton } from "@/components/ui/IconButton";
 import type { StreamWatcherIdentity } from "@/lib/stream-watchers";
-import { StreamingStatsPanel } from "@/components/voice/StreamingStatsPanel";
+import { VoiceConnectionLabel } from "@/components/voice/VoiceConnectionLabel";
 import { StreamWatcherList } from "@/components/voice/StreamWatcherList";
 import InlineEmojiText from "@/components/chat/InlineEmojiText";
 import { Icon, type IconName } from "@/components/ui/icon";
@@ -82,7 +82,7 @@ export function VoiceHeader({
         </h2>
       </div>
       <div aria-hidden className="h-4 w-px shrink-0 bg-line-strong" />
-      <StreamingStatsPanel
+      <VoiceConnectionLabel
         connectionState={connectionState}
         joined={joined}
         className="min-w-0 shrink-0"

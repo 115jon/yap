@@ -57,34 +57,6 @@ const ignoredWatchPaths = [
   "**/.codex-logs/**",
 ];
 
-/**
- * Map of modules that only exist in the desktop/worker environment
- * to their client-side no-op shims.
- */
-const tauriShims: Record<string, string> = {
-  "@tauri-apps/plugin-shell": path.resolve(shimDir, "tauri-plugin-shell.ts"),
-  "@tauri-apps/plugin-updater": path.resolve(
-    shimDir,
-    "tauri-plugin-updater.ts",
-  ),
-  "@tauri-apps/plugin-process": path.resolve(
-    shimDir,
-    "tauri-plugin-process.ts",
-  ),
-  "@tauri-apps/plugin-autostart": path.resolve(
-    shimDir,
-    "tauri-plugin-autostart.ts",
-  ),
-  "@tauri-apps/plugin-notification": path.resolve(
-    shimDir,
-    "tauri-plugin-notification.ts",
-  ),
-  "tauri-plugin-status-bar-color-api": path.resolve(
-    shimDir,
-    "tauri-plugin-status-bar-color-api.ts",
-  ),
-};
-
 function clientEnvironmentShims(): Plugin {
   return {
     name: "client-environment-shims",
@@ -106,16 +78,9 @@ function clientEnvironmentShims(): Plugin {
       }
     },
     resolveId(id) {
-      // 1. Shim cloudflare:workers ONLY in the client environment
+      // Shim cloudflare:workers ONLY in the client environment
       if (this.environment?.name === "client" && id === "cloudflare:workers") {
         return path.resolve(shimDir, "cloudflare-workers.ts");
-      }
-
-      // 2. Shim Tauri plugins in BOTH client and SSR environments
-      // ONLY if we are NOT running inside Tauri.
-      // because Tauri is never available in web/Cloudflare runtime.
-      if (!process.env.TAURI_ENV_PLATFORM && id in tauriShims) {
-        return tauriShims[id];
       }
     },
   };
@@ -153,10 +118,6 @@ export default defineConfig(({ command, isPreview }) => {
   const kovaKey = command === "serve" && !isPreview ? devAuthKey() : null;
   return {
     define: {
-      // Build flags (src/lib/runtime.ts). Constants here, so the web build
-      // drops desktop/mobile branches and the desktop host adapter.
-      __IS_DESKTOP__: false,
-      __IS_MOBILE__: false,
       "import.meta.env.YAP_BUILD_COMMIT": JSON.stringify(buildCommit()),
       "import.meta.env.YAP_BUILT_AT": JSON.stringify(new Date().toISOString()),
       ...(kovaKey
@@ -169,10 +130,6 @@ export default defineConfig(({ command, isPreview }) => {
       // Kova dev sign-in only accepts 5173 (see src/lib/dev-port.ts).
       port: resolveWebDevPort(process.env.RALPH_DEV_PORT),
       strictPort: true,
-      cors: {
-        origin: ["http://tauri.localhost", "https://tauri.localhost"],
-        credentials: true,
-      },
       hmr: {
         protocol: "ws",
         host: "localhost",

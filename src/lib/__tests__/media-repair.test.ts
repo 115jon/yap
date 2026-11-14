@@ -9,6 +9,10 @@ vi.mock("@/lib/api-client", () => ({ apiPost: mocks.apiPost }));
 import { issueMediaGrant, verifyMediaCap } from "../media-capability";
 import { resetMediaGrantForTests } from "../media-grant";
 import { installMediaCapRepair } from "../media-repair";
+import { KOVA_AUTH_PUBLISHABLE_KEY } from "@/lib/kova-auth-config";
+
+/** Where the signed-in session's token lives (lib/desktop-auth). */
+const SESSION_KEY = `kova-auth:${KOVA_AUTH_PUBLISHABLE_KEY}:session-token`;
 
 const SECRET = "test-secret";
 let uninstall: () => void = () => undefined;
@@ -25,11 +29,7 @@ function image(src: string) {
 
 beforeEach(() => {
   mocks.apiPost.mockReset();
-  Object.defineProperty(window, "__TAURI_INTERNALS__", {
-    configurable: true,
-    value: {},
-  });
-  window.localStorage.setItem("desktop_auth_token", "session-a");
+  window.localStorage.setItem(SESSION_KEY, "session-a");
   uninstall = installMediaCapRepair();
 });
 
@@ -37,7 +37,6 @@ afterEach(() => {
   uninstall();
   document.body.innerHTML = "";
   window.localStorage.clear();
-  delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   resetMediaGrantForTests();
 });
 

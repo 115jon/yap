@@ -16,27 +16,12 @@ const DESKTOP =
 const env = (
   over: Partial<ScreenShareEnvironment>,
 ): ScreenShareEnvironment => ({
-  tauri: false,
-  tauriMobile: false,
   hasDisplayMedia: false,
   userAgent: DESKTOP,
   ...over,
 });
 
 describe("getScreenShareSupport", () => {
-  it("uses the native picker in the desktop app", () => {
-    expect(getScreenShareSupport(env({ tauri: true }))).toEqual({
-      supported: true,
-      picker: "desktop-app",
-    });
-  });
-
-  it("says the phone app can't share (no capture API in the webview)", () => {
-    expect(
-      getScreenShareSupport(env({ tauri: true, tauriMobile: true })),
-    ).toEqual({ supported: false, reason: "mobile-app" });
-  });
-
   it("uses the browser picker wherever getDisplayMedia exists", () => {
     expect(getScreenShareSupport(env({ hasDisplayMedia: true }))).toEqual({
       supported: true,

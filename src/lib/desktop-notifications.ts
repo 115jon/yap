@@ -8,17 +8,6 @@ export interface DesktopNotificationBadgeState {
   overlayLabel: string | null;
 }
 
-export interface DesktopNotificationSyncPayload {
-  count: number;
-  showDot: boolean;
-  tooltip: string;
-}
-
-export interface UnreadChannelState {
-  unreadDmChannelIds: string[];
-  unreadServerChannelIds: string[];
-}
-
 const MAX_BADGE_COUNT = 99;
 
 export function getDesktopNotificationBadgeState(input: {
@@ -50,77 +39,6 @@ export function getDesktopNotificationBadgeState(input: {
     showDot,
     overlayLabel:
       indicatorCount > 0 ? String(indicatorCount) : showDot ? "dot" : null,
-  };
-}
-
-export function shouldNativeNotifyForMessage(input: {
-  notification: AppNotification;
-  activeChannelId: string | null;
-  focused: boolean;
-  desktopNotificationsEnabled: boolean;
-}): boolean {
-  return shouldNativeNotifyForChannelActivity({
-    channelId: input.notification.channel_id,
-    activeChannelId: input.activeChannelId,
-    focused: input.focused,
-    desktopNotificationsEnabled: input.desktopNotificationsEnabled,
-  });
-}
-
-export function shouldNativeNotifyForChannelActivity(input: {
-  channelId: string;
-  activeChannelId: string | null;
-  focused: boolean;
-  desktopNotificationsEnabled: boolean;
-}): boolean {
-  if (!input.desktopNotificationsEnabled) return false;
-  if (input.focused && input.channelId === input.activeChannelId) return false;
-  return true;
-}
-
-export function getUnreadChannelState(input: {
-  lastMessageAt: Record<string, string>;
-  readStates: Record<string, string>;
-  dmChannelIds: Iterable<string>;
-  /** Muted channels and DMs show no unread, so they skip the badge too. */
-  isMuted?: (channelId: string, isDm: boolean) => boolean;
-}): UnreadChannelState {
-  const unreadDmChannelIds: string[] = [];
-  const unreadServerChannelIds: string[] = [];
-  const dmChannelIdSet = new Set(input.dmChannelIds);
-
-  for (const [channelId, lastMessageTimestamp] of Object.entries(
-    input.lastMessageAt,
-  )) {
-    if (!lastMessageTimestamp) continue;
-    const lastReadTimestamp = input.readStates[channelId];
-    if (lastReadTimestamp && lastMessageTimestamp <= lastReadTimestamp)
-      continue;
-
-    const isDm = dmChannelIdSet.has(channelId);
-    if (input.isMuted?.(channelId, isDm)) continue;
-
-    if (isDm) {
-      unreadDmChannelIds.push(channelId);
-    } else {
-      unreadServerChannelIds.push(channelId);
-    }
-  }
-
-  return { unreadDmChannelIds, unreadServerChannelIds };
-}
-
-export function toDesktopNotificationSyncPayload(
-  badge: DesktopNotificationBadgeState,
-): DesktopNotificationSyncPayload {
-  return {
-    count: badge.indicatorCount,
-    showDot: badge.showDot,
-    tooltip: badge.hasUnread
-      ? badge.indicatorCount > 0
-        ? `Yap - ${badge.unreadCount} unread notifications`
-        : "Yap - unread activity"
-      : "Yap",
   };
 }
 

@@ -124,7 +124,6 @@ describe("launching the native app", () => {
 describe("where the app is offered", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
-    delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   });
 
   function stubPlatform(platform: string) {
@@ -145,12 +144,6 @@ describe("where the app is offered", () => {
     stubPlatform("macOS");
     expect(canOfferNativeApp()).toBe(false);
     stubPlatform("Android");
-    expect(canOfferNativeApp()).toBe(false);
-  });
-
-  it("never offers it inside the Tauri apps", () => {
-    stubPlatform("Windows");
-    (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
     expect(canOfferNativeApp()).toBe(false);
   });
 });

@@ -46,7 +46,7 @@ describe("sanitizeRedirectUrl", () => {
     "//evil.example/path",
     "https://evil.example/",
     "javascript:alert(1)",
-    "ralphmeet://auth",
+    "yap://auth",
     "/\\evil.example",
     "/chat\u0000",
   ])("rejects %s", (value) => {

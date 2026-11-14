@@ -1,7 +1,5 @@
 import { useSyncExternalStore } from "react";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api-client";
-import { getUnreadChannelState } from "@/lib/desktop-notifications";
-import { syncDesktopNotificationState } from "@/lib/desktop-native-sync";
 import { parseMediaContentFilter } from "@/lib/media-content-filter";
 import { parseUserBadges } from "@/lib/badges";
 import { parsePublicConnections } from "@/lib/connections";
@@ -312,28 +310,10 @@ export function createChatActions(
     unreadBarriers.clear();
   };
 
-  const syncDesktopNotifications = async () => {
-    const state = get();
-    const { unreadDmChannelIds, unreadServerChannelIds } =
-      getUnreadChannelState({
-        lastMessageAt: state.lastMessageAt,
-        readStates: state.readStates,
-        dmChannelIds: state.dmChannels.map((dm) => dm.id),
-        isMuted: mutedChannelPredicate(state),
-      });
-
-    await syncDesktopNotificationState({
-      notifications: state.notifications,
-      unreadDmChannelIds,
-      unreadServerChannelIds,
-    });
-  };
-
   const notificationSettingsActions = createNotificationSettingsActions(
     get,
     dispatch,
     {
-      onChange: () => void syncDesktopNotifications(),
       onSaveError: () => toast.error("Couldn't save notification settings"),
     },
   );
@@ -1030,7 +1010,6 @@ export function createChatActions(
         pendingReadRequests.clear();
         pendingReadMessageAt.clear();
       }
-      await syncDesktopNotifications();
     } catch {
       /* ignore */
     }
@@ -1094,7 +1073,6 @@ export function createChatActions(
       channelId,
       timestamp: optimisticTimestamp,
     });
-    void syncDesktopNotifications();
 
     const writePromise = apiPut(`/api/channels/${channelId}/read-state`, {})
       .then(() => undefined)
@@ -1159,7 +1137,6 @@ export function createChatActions(
       channelId,
       timestamp: optimisticTimestamp,
     });
-    void syncDesktopNotifications();
 
     const patchGeneration = readStateGeneration;
     const patchPromise = apiPatch<{
@@ -1174,7 +1151,6 @@ export function createChatActions(
           channelId,
           timestamp: result.last_read_at,
         });
-        await syncDesktopNotifications();
       })
       .catch(() => {
         if (patchGeneration !== readStateGeneration) return;
@@ -1186,7 +1162,6 @@ export function createChatActions(
             timestamp: previous,
           });
         }
-        void syncDesktopNotifications();
       })
       .finally(() => {
         if (patchGeneration !== readStateGeneration) return;
@@ -1277,7 +1252,6 @@ export function createChatActions(
       );
       if (generation === readStateGeneration && Array.isArray(data)) {
         dispatch({ type: "SET_DM_CHANNELS", dmChannels: data });
-        await syncDesktopNotifications();
       }
     } catch {
       /* ignore */
@@ -1325,7 +1299,6 @@ export function createChatActions(
         notifications: data.notifications,
         unreadCount: data.unread_count,
       });
-      await syncDesktopNotifications();
     } catch {
       /* ignore */
     }
@@ -1424,13 +1397,11 @@ export function createChatActions(
       dispatch({ type: "MARK_NOTIFICATIONS_READ", all: true });
       await apiPatch("/api/notifications", { all: true });
     }
-    await syncDesktopNotifications();
   };
 
   const clearNotifications = async () => {
     dispatch({ type: "CLEAR_NOTIFICATIONS" });
     await apiDelete("/api/notifications");
-    await syncDesktopNotifications();
   };
 
   const reorderChannels = async (

@@ -40,8 +40,7 @@ type LegacySettingsTab =
   | "accessibility"
   | "text"
   | "notifications"
-  | "devices"
-  | "os-settings";
+  | "devices";
 
 const LEGACY_TABS: Record<
   LegacySettingsTab,
@@ -58,7 +57,6 @@ const LEGACY_TABS: Record<
   accessibility: { panel: "appearance", row: "reduced-motion" },
   notifications: { panel: "notifications" },
   devices: { panel: "sessions" },
-  "os-settings": { panel: "desktop" },
 };
 
 export type SettingsTabInput = LegacySettingsTab | SettingsPanelId;

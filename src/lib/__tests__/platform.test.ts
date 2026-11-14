@@ -8,10 +8,8 @@ import {
   getMediaUrl,
   getPublicApiUrl,
   getWsBaseUrl,
-  isTauri,
-  isDesktop,
-  isMobile,
 } from "../platform";
+import { KOVA_AUTH_PUBLISHABLE_KEY } from "../kova-auth-config";
 import { issueMediaGrant, verifyMediaCap } from "../media-capability";
 import {
   resetMediaGrantForTests,
@@ -25,20 +23,17 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  if (typeof window !== "undefined") delete window.__TAURI_INTERNALS__;
   window.localStorage.clear();
   resetMediaGrantForTests();
 });
 
 const SECRET = "test-secret";
+/** Where the signed-in session's token lives (lib/desktop-auth). */
+const SESSION_KEY = `kova-auth:${KOVA_AUTH_PUBLISHABLE_KEY}:session-token`;
 
 /** A signed-in session with a media grant for it. */
 function signInWithGrant(token = "session-token") {
-  window.localStorage.setItem("desktop_auth_token", token);
-  Object.defineProperty(window, "__TAURI_INTERNALS__", {
-    configurable: true,
-    value: {},
-  });
+  window.localStorage.setItem(SESSION_KEY, token);
   seedMediaGrantForTests(issueMediaGrant(SECRET, "user-1", Date.now()), token);
 }
 
@@ -84,11 +79,7 @@ describe("platform asset urls", () => {
   });
 
   it("adds nothing to private media while there is no grant", () => {
-    window.localStorage.setItem("desktop_auth_token", "session-token");
-    Object.defineProperty(window, "__TAURI_INTERNALS__", {
-      configurable: true,
-      value: {},
-    });
+    window.localStorage.setItem(SESSION_KEY, "session-token");
     vi.stubGlobal(
       "fetch",
       vi.fn(() => new Promise<Response>(() => undefined)),
@@ -96,6 +87,7 @@ describe("platform asset urls", () => {
 
     const url = new URL(
       getMediaUrl("/api/attachments/c1/a1/f.png?token=stale-token"),
+      window.location.origin,
     );
     expect(url.searchParams.has("token")).toBe(false);
     expect(url.searchParams.has("cap")).toBe(false);
@@ -103,27 +95,27 @@ describe("platform asset urls", () => {
 
   it("does not use a grant issued for another session", () => {
     signInWithGrant("first-session");
-    window.localStorage.setItem("desktop_auth_token", "second-session");
+    window.localStorage.setItem(SESSION_KEY, "second-session");
     vi.stubGlobal(
       "fetch",
       vi.fn(() => new Promise<Response>(() => undefined)),
     );
 
-    const url = new URL(getMediaUrl("/api/attachments/c1/a1/f.png"));
+    const url = new URL(
+      getMediaUrl("/api/attachments/c1/a1/f.png"),
+      window.location.origin,
+    );
     expect(url.searchParams.has("cap")).toBe(false);
   });
 
   it("does not append a session token to capability media URLs", () => {
-    Object.defineProperty(window, "__TAURI_INTERNALS__", {
-      configurable: true,
-      value: {},
-    });
-    window.localStorage.setItem("desktop_auth_token", "session-token");
+    window.localStorage.setItem(SESSION_KEY, "session-token");
 
     const url = new URL(
       getMediaUrl(
         "/api/soundboard/uploads/sound-1?cap=capability&room_slug=room-1&playback_id=playback-1",
       ),
+      window.location.origin,
     );
 
     expect(url.searchParams.get("cap")).toBe("capability");
@@ -131,16 +123,13 @@ describe("platform asset urls", () => {
   });
 
   it("removes a stale session token from capability media URLs", () => {
-    Object.defineProperty(window, "__TAURI_INTERNALS__", {
-      configurable: true,
-      value: {},
-    });
-    window.localStorage.setItem("desktop_auth_token", "session-token");
+    window.localStorage.setItem(SESSION_KEY, "session-token");
 
     const url = new URL(
       getMediaUrl(
         "/api/soundboard/uploads/sound-1?cap=capability&token=stale-token",
       ),
+      window.location.origin,
     );
 
     expect(url.searchParams.get("cap")).toBe("capability");
@@ -158,18 +147,14 @@ describe("platform asset urls", () => {
   });
 
   it("leaves other external asset urls unchanged without a session", () => {
-    window.localStorage.removeItem("desktop_auth_token");
+    window.localStorage.removeItem(SESSION_KEY);
     expect(getAuthAssetUrl("https://example.com/image.png")).toBe(
       "https://example.com/image.png",
     );
   });
 
   it("routes external media through the proxy for a signed-in session", () => {
-    Object.defineProperty(window, "__TAURI_INTERNALS__", {
-      configurable: true,
-      value: {},
-    });
-    window.localStorage.setItem("desktop_auth_token", "session-token");
+    window.localStorage.setItem(SESSION_KEY, "session-token");
 
     const url = new URL(
       getAuthAssetUrl("https://tracker.example/pixel.png?id=1"),
@@ -181,7 +166,7 @@ describe("platform asset urls", () => {
     );
     // The media pass cookie authorizes it: no session token in the URL.
     expect(url.searchParams.has("token")).toBe(false);
-    window.localStorage.removeItem("desktop_auth_token");
+    window.localStorage.removeItem(SESSION_KEY);
   });
 
   it("never puts the session on another host's URL", () => {
@@ -211,20 +196,19 @@ describe("platform asset urls", () => {
       expect(target.host, JSON.stringify(input)).toBe("evil.example");
       expect(target.pathname).toBe("/api/attachments/x.png");
     }
-    window.localStorage.removeItem("desktop_auth_token");
+    window.localStorage.removeItem(SESSION_KEY);
   });
 
   it("reads a scheme-relative URL as the page does", () => {
     signInWithGrant();
-    // On an http page (the desktop webview is http://tauri.localhost) this
-    // names another host; it must not load from it.
+    // On an http page this names another host; it must not load from it.
     const out = new URL(
       getAuthAssetUrl("https:evil.example/x.png"),
       "https://app.invalid",
     );
     expect(out.pathname).toBe("/api/proxy-media");
     expect(new URL(out.searchParams.get("url")!).host).toBe("evil.example");
-    window.localStorage.removeItem("desktop_auth_token");
+    window.localStorage.removeItem(SESSION_KEY);
   });
 
   it("loads absolute URLs of this page's origin and our zones directly", () => {
@@ -240,7 +224,7 @@ describe("platform asset urls", () => {
     ]) {
       expect(getAuthAssetUrl(input), input).not.toContain("/api/proxy-media");
     }
-    window.localStorage.removeItem("desktop_auth_token");
+    window.localStorage.removeItem(SESSION_KEY);
   });
 
   it("loads the public API's own absolute URLs directly", () => {
@@ -249,7 +233,7 @@ describe("platform asset urls", () => {
     const out = getAuthAssetUrl(`${api}/api/emojis/assets/e1.png`);
     expect(out.startsWith(`${api}/api/emojis/assets/e1.png`)).toBe(true);
     expect(out).not.toContain("/api/proxy-media");
-    window.localStorage.removeItem("desktop_auth_token");
+    window.localStorage.removeItem(SESSION_KEY);
   });
 
   it("leaves data and blob URLs alone", () => {
@@ -275,7 +259,7 @@ describe("platform asset urls", () => {
   });
 
   it("loads an unwrapped original with the server's signature", () => {
-    window.localStorage.removeItem("desktop_auth_token");
+    window.localStorage.removeItem(SESSION_KEY);
     const signed =
       "https://yap.example/api/proxy-media?url=https%3A%2F%2Fcdn.example%2Fog.png&sig=abc123";
     expect(unwrapProxyMediaUrl(signed)).toBe("https://cdn.example/og.png");
@@ -291,36 +275,14 @@ describe("platform asset urls", () => {
       ),
     ).toBe("/api/proxy-media?url=https%3A%2F%2Fa.example%2Fb.png&sig=s");
   });
+});
 
-  it("uses the public API origin for the mobile Tauri runtime", () => {
-    vi.stubGlobal("__IS_MOBILE__", true);
-    Object.defineProperty(globalThis, "__IS_MOBILE__", {
-      configurable: true,
-      value: true,
-    });
-    Object.defineProperty(window, "__TAURI_INTERNALS__", {
-      configurable: true,
-      value: {},
-    });
-
-    expect(isMobile()).toBe(true);
-    expect(isTauri()).toBe(true);
-    expect(getApiBaseUrl()).toBe(getPublicApiUrl());
+describe("platform base urls", () => {
+  it("uses this page's origin for the API and sockets", () => {
+    expect(getApiBaseUrl()).toBe("");
     expect(getWsBaseUrl()).toBe(
-      getPublicApiUrl()
-        .replace(/^https:/, "wss:")
-        .replace(/^http:/, "ws:"),
+      `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`,
     );
-  });
-
-  it("keeps desktop-only native APIs behind the desktop build flag", () => {
-    vi.stubGlobal("__IS_DESKTOP__", true);
-    Object.defineProperty(globalThis, "__IS_DESKTOP__", {
-      configurable: true,
-      value: true,
-    });
-    expect(isDesktop()).toBe(true);
-    expect(isMobile()).toBe(false);
   });
 });
 

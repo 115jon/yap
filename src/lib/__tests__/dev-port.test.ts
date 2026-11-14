@@ -30,10 +30,4 @@ describe("describeBusyDevPort", () => {
     expect(message).toContain("RALPH_DEV_PORT=5174 pnpm dev");
     expect(message).toContain("sign-in fails");
   });
-
-  it("names the fixed port for the desktop server", () => {
-    const message = describeBusyDevPort("desktop", 1420);
-    expect(message).toContain("Tauri dev needs exactly 1420");
-    expect(message).not.toContain("RALPH_DEV_PORT");
-  });
 });

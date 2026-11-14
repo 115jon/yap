@@ -2,7 +2,6 @@ import { SettingsSwitch } from "@/components/chat/SettingsSwitch";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { playNotification } from "@/lib/sounds";
-import { useDesktopSettingsStore } from "@/stores/useDesktopSettingsStore";
 import {
   useSoundSettingsStore,
   type SoundSettings,
@@ -51,33 +50,10 @@ export function useSoundSettingsForSettings() {
 export default function NotificationsPanel() {
   const { settingsUserId, soundSettings } = useSoundSettingsForSettings();
   const updateSoundSettings = useSoundSettingsStore((s) => s.updateSettings);
-  const desktopNotifications = useDesktopSettingsStore(
-    (s) => s.desktopNotifications,
-  );
-  const updateDesktopSettings = useDesktopSettingsStore(
-    (s) => s.updateSettings,
-  );
   const soundsOn = soundSettings.soundsEnabled;
 
   return (
     <>
-      <SettingsCard id="desktop-alerts">
-        <SettingsRow id="desktop-notifications" layout="inline">
-          {(ids) => (
-            <SettingsSwitch
-              checked={desktopNotifications}
-              onChange={() =>
-                updateDesktopSettings({
-                  desktopNotifications: !desktopNotifications,
-                })
-              }
-              labelledBy={ids.labelId}
-              describedBy={ids.descId}
-            />
-          )}
-        </SettingsRow>
-      </SettingsCard>
-
       <SettingsCard id="sounds">
         <SettingsRow id="sounds-enabled" layout="inline">
           {(ids) => (

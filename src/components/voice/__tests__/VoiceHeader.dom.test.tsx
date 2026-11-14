@@ -1,15 +1,11 @@
 // @vitest-environment jsdom
 
 import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { VoiceHeader } from "@/components/voice/VoiceHeader";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NATIVE_EMOJI_STYLE_VERSION } from "@/lib/emoji";
-
-vi.mock("@/hooks/useNativeShareStats", () => ({
-  useNativeShareStats: () => ({ data: null, stale: false }),
-}));
 
 describe("VoiceHeader DOM behavior", () => {
   it("mounts the connected chat tooltip without entering an update loop", () => {

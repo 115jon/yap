@@ -15,17 +15,6 @@ vi.mock("@/lib/api-client", () => ({
   apiPut: mocks.apiPut,
 }));
 
-vi.mock("@/lib/desktop-notifications", () => ({
-  getUnreadChannelState: () => ({
-    unreadDmChannelIds: [],
-    unreadServerChannelIds: [],
-  }),
-}));
-
-vi.mock("@/lib/desktop-native-sync", () => ({
-  syncDesktopNotificationState: vi.fn(),
-}));
-
 vi.mock("./useMediaSafetySettingsStore", () => ({
   useMediaSafetySettingsStore: {
     getState: () => ({
