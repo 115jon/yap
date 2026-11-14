@@ -85,8 +85,12 @@ pub fn content_type(name: &str) -> &'static str {
         "mp3" => "audio/mpeg",
         "wav" => "audio/wav",
         "ogg" | "oga" => "audio/ogg",
+        "opus" => "audio/opus",
         "flac" => "audio/flac",
         "m4a" => "audio/mp4",
+        "aac" => "audio/aac",
+        "weba" => "audio/webm",
+        "amr" => "audio/amr",
         "pdf" => "application/pdf",
         "zip" => "application/zip",
         "7z" => "application/x-7z-compressed",
@@ -163,6 +167,8 @@ mod tests {
         assert_eq!(content_type("clip.heic"), "image/heic");
         assert_eq!(content_type("clip.3gp"), "video/3gpp");
         assert_eq!(content_type("song.m4a"), "audio/mp4");
+        assert_eq!(content_type("memo.OPUS"), "audio/opus");
+        assert_eq!(content_type("clip.aac"), "audio/aac");
         assert_eq!(content_type("notes.md"), "text/plain");
         assert_eq!(content_type("noext"), "application/octet-stream");
         assert_eq!(content_type("a.unknown"), "application/octet-stream");
