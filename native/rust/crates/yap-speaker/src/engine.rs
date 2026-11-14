@@ -10,6 +10,8 @@ use crate::bus::{Bus, Input};
 use crate::wav::WavWriter;
 use crate::{FRAME, RATE, SAMPLES};
 
+#[cfg(target_os = "android")]
+use crate::aaudio;
 #[cfg(windows)]
 use crate::wasapi::{self, Render, Watch};
 
@@ -123,6 +125,13 @@ pub struct Speaker {
     choice: Mutex<Option<String>>,
     #[cfg(windows)]
     watch: Arc<Watch>,
+    /// Android: what plays is call audio ([`Self::set_call`]).
+    call: AtomicBool,
+    /// Every frame goes to the device as silence ([`Self::set_muted`]).
+    muted: AtomicBool,
+    /// Android: open the stream again (the call began or ended).
+    #[cfg(target_os = "android")]
+    reopen: AtomicBool,
     /// No device at all (`YAP_NULL_SPEAKER=1`, other platforms, tests).
     null: bool,
     ahead_ms: u32,
@@ -147,7 +156,8 @@ impl std::fmt::Debug for Speaker {
 pub fn speaker() -> &'static Speaker {
     static SPEAKER: OnceLock<Speaker> = OnceLock::new();
     SPEAKER.get_or_init(|| {
-        let null = !cfg!(windows) || std::env::var("YAP_NULL_SPEAKER").is_ok_and(|v| v == "1");
+        let null = !cfg!(any(windows, target_os = "android"))
+            || std::env::var("YAP_NULL_SPEAKER").is_ok_and(|v| v == "1");
         if null {
             eprintln!("[speaker] no device (clock-paced mix)");
         }
@@ -240,6 +250,10 @@ impl Speaker {
             choice: Mutex::new(None),
             #[cfg(windows)]
             watch: Arc::new(Watch::default()),
+            call: AtomicBool::new(false),
+            muted: AtomicBool::new(false),
+            #[cfg(target_os = "android")]
+            reopen: AtomicBool::new(false),
             null,
             ahead_ms,
             health: Health::default(),
@@ -327,6 +341,28 @@ impl Speaker {
         }
     }
 
+    /// A call runs (Android): the output plays as call audio, so it goes
+    /// where the call goes (earpiece, speaker, headset) at the call's
+    /// volume; outside one it plays as UI sound. A change reopens the
+    /// stream. The Windows output does not depend on it.
+    pub fn set_call(&self, call: bool) {
+        if self.call.swap(call, Ordering::AcqRel) == call {
+            return;
+        }
+        eprintln!("[speaker] call audio: {call}");
+        #[cfg(target_os = "android")]
+        self.reopen.store(true, Ordering::Relaxed);
+    }
+
+    /// Plays silence while set (Android: another app, a phone call, has
+    /// the phone's ear). The mix runs on, so a clip that plays through it
+    /// stays where the room is; the taps hear the silence that plays.
+    pub fn set_muted(&self, muted: bool) {
+        if self.muted.swap(muted, Ordering::AcqRel) != muted {
+            eprintln!("[speaker] muted: {muted}");
+        }
+    }
+
     /// The chosen endpoint (`None`: the default).
     pub fn device_choice(&self) -> Option<String> {
         lock(&self.choice).clone()
@@ -374,6 +410,9 @@ impl Speaker {
         delay_ms: u32,
     ) -> bool {
         let active = self.bus.render(frame);
+        if self.muted.load(Ordering::Relaxed) {
+            frame.fill(0);
+        }
         if let Some(writer) = file.as_mut() {
             let _ = writer.write(frame);
         }
@@ -447,8 +486,118 @@ impl Speaker {
         }
         #[cfg(windows)]
         self.run_device(&mut frame, &mut file, &mut idle);
-        #[cfg(not(windows))]
+        #[cfg(target_os = "android")]
+        self.run_aaudio(&mut frame, &mut file, &mut idle);
+        #[cfg(not(any(windows, target_os = "android")))]
         let _ = self.pace(&mut frame, &mut file, &mut idle, None);
+    }
+
+    /// Android: the AAudio stream, opened again when it is lost or the call
+    /// begins or ends, until the speaker has been idle long enough.
+    #[cfg(target_os = "android")]
+    fn run_aaudio(
+        &'static self,
+        frame: &mut [i16; SAMPLES],
+        file: &mut Option<WavWriter>,
+        idle: &mut Idle,
+    ) {
+        loop {
+            self.reopen.store(false, Ordering::Relaxed);
+            let call = self.call.load(Ordering::Acquire);
+            let step = match aaudio::Render::open(call, self.ahead_ms) {
+                Ok(render) => {
+                    eprintln!("[speaker] open {}", render.name);
+                    lock(&self.device).clone_from(&render.name);
+                    match self.play_aaudio(&render, frame, file, idle) {
+                        // Lost before it took anything: not again at once.
+                        Step::Reopen if self.health.failures.load(Ordering::Relaxed) > 0 => {
+                            drop(render);
+                            self.pace(frame, file, idle, Some(RETRY_AFTER))
+                        }
+                        step => step,
+                    }
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[speaker] unavailable: {}; mixing to nothing for {} ms",
+                        error.message,
+                        RETRY_AFTER.as_millis()
+                    );
+                    self.health.failed(error.refused);
+                    lock(&self.device).clear();
+                    self.pace(frame, file, idle, Some(RETRY_AFTER))
+                }
+            };
+            match step {
+                Step::Exit => {
+                    eprintln!("[speaker] idle: closed");
+                    lock(&self.device).clear();
+                    return;
+                }
+                Step::Reopen => {
+                    self.counters.reopens.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+
+    /// Feeds the stream until it is lost, a reopen is asked for, or the
+    /// speaker has been idle long enough. Blocking writes pace the mix.
+    #[cfg(target_os = "android")]
+    fn play_aaudio(
+        &self,
+        render: &aaudio::Render,
+        frame: &mut [i16; SAMPLES],
+        file: &mut Option<WavWriter>,
+        idle: &mut Idle,
+    ) -> Step {
+        let mut progressed = Instant::now();
+        let mut worked = false;
+        let mut xruns = render.xruns();
+        let lost = |error: String, worked: bool| {
+            eprintln!("[speaker] device lost: {error}; reopening");
+            if !worked {
+                self.health.failed(false);
+            }
+            Step::Reopen
+        };
+        loop {
+            if self.reopen.swap(false, Ordering::Relaxed) {
+                return Step::Reopen;
+            }
+            let active = self.next_frame(frame, file, render.delay_ms());
+            match render.write(frame, Duration::from_millis(100)) {
+                Err(error) => return lost(error, worked),
+                Ok(written) => {
+                    if written > 0 {
+                        progressed = Instant::now();
+                        if !worked {
+                            worked = true;
+                            self.health.working();
+                        }
+                    }
+                    // A short write timed out: the rest of the frame is
+                    // dropped, and a device that takes nothing for long
+                    // counts as lost.
+                    if written < FRAME && progressed.elapsed() >= STALL_LIMIT {
+                        return lost(
+                            format!("no audio taken for {} ms", progressed.elapsed().as_millis()),
+                            worked,
+                        );
+                    }
+                }
+            }
+            let now = render.xruns();
+            if now > xruns {
+                self.counters
+                    .underruns
+                    .fetch_add(now - xruns, Ordering::Relaxed);
+                xruns = now;
+            }
+            if self.idle_over(active, idle) {
+                return Step::Exit;
+            }
+        }
     }
 
     #[cfg(windows)]
