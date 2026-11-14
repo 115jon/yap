@@ -178,6 +178,12 @@ Item {
         }
     }
 
+    // A share from another app, into the open conversation's composer
+    // (Main.deliverShare, once its conversation is the open one).
+    function acceptShare(text, paths, failed, dropped) {
+        chat.acceptShare(text, paths, failed, dropped)
+    }
+
     // Back steps a page left: members to the chat, the chat to the drawer.
     function previous() {
         return page === "members" ? "chat" : "drawer"

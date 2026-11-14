@@ -38,6 +38,11 @@ Item {
         composer.insertText(emoji)
         composer.focusField()
     }
+    // A share from another app (Pager.acceptShare): its files in the tray,
+    // its text in the field.
+    function acceptShare(text, paths, failed, dropped) {
+        composer.acceptShare(text, paths, failed, dropped)
+    }
     // The conversation shows rows (the drawer reopens it only when not).
     readonly property bool hasRows: view.count > 0
 

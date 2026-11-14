@@ -12,12 +12,12 @@ import dev.yap.qtproto.voice.VoiceShim;
 
 /**
  * Qt's activity, with a notification's tap kept for the push code and a
- * link for the link code: either can arrive (onCreate, or onNewIntent on a
- * task relaunched from Recents) before Qt's main() has installed its shim,
- * so PushShim and LinkShim hold it until install() reads it. An incoming
- * call's full-screen intent and its Answer go to IncomingCalls, which
- * keeps them for Qt the same way, and shows the app over the lock screen
- * while the call needs it. And with a
+ * link or a share (ShareActivity's) for the link code: any can arrive
+ * (onCreate, or onNewIntent on a task relaunched from Recents) before Qt's
+ * main() has installed its shim, so PushShim, LinkShim and ShareShim hold
+ * it until install() reads it. An incoming call's full-screen intent and
+ * its Answer go to IncomingCalls, which keeps them for Qt the same way, and
+ * shows the app over the lock screen while the call needs it. And with a
  * call's goodbye on the way out. Crash reports (crash/CrashReports) are
  * set up before Qt starts, and last run's crash is offered on top.
  */
@@ -38,6 +38,7 @@ public class YapActivity extends QtActivity {
         if (fresh && !IncomingCalls.offer(this, getIntent())) {
             PushShim.offer(getIntent());
             LinkShim.offer(getIntent());
+            ShareShim.offer(getIntent());
         }
         if (fresh) CrashReports.test(getIntent());
         super.onCreate(savedInstanceState);
@@ -49,6 +50,7 @@ public class YapActivity extends QtActivity {
         if (!IncomingCalls.offer(this, intent)) {
             PushShim.offer(intent);
             LinkShim.offer(intent);
+            ShareShim.offer(intent);
         }
         CrashReports.test(intent);
     }

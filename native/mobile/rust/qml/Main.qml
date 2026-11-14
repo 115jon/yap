@@ -142,6 +142,111 @@ Window {
             window.openFromLink()
         }
     }
+    // Shares from another app (ShareActivity's pictures, videos, files and
+    // text), once signed in: signed out, Native holds the latest until the
+    // session is ready. The picker asks where it goes (SharePickerPage); a
+    // newer share while it is open takes its place there.
+    function openShare() {
+        if (!ready)
+            return
+        const share = Native.takeShareRequest()
+        if (share.files === undefined)
+            return
+        const open = stack.currentItem?.isSharePicker === true ? stack.currentItem : null
+        if (open && !open.picked) {
+            open.text = share.text
+            open.files = share.files
+            open.dropped = share.dropped
+            return
+        }
+        closeTop(true)
+        const page = openPage("SharePickerPage", { text: share.text, files: share.files, dropped: share.dropped },
+            { whileBusy: true })
+        if (page)
+            page.targetPicked.connect(target => window.placeShare(target, page.text, page.files, page.dropped))
+    }
+    Connections {
+        target: Native
+        function onShareRequested() {
+            window.openShare()
+        }
+        function onShareCopied(paths, failed) {
+            // A share given up meanwhile (a sign-out, the minute passed).
+            if (window.shareChannel.length === 0 || window.sharePaths !== null) {
+                for (const path of paths)
+                    Native.discardPicked(path)
+                return
+            }
+            window.sharePaths = paths
+            window.shareFailed = failed
+            window.deliverShare()
+        }
+    }
+    // The picked conversation, until its composer has the share: its files
+    // are copied in (the account's limit: a bigger one is a sized stand-in,
+    // the tray's too-big card) while it opens.
+    property string shareChannel: ""
+    property string shareText: ""
+    property var sharePaths: null
+    property int shareFailed: 0
+    property int shareDropped: 0
+    Timer {
+        id: shareTimer
+        interval: 60000
+        onTriggered: window.dropPlacedShare()
+    }
+    function placeShare(target, text, files, dropped) {
+        dropPlacedShare()
+        shareChannel = target.channelId
+        shareText = text
+        shareDropped = dropped
+        sharePaths = files > 0 ? null : []
+        if (files > 0)
+            Native.copyShare(Settings.attachmentLimit)
+        else
+            Native.dropShare()
+        shareTimer.restart()
+        closeTop(true)
+        const channelId = target.channelId
+        const serverId = target.serverId === "@me" ? "" : target.serverId
+        if (Nav.activeChannelId !== channelId)
+            openUnseen(() => Nav.openChannel(channelId, serverId))
+        pager.showChannelWhenOpen(channelId)
+        // After the composer put back the conversation's own draft.
+        Qt.callLater(deliverShare)
+    }
+    function deliverShare() {
+        if (!ready || shareChannel.length === 0 || sharePaths === null || Nav.activeChannelId !== shareChannel)
+            return
+        const paths = sharePaths
+        const text = shareText
+        const failed = shareFailed
+        const dropped = shareDropped
+        shareTimer.stop()
+        shareChannel = ""
+        shareText = ""
+        sharePaths = null
+        shareFailed = 0
+        shareDropped = 0
+        pager.acceptShare(text, paths, failed, dropped)
+    }
+    function dropPlacedShare() {
+        shareTimer.stop()
+        for (const path of sharePaths ?? [])
+            Native.discardPicked(path)
+        shareChannel = ""
+        shareText = ""
+        sharePaths = null
+        shareFailed = 0
+        shareDropped = 0
+    }
+    Connections {
+        target: Nav
+        function onActiveChannelIdChanged() {
+            Qt.callLater(window.deliverShare)
+        }
+    }
+
     // An invite's landing, from a link here or one tapped in a message.
     Connections {
         target: Invites
@@ -624,9 +729,11 @@ Window {
             openFromLink()
             takeAnswered()
             openAnswered()
+            openShare()
             return
         }
         dropAnswered()
+        dropPlacedShare()
         callWanted = false
         accountPanel.close()
         stack.pop(null, StackView.Immediate)

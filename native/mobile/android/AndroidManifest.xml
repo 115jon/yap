@@ -12,7 +12,8 @@
      (the FCM service, the Reply and Mark as read receiver, the permission);
      and voice calls (the mic, the audio route, the call's service, the
      phone's camera in a call);
-     and links into the app (LinkActivity's filters); the composer's Camera
+     and links into the app (LinkActivity's filters); shares into it
+     (ShareActivity's); the composer's Camera
      (CaptureProvider, where the camera app writes the photo: the system
      camera takes it, once the call camera's permission is granted).
      No package attribute: the application id is CMake's YAP_ANDROID_APP_ID
@@ -141,12 +142,16 @@
 
         <!-- Links into the app (LinkActivity hands them to YapActivity):
              the web's invite and chat links, as the Expo app took them
-             (apps/mobile app.config.ts, branch archive/expo-mobile), on the web origin the core uses
-             (yap-core config.rs `api_base`), and the yap:// links the core
-             reads (yap-core links.rs). Not autoVerify: the web serves no
-             Digital Asset Links statement for this app yet, so on Android
-             12+ an https link opens in the browser until the user turns on
-             "Open supported links" for it. -->
+             (apps/mobile app.config.ts, branch archive/expo-mobile), on the
+             web origin the core uses (yap-core config.rs `api_base`), and
+             the yap:// links the core reads (yap-core links.rs). The https
+             filter is autoVerify: the web's /.well-known/assetlinks.json
+             (src/server/assetlinks.ts) lists dev.yap.app with its release
+             key, so Android 12+ opens those links here without asking.
+             Another key (a debug build, another application id) is not
+             verified, and its links open in the browser until the user
+             turns on "Open supported links". Not /share/: the web's shared
+             message page is a public snapshot the app has no view for. -->
         <activity
             android:name="dev.yap.qtproto.LinkActivity"
             android:exported="true"
@@ -154,7 +159,7 @@
             android:noHistory="true"
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar">
-            <intent-filter>
+            <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
@@ -174,6 +179,32 @@
                      (yap://signin?code=…, sent as an intent link): it only
                      brings the app forward; the app's own poll signs in. -->
                 <data android:host="signin" />
+            </intent-filter>
+        </activity>
+
+        <!-- Another app's Share into Yap (ShareActivity hands it to
+             YapActivity): pictures, videos, any file, and text (a link from
+             the browser), one or several. The app asks where it goes
+             (SharePickerPage) and fills that conversation's composer. -->
+        <activity
+            android:name="dev.yap.qtproto.ShareActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <!-- Any type: a picture, a video, a PDF or a zip all go as an
+                 attachment; text (text/plain without a stream) as the
+                 message. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
 

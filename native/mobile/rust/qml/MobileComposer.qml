@@ -162,6 +162,35 @@ Rectangle {
         Chat.addFiles([path])
         root.showNotice(qsTr("Your camera photo is in the tray, ready to send."))
     }
+    // Something shared from another app (ChatPage.acceptShare), once its
+    // conversation is the open one: the copies go to the tray, as a pick's,
+    // and the text after what is typed (the draft this conversation kept),
+    // the keyboard up to add to it. Where nothing can be sent (read only,
+    // a blocked DM) the copies go again and a notice says so.
+    function acceptShare(text, paths, failed, dropped) {
+        // Not `enabled`: the page is off until the chat slides in.
+        if (Chat.readOnly || Nav.dmBlock.length > 0) {
+            for (const path of paths)
+                Native.discardPicked(path)
+            root.showNotice(qsTr("You can't send messages here, so the share was not added."))
+            return
+        }
+        if (paths.length > 0)
+            Chat.addFiles(paths)
+        if (text.length > 0) {
+            Qt.inputMethod.commit()
+            const before = field.text
+            field.text = before.trim().length === 0 ? text
+                : before + (/\s$/.test(before) ? "" : "\n") + text
+            field.cursorPosition = field.length
+        }
+        if (failed > 0)
+            root.showNotice(failed === 1 ? qsTr("1 of the shared files could not be read.")
+                : qsTr("%1 of the shared files could not be read.").arg(failed))
+        else if (dropped > 0)
+            root.showNotice(qsTr("Only the first %1 files were added.").arg(paths.length))
+        root.focusField()
+    }
     // A paste's files are being copied in.
     property bool pasting: false
     Connections {

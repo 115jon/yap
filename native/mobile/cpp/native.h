@@ -201,6 +201,14 @@ public:
   // The link the app was last opened with, once (empty: none).
   // `linkRequested` says one is waiting.
   Q_INVOKABLE QString takeLinkRequest();
+  // What another app shared into this one, once (`text`, the `files` it
+  // brought and how many over ten it `dropped`; empty: none).
+  // `shareRequested` says one is waiting. Its files stay the sender's
+  // until copyShare copies them in (as a pick: over `limitBytes` a sized
+  // stand-in), which answers with shareCopied; dropShare lets it go.
+  Q_INVOKABLE QVariantMap takeShareRequest();
+  Q_INVOKABLE void copyShare(qreal limitBytes) const;
+  Q_INVOKABLE void dropShare();
   // Signed out: the account's notifications and conversation shortcuts go.
   Q_INVOKABLE void forgetNotifications() const;
 
@@ -260,6 +268,8 @@ public:
   void onImageSaved(const QString& path, int result);
   void onOpenRequest(const QString& channelId, const QString& serverId, const QString& userId);
   void onLinkRequest(const QString& url);
+  void onShareRequest(const QString& text, int files, int dropped);
+  void onShareCopied(const QStringList& paths, int failed);
   void onAudioRoutes(const QByteArray& json);
   void onRing(const QByteArray& json);
   void onRingEnded(const QString& callId);
@@ -291,6 +301,9 @@ signals:
   void activeConversationChanged();
   void openRequested();
   void linkRequested();
+  void shareRequested();
+  // copyShare's copies; `failed` items could not be read.
+  void shareCopied(const QStringList& paths, int failed);
   void audioRoutesChanged();
   void microphoneAnswered(bool granted);
   void incomingCallChanged();
@@ -355,6 +368,7 @@ private:
   bool m_notificationsEnabled = false;
   QString m_activeConversation;
   QString m_linkRequest;
+  QVariantMap m_shareRequest;
   QVariantMap m_openRequest;
   QVariantList m_audioRoutes;
   bool m_askingMicrophone = false;
