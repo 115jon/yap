@@ -31,7 +31,7 @@ Rectangle {
     // Message: the DM with them, opened by the caller.
     signal messageRequested(string userId)
     // Edit profile (your own), opened by the caller.
-    signal editRequested()
+    signal profileEditRequested()
 
     readonly property bool loaded: Profile.userId === userId
     // Read once for the page: content that scrolls or sits at an inset
@@ -206,7 +206,7 @@ Rectangle {
                     variant: "secondary"
                     iconName: "edit"
                     text: qsTr("Edit profile")
-                    onClicked: root.editRequested()
+                    onClicked: root.profileEditRequested()
                 }
             }
             Item {
