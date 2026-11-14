@@ -6,8 +6,10 @@ import {
   apiSuccess,
   getEnv,
   isDesktopOrigin,
+  pendingDeletionResponse,
   requireAuth,
 } from "@/lib/api-helpers";
+import { pendingDeletionDate } from "@/lib/account-deletion";
 import { checkRateLimitDO } from "@/lib/rate-limit";
 import { cacheFetch, cacheGet, cacheSet } from "@/lib/cache";
 import { clog } from "@/lib/console-logger";
@@ -1159,10 +1161,12 @@ const BEARER_MEMO_MAX = 2_000;
 const bearerMemo = new Map<string, { userId: string; until: number }>();
 
 /**
- * Expo and the native apps send their session bearer to the API's own URLs.
+ * The native apps send their session bearer to the API's own URLs.
  * A valid session is remembered per isolate for BEARER_MEMO_TTL_MS, keyed
  * by a hash of the token, so a screen of images costs one session lookup.
- * Returns the session's user, or null.
+ * Returns the session's user, or null. An account waiting for deletion is
+ * let through here and refused by authorizeGenericMediaRequest on every
+ * request, so the memo cannot carry it past the deletion request.
  */
 async function bearerUserId(request: Request): Promise<string | null> {
   const authorization = request.headers.get("authorization");
@@ -1176,7 +1180,7 @@ async function bearerUserId(request: Request): Promise<string | null> {
   if (memo && memo.until > now) return memo.userId;
   bearerMemo.delete(memoKey);
 
-  const result = await requireAuth(request);
+  const result = await requireAuth(request, { allowPendingDeletion: true });
   if (result instanceof Response) return null;
   if (bearerMemo.size >= BEARER_MEMO_MAX) {
     const oldest = bearerMemo.keys().next().value;
@@ -1192,14 +1196,28 @@ async function bearerUserId(request: Request): Promise<string | null> {
 export type GenericMediaAuthorization =
   | { via: "signature" }
   | { via: "pass" | "bearer"; userId: string }
+  /** A pass or bearer whose account waits for deletion (and nothing else). */
+  | { via: "pending-deletion"; deleteAfter: string }
   | null;
 
-/** How (if at all) a generic-mode request is allowed to use the proxy. */
+/** When `userId`'s account will be deleted (ISO), or null when it won't. */
+export type PendingDeletionCheck = (userId: string) => Promise<string | null>;
+
+/**
+ * How (if at all) a generic-mode request is allowed to use the proxy.
+ *
+ * A pass or bearer counts only while its account is not waiting for
+ * deletion, as for requireAuth and media capabilities (lib/media-auth): a
+ * pass issued before the deletion request stays valid for up to an hour,
+ * and a bearer is remembered for BEARER_MEMO_TTL_MS, so both are checked on
+ * every request. A signature carries no user and is not affected.
+ */
 export async function authorizeGenericMediaRequest(
   request: Request,
   targetUrl: string,
   key: Buffer,
   checkBearer: (request: Request) => Promise<string | null> = bearerUserId,
+  checkPendingDeletion: PendingDeletionCheck = pendingDeletionDate,
 ): Promise<GenericMediaAuthorization> {
   const params = new URL(request.url).searchParams;
   const signature = params.get("sig");
@@ -1215,9 +1233,18 @@ export async function authorizeGenericMediaRequest(
     readMediaPassCookie(request.headers.get("cookie")),
     key,
   );
-  if (pass) return { via: "pass", userId: pass.userId };
+  let deleteAfter: string | null = null;
+  if (pass) {
+    deleteAfter = await checkPendingDeletion(pass.userId);
+    if (!deleteAfter) return { via: "pass", userId: pass.userId };
+  }
   const userId = await checkBearer(request);
-  return userId ? { via: "bearer", userId } : null;
+  if (userId) {
+    const bearerDeleteAfter = await checkPendingDeletion(userId);
+    if (!bearerDeleteAfter) return { via: "bearer", userId };
+    deleteAfter ??= bearerDeleteAfter;
+  }
+  return deleteAfter ? { via: "pending-deletion", deleteAfter } : null;
 }
 
 /**
@@ -1266,9 +1293,11 @@ const checkProxySignedIpRate: SignedIpRateCheck = async (clientIp) => {
   }
 };
 
-export interface ProxyMediaRateChecks {
+export interface ProxyMediaChecks {
   user?: UserRateCheck;
   signedIp?: SignedIpRateCheck;
+  /** Defaults to lib/account-deletion's gate. */
+  pendingDeletion?: PendingDeletionCheck;
 }
 
 function hostKey(url: URL): string {
@@ -1286,10 +1315,10 @@ export async function handleProxyMedia(
   request: Request,
   includeBody: boolean,
   nested = false,
-  rateChecks: ProxyMediaRateChecks = {},
+  checks: ProxyMediaChecks = {},
 ): Promise<Response> {
-  const checkUserRate = rateChecks.user ?? checkProxyUserRate;
-  const checkSignedIpRate = rateChecks.signedIp ?? checkProxySignedIpRate;
+  const checkUserRate = checks.user ?? checkProxyUserRate;
+  const checkSignedIpRate = checks.signedIp ?? checkProxySignedIpRate;
   const requestUrl = new URL(request.url);
   const target = requestUrl.searchParams.get("url");
   if (!target) return new Response("Missing media URL", { status: 400 });
@@ -1310,7 +1339,7 @@ export async function handleProxyMedia(
       new Request(inner, { method: request.method, headers: request.headers }),
       includeBody,
       true,
-      rateChecks,
+      checks,
     );
   }
 
@@ -1325,11 +1354,26 @@ export async function handleProxyMedia(
     },
   );
   const authorization = key
-    ? await authorizeGenericMediaRequest(request, target, key)
+    ? await authorizeGenericMediaRequest(
+        request,
+        target,
+        key,
+        undefined,
+        checks.pendingDeletion,
+      )
     : null;
 
-  if (!authorization) {
+  if (!authorization || authorization.via === "pending-deletion") {
+    // The allowlisted hosts stay open to everyone, unsigned.
     if (isAllowedMediaUrl(targetUrl)) return proxyMedia(request, includeBody);
+    if (authorization) {
+      const refused = pendingDeletionResponse(
+        authorization.deleteAfter,
+        request,
+      );
+      refused.headers.set("Cache-Control", "no-store");
+      return refused;
+    }
     return new Response("Media proxy request is not authorized", {
       status: 401,
       headers: { "Cache-Control": "no-store" },
@@ -1379,6 +1423,7 @@ const HEAD = async ({ request }: { request: Request }) =>
 /**
  * POST: the media pass for a signed-in web session, as an HttpOnly cookie
  * scoped to this path (the web app's own <img> requests then carry it).
+ * requireAuth refuses an account waiting for deletion, so it gets no pass.
  * DELETE: clears it on sign-out.
  */
 const POST = async ({ request }: { request: Request }) => {
