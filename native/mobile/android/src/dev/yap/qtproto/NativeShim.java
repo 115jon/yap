@@ -650,6 +650,11 @@ public final class NativeShim {
      * (normalisePicture).
      */
     private static File copyIn(Uri uri, File dir, String mime, boolean picture) {
+        return copyIn(uri, dir, mime, picture, pickLimit);
+    }
+
+    /** `limit`: this copy's own (a share's), not the pick under way's. */
+    private static File copyIn(Uri uri, File dir, String mime, boolean picture, long limit) {
         ContentResolver resolver = activity.getContentResolver();
         if (!dir.mkdirs() && !dir.isDirectory()) return null;
         try {
@@ -662,9 +667,9 @@ public final class NativeShim {
         long size = size(resolver, uri);
         // A picture to convert stands in as the JPEG it would become, so the
         // core's too-big card shows rather than its "not an image".
-        if (picture && size > pickLimit && converts(mime, name)) name = jpegName(name, false);
+        if (picture && size > limit && converts(mime, name)) name = jpegName(name, false);
         File out = new File(dir, name);
-        if (size > pickLimit) {
+        if (size > limit) {
             try (RandomAccessFile stand = new RandomAccessFile(out, "rw")) {
                 stand.setLength(size);
                 return out;
@@ -852,6 +857,32 @@ public final class NativeShim {
         } catch (IOException | RuntimeException e) {
             Log.w("yap-native", "could not drop a picked picture's location", e);
         }
+    }
+
+    /**
+     * Things shared into the app (ShareShim), copied in as a pick's are:
+     * under uploads/<batch>/<item>/ (discardPicked deletes them), over
+     * `limitBytes` a sized stand-in, on the calling thread. Only other
+     * apps' content:// items: a file:// path or one of this app's own
+     * providers would hand our own files to an upload. `mime` is the type
+     * the sender named. The paths of the copies that could be made.
+     */
+    static List<String> copyShared(List<Uri> uris, String mime, long limitBytes) {
+        List<String> paths = new ArrayList<>();
+        if (activity == null) return paths;
+        long limit = limitBytes > 0 ? limitBytes : Long.MAX_VALUE;
+        File batch = new File(new File(activity.getCacheDir(), UPLOADS),
+                "share-" + System.nanoTime());
+        for (int i = 0; i < uris.size(); i++) {
+            Uri uri = uris.get(i);
+            if (!YapEditText.isForeignContent(activity, uri)) {
+                Log.w("yap-native", "share: refused an item that is not another app's content");
+                continue;
+            }
+            File copy = copyIn(uri, new File(batch, Integer.toString(i)), mime, false, limit);
+            if (copy != null) paths.add(copy.getAbsolutePath());
+        }
+        return paths;
     }
 
     /**

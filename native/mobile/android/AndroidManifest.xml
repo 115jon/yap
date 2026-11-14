@@ -12,7 +12,8 @@
      (the FCM service, the Reply and Mark as read receiver, the permission);
      and voice calls (the mic, the audio route, the call's service, the
      phone's camera in a call);
-     and links into the app (LinkActivity's filters); the composer's Camera
+     and links into the app (LinkActivity's filters); shares into it
+     (ShareActivity's); the composer's Camera
      (CaptureProvider, where the camera app writes the photo: the system
      camera takes it, once the call camera's permission is granted).
      No package attribute: the application id is CMake's YAP_ANDROID_APP_ID
@@ -164,6 +165,32 @@
                      (yap://signin?code=…, sent as an intent link): it only
                      brings the app forward; the app's own poll signs in. -->
                 <data android:host="signin" />
+            </intent-filter>
+        </activity>
+
+        <!-- Another app's Share into Yap (ShareActivity hands it to
+             YapActivity): pictures, videos, any file, and text (a link from
+             the browser), one or several. The app asks where it goes
+             (SharePickerPage) and fills that conversation's composer. -->
+        <activity
+            android:name="dev.yap.qtproto.ShareActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <!-- Any type: a picture, a video, a PDF or a zip all go as an
+                 attachment; text (text/plain without a stream) as the
+                 message. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
 
