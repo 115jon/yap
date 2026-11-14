@@ -6,6 +6,7 @@ import { CacheKey } from "@/lib/cache";
 import { ServiceError } from "@/lib/service-error";
 import type { D1Database } from "@cloudflare/workers-types";
 import type { BroadcastDescriptor } from "./server.service";
+import { blockBetween, blockRefusal, BLOCK_ERROR } from "./block.service";
 import { recordServerJoin } from "./profile-activity.service";
 
 // ─── listRelationships ───────────────────────────────────────────────────────
@@ -73,6 +74,23 @@ export async function sendFriendRequest(
     throw ServiceError.badRequest("Cannot friend yourself");
   }
 
+  // A block either way refuses the request (the blocked side cannot even
+  // leave a pending row behind for the blocker). The block may name an
+  // account purged and signed up again with the same id (migration 046).
+  const block = await blockBetween(db, userId, target.id as string);
+  if (block === "you_blocked") {
+    throw ServiceError.conflict(
+      "You blocked this user. Unblock to send a friend request.",
+      BLOCK_ERROR.youBlocked,
+    );
+  }
+  if (block === "blocked_you") {
+    throw ServiceError.forbidden(
+      "You can't send this user a friend request.",
+      BLOCK_ERROR.blockedYou,
+    );
+  }
+
   // Check existing relationship
   const existing = (await db
     .prepare(
@@ -83,7 +101,6 @@ export async function sendFriendRequest(
 
   if (existing) {
     if (existing.type === 0) throw ServiceError.conflict("Already friends");
-    if (existing.type === 1) throw ServiceError.conflict("User is blocked");
     if (existing.type === 3)
       throw ServiceError.conflict("Request already sent");
 
@@ -116,20 +133,6 @@ export async function sendFriendRequest(
         broadcasts: [],
       };
     }
-  }
-
-  // Refused when the target has blocked the sender (a block deletes the
-  // sender's own row, so `existing` is null then). The block may name an
-  // account purged and signed up again with the same id (migration 046).
-  const blockedBy = await db
-    .prepare(
-      `SELECT 1 FROM relationships
-       WHERE type = 1 AND user_id = ? AND target_user_id = ?`,
-    )
-    .bind(target.id as string, userId)
-    .first();
-  if (blockedBy) {
-    throw ServiceError.forbidden("Can't send a friend request to this user");
   }
 
   // Create pending relationships
@@ -445,6 +448,10 @@ export async function getOrCreateDM(
       },
     };
   }
+
+  // A block either way stops a new DM (an existing one still opens, to read).
+  const block = await blockBetween(db, userId, targetUserId);
+  if (block) throw blockRefusal(block);
 
   // Create new DM
   const channelId = crypto.randomUUID();

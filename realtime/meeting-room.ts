@@ -52,6 +52,11 @@ import {
 } from "../src/lib/channel-access";
 import { PERMISSIONS } from "../src/lib/permissions";
 import {
+  BLOCK_MESSAGE_COPY,
+  blockBetween,
+  dmBlockState,
+} from "../src/services/block.service";
+import {
   parseVoiceMoveGrantRecord,
   parseVoiceMoveGrantUse,
   parseVoiceMoveRequest,
@@ -5494,6 +5499,35 @@ export class MeetingRoom extends DurableObject<Env> {
     if (channelId) this.hintVoiceRoster(channelId);
   }
 
+  /**
+   * Refuses a send or reaction in a 1:1 DM closed by a block (either way),
+   * with the same copy as the REST routes. True when refused; a failed
+   * lookup refuses too.
+   */
+  private async refuseBlockedDm(
+    ws: WebSocket,
+    userId: string,
+    channelId: string,
+  ): Promise<boolean> {
+    let block: Awaited<ReturnType<typeof dmBlockState>>;
+    try {
+      block = await dmBlockState(this.env.DB, userId, channelId);
+    } catch (err) {
+      log.error("DM block check failed:", err);
+      this.sendTo(ws, {
+        op: Op.Error,
+        d: { code: 5000, message: "Failed to check this conversation" },
+      });
+      return true;
+    }
+    if (!block) return false;
+    this.sendTo(ws, {
+      op: Op.Error,
+      d: { code: 4003, message: BLOCK_MESSAGE_COPY[block] },
+    });
+    return true;
+  }
+
   private async handleMessageCreate(
     ws: WebSocket,
     d: MainClientPayload<Op.MessageCreate>,
@@ -5540,6 +5574,13 @@ export class MeetingRoom extends DurableObject<Env> {
           message: "Channel not found or access denied",
         },
       });
+      return;
+    }
+
+    if (
+      !access.serverId &&
+      (await this.refuseBlockedDm(ws, session.user_id, d.channel_id))
+    ) {
       return;
     }
 
@@ -5949,6 +5990,16 @@ export class MeetingRoom extends DurableObject<Env> {
       return;
     }
 
+    // Nobody types into a 1:1 DM closed by a block: drop it quietly.
+    if (
+      !access.serverId &&
+      (await dmBlockState(this.env.DB, session.user_id, d.channel_id).catch(
+        () => null,
+      ))
+    ) {
+      return;
+    }
+
     await this.broadcastToChannel(
       d.channel_id,
       {
@@ -6018,6 +6069,13 @@ export class MeetingRoom extends DurableObject<Env> {
           message: "Channel not found or access denied",
         },
       });
+      return;
+    }
+
+    if (
+      !access.serverId &&
+      (await this.refuseBlockedDm(ws, session.user_id, d.channel_id))
+    ) {
       return;
     }
 
@@ -6289,20 +6347,15 @@ export class MeetingRoom extends DurableObject<Env> {
       return;
     }
 
-    // Check relationship: must not be blocked
+    // A block either way: no ring (the callee hears nothing), and the
+    // caller's client says why ("blocked").
     try {
-      const rel = await this.env.DB.prepare(
-        "SELECT type FROM relationships WHERE user_id = ? AND target_user_id = ?",
-      )
-        .bind(calleeId, callerId)
-        .first<{ type: number }>();
-      if (rel?.type === 1) {
-        // Blocked — silently fail
+      if (await blockBetween(this.env.DB, callerId, calleeId)) {
         this.sendTo(ws, {
           op: Op.Dispatch,
           d: {
             event: "CALL_RING_STOP",
-            data: { call_id: null, reason: "unavailable" },
+            data: { call_id: null, reason: "blocked" },
           },
         });
         return;

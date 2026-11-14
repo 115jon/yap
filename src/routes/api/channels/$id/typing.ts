@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { broadcastToChannel, requireAuth } from "@/lib/api-helpers";
+import { broadcastToChannel, getDB, requireAuth } from "@/lib/api-helpers";
 import { requireChannelAccess } from "@/lib/require-channel-access";
+import { dmBlockState } from "@/services/block.service";
 
 // POST /api/channels/:id/typing — send typing indicator
 const POST = async ({ request: _request, params }: any) => {
@@ -14,6 +15,14 @@ const POST = async ({ request: _request, params }: any) => {
   // Verify channel access
   const accessResult = await requireChannelAccess(userId, channelId);
   if (accessResult instanceof Response) return accessResult;
+
+  // Nobody can type into a 1:1 DM closed by a block: drop it quietly.
+  if (
+    accessResult.serverId === null &&
+    (await dmBlockState(getDB(), userId, channelId))
+  ) {
+    return new Response(null, { status: 204 });
+  }
 
   await broadcastToChannel(channelId, "TYPING_START", {
     channel_id: channelId,

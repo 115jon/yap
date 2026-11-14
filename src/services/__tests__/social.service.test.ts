@@ -110,16 +110,23 @@ describe("sendFriendRequest", () => {
     ).rejects.toHaveProperty("status", 400);
   });
 
-  it("throws 403 when the target has blocked the sender", async () => {
+  it("refuses a request to someone who blocked us", async () => {
     db.mockQuery("FROM users WHERE username", userRow());
-    db.mockQuery("WHERE type = 1 AND user_id", { "1": 1 }, [
-      TARGET_ID,
-      USER_ID,
-    ]);
+    db.mockQuery("WHERE type = 1", { results: [{ user_id: TARGET_ID }] });
 
     await expect(
       sendFriendRequest(db as any, USER_ID, "bob"),
-    ).rejects.toHaveProperty("status", 403);
+    ).rejects.toMatchObject({ status: 403, code: "BLOCKED_BY_USER" });
+    expect(db.getCalls("INSERT INTO relationships")).toHaveLength(0);
+  });
+
+  it("refuses a request to someone we blocked", async () => {
+    db.mockQuery("FROM users WHERE username", userRow());
+    db.mockQuery("WHERE type = 1", { results: [{ user_id: USER_ID }] });
+
+    await expect(
+      sendFriendRequest(db as any, USER_ID, "bob"),
+    ).rejects.toMatchObject({ status: 409, code: "USER_BLOCKED" });
     expect(db.getCalls("INSERT INTO relationships")).toHaveLength(0);
   });
 
@@ -370,6 +377,43 @@ describe("getOrCreateDM", () => {
     // Both people are recipients of the new channel.
     db.assertCalledWith("INSERT INTO dm_recipients", [result.dm.id, USER_ID]);
     db.assertCalledWith("INSERT INTO dm_recipients", [result.dm.id, TARGET_ID]);
+  });
+
+  it("refuses a new DM with someone who blocked us", async () => {
+    db.mockQuery("FROM users WHERE id", userRow(), [TARGET_ID]);
+    db.mockQuery("WHERE type = 1", { results: [{ user_id: TARGET_ID }] });
+
+    await expect(
+      getOrCreateDM(db as any, USER_ID, TARGET_ID),
+    ).rejects.toMatchObject({
+      status: 403,
+      code: "BLOCKED_BY_USER",
+      message: "You can't message this user.",
+    });
+    expect(db.getCalls("INSERT INTO channels")).toHaveLength(0);
+  });
+
+  it("refuses a new DM with someone we blocked", async () => {
+    db.mockQuery("FROM users WHERE id", userRow(), [TARGET_ID]);
+    db.mockQuery("WHERE type = 1", { results: [{ user_id: USER_ID }] });
+
+    await expect(
+      getOrCreateDM(db as any, USER_ID, TARGET_ID),
+    ).rejects.toMatchObject({
+      status: 403,
+      code: "USER_BLOCKED",
+      message: "You blocked this user. Unblock to message.",
+    });
+    expect(db.getCalls("INSERT INTO channels")).toHaveLength(0);
+  });
+
+  it("still opens an existing DM across a block (to read it)", async () => {
+    db.mockQuery("FROM users WHERE id", userRow());
+    db.mockQuery("FROM dm_recipients a", { id: "dm_existing" });
+    db.mockQuery("WHERE type = 1", { results: [{ user_id: TARGET_ID }] });
+
+    const result = await getOrCreateDM(db as any, USER_ID, TARGET_ID);
+    expect(result.dm.id).toBe("dm_existing");
   });
 
   it("throws 400 when DMing yourself", async () => {

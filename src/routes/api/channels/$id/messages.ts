@@ -40,6 +40,7 @@ import {
 } from "@/lib/background-tasks";
 import { recordR2CleanupFailure } from "@/services/r2-cleanup.service";
 import { scheduleMessageSent } from "@/services/stats.service";
+import { blockRefusal, dmBlockState } from "@/services/block.service";
 import { cfTimeZone } from "@/lib/request-time-zone";
 
 // GET /api/channels/:id/messages — get message history (paginated)
@@ -125,6 +126,13 @@ export const POST = async ({ request, params }: any) => {
         "You do not have permission to send messages in this channel",
         403,
       );
+    }
+  } else {
+    // A block either way closes a 1:1 DM to new messages (Discord-style).
+    const block = await dmBlockState(getDB(), userId, channelId);
+    if (block) {
+      const refusal = blockRefusal(block);
+      return apiError(refusal.message, refusal.status, refusal.code);
     }
   }
 
