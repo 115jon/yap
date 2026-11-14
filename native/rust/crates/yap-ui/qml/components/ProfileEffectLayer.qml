@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Yap.Media
-import com.yap.native
 import Yap.Ui
 
 // A profile effect over a profile surface (ProfileCollectiblesLayer.tsx,

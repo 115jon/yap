@@ -4,8 +4,8 @@ import com.yap.native
 import Yap.Ui
 
 // The profile card's action row (ProfileCard.tsx ProfileActionRow,
-// ProfileActionNotices, ProfileBlockConfirm). The primary follows the
-// relationship:
+// ProfileActionNotices, ProfileBlockConfirm), drawn over Yap.Ui's
+// ProfileFriendCore. The primary follows the relationship:
 //   friend    Message                      more: Remove friend, Block
 //   incoming  Accept, then Message and Decline
 //   outgoing  Message, then Cancel request
@@ -30,22 +30,21 @@ Column {
     signal messageRequested()
     signal callRequested()
 
-    readonly property var model: JSON.parse(Friends.state)
-    readonly property string relation: model.card && model.card.userId === userId ? model.card.relation : "none"
-    readonly property var act: model.acts?.[userId] ?? { busy: "", error: "", failed: "", done: 0 }
-    readonly property bool pending: act.busy.length > 0
-    property bool confirmBlock: false
+    // The relationship and the actions (Yap.Ui, shared with the phone).
+    ProfileFriendCore {
+        id: core
+        userId: root.userId
+        username: root.username
+        name: root.name
+    }
+    readonly property string relation: core.relation
+    readonly property var act: core.act
+    readonly property bool pending: core.pending
+    property alias confirmBlock: core.confirmBlock
 
     function run(action) {
-        Friends.act(action, userId, username, name)
+        core.run(action)
     }
-
-    // A fresh card starts clean (the web's hook state is per card).
-    onUserIdChanged: {
-        confirmBlock = false
-        Friends.clear(userId)
-    }
-    onRelationChanged: if (relation === "blocked") confirmBlock = false
 
     width: parent ? parent.width : 0
     spacing: 8
@@ -172,7 +171,7 @@ Column {
             width: parent.width - 48
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
-            text: qsTr("You blocked %1. They can't message you or send requests.").arg(root.name)
+            text: core.blockedNotice
             color: Theme.ink2
             font: Theme.type.description
         }
@@ -188,7 +187,7 @@ Column {
         visible: active
         width: parent.width
         sourceComponent: ConfirmStrip {
-            consequence: qsTr("Block %1? They'll be removed from your friends and can't send you friend requests. You can unblock them later.").arg(root.name)
+            consequence: core.blockConsequence
             confirmLabel: qsTr("Block %1").arg(root.name)
             irreversible: false
             busy: root.act.busy === "block"

@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
-import com.yap.native
 import Yap.Ui
 
 // A profile's badges (ui/user-badges.tsx), in their fixed order: each a
