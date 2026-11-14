@@ -20,9 +20,13 @@ import { PERMISSIONS } from "../../src/lib/permissions";
 import { DEFAULT_KOVA_AUTH_URL } from "../../src/lib/site-defaults";
 import {
   generateAllMessagePushes,
+  markChannelAsRead,
   processMessagePostprocessingTask,
 } from "../../src/services/message.service";
-import type { MessagePush } from "../../src/services/push.service";
+import {
+  hasNotificationsSinceLastRead,
+  type MessagePush,
+} from "../../src/services/push.service";
 import { setTestRequestHeaders } from "../test-shims/react-start-server";
 
 type RouteModule = { Route: { options: unknown } };
@@ -475,6 +479,15 @@ describe("all messages", () => {
       skip: new Set(),
     });
     expect(again).toEqual([]);
+
+    // Reading the channel clears that push on the user's other devices.
+    expect(await hasNotificationsSinceLastRead(db, bob.id, lab.channelId)).toBe(
+      true,
+    );
+    await markChannelAsRead(db, bob.id, lab.channelId);
+    expect(await hasNotificationsSinceLastRead(db, bob.id, lab.channelId)).toBe(
+      false,
+    );
 
     // A mention is pushed once, as a mention.
     const mention = await post(alice, lab.channelId, `@${bob.username} look`);

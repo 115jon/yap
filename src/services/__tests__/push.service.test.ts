@@ -375,6 +375,10 @@ describe("hasNotificationsSinceLastRead", () => {
       "chan-1",
       "user-1",
       "chan-1",
+      "user-1",
+      "chan-1",
+      "user-1",
+      "chan-1",
     ]);
   });
 
