@@ -7,11 +7,11 @@ import Yap.Ui
 
 // The soundboard in a call, as a sheet (SoundboardPicker.tsx at phone
 // size, over the desktop picker's logic: Yap.Ui's SoundboardCore). From the
-// top: the search (MyInstants beside it, not in a DM call), then what plays
-// now (each with Stop), Favorites, each server's sounds (the call's server
-// leads with Add sound when we may upload; in a DM call every member
-// server), Custom sounds and Yap sounds, four cells a row. A tap plays the
-// sound for everyone; a long press opens its sheet (Preview, the
+// top: the search (Listen Together and MyInstants beside it, not in a DM
+// call), then what plays now (each with Stop), Favorites, each server's
+// sounds (the call's server leads with Add sound when we may upload; in a
+// DM call every member server), Custom sounds and Yap sounds, four cells a
+// row. A tap plays the sound for everyone; a long press opens its sheet (Preview, the
 // favourite, Edit, Delete; favourites live on the server). The foot holds
 // Send (how loud our clips play for the room) and Soundboard (how loud
 // clips play here, this phone's setting). Add sound picks an audio file
@@ -46,6 +46,8 @@ Item {
     property int boardVolume: 100
 
     readonly property bool up: board.up
+    // The Listen Together key (not in a DM call): the host opens its sheet.
+    signal listenTogether()
     // The shared lists: the soundboard filtered by the search, and the
     // MyInstants search.
     SoundboardCore {
@@ -512,8 +514,8 @@ Item {
                 id: plate
                 anchors.left: backKey.visible ? backKey.right : parent.left
                 anchors.leftMargin: backKey.visible ? 4 : 16
-                anchors.right: instantsKey.visible ? instantsKey.left : parent.right
-                anchors.rightMargin: instantsKey.visible ? 4 : 16
+                anchors.right: listenKey.visible ? listenKey.left : parent.right
+                anchors.rightMargin: listenKey.visible ? 4 : 16
                 height: Theme.controlLg
                 radius: Theme.radius
                 color: Theme.ply2
@@ -569,6 +571,21 @@ Item {
                         Qt.inputMethod.reset()
                         search.clear()
                     }
+                }
+            }
+            IconKey {
+                id: listenKey
+                visible: root.view === "soundboard" && !core.dmCall
+                focusPolicy: Qt.NoFocus
+                anchors.right: instantsKey.left
+                anchors.verticalCenter: plate.verticalCenter
+                iconName: "headphones"
+                tip: qsTr("Listen Together")
+                Accessible.name: tip
+                onClicked: {
+                    Native.haptic(Native.Tick)
+                    root.close()
+                    root.listenTogether()
                 }
             }
             IconKey {

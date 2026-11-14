@@ -56,6 +56,7 @@ const QML: &[&str] = &[
     "qml/ConfirmSheet.qml",
     "qml/SelectTextPage.qml",
     "qml/LicensesPage.qml",
+    "qml/ListenTogetherSheet.qml",
     "qml/SwipeReply.qml",
     "qml/seams/InlineAudio.qml",
     "qml/seams/InlineVideo.qml",

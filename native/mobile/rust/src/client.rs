@@ -43,7 +43,7 @@ impl Realtime for MobileRealtime {
         crate::voice::spawn(api, http, target, commands, events);
     }
 
-    /// The room's soundboard clips (`sound.rs`).
+    /// The room's soundboard clips and Listen Together stream (`sound.rs`).
     #[cfg(target_os = "android")]
     fn spawn_audio(
         &self,
@@ -275,6 +275,12 @@ impl Platform for Mobile {
     #[cfg(target_os = "android")]
     fn set_soundboard_volume(&self, volume: u8) {
         crate::sound::set_soundboard_volume(volume);
+    }
+
+    /// The Listen Together sheet's volume (`sound.rs`).
+    #[cfg(target_os = "android")]
+    fn set_listen_volume(&self, volume: u8) {
+        crate::sound::set_listen_volume(volume);
     }
 
     /// The call page's per-person volume and mute (`voice.rs`).

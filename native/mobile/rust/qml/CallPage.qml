@@ -594,7 +594,19 @@ Rectangle {
         anchors.fill: parent
         z: 100
         active: false
-        sourceComponent: SoundboardSheet {}
+        sourceComponent: SoundboardSheet {
+            onListenTogether: listen.open()
+        }
+    }
+
+    // Listen Together: a bar over the dock while the room plays, and its
+    // sheet (ListenTogetherSheet).
+    ListenTogetherSheet {
+        id: listen
+        anchors.fill: parent
+        z: 99
+        shown: root.inCall
+        dockHeight: dock.height
     }
 
     // Bumped by each per-person volume or mute change, so what shows them

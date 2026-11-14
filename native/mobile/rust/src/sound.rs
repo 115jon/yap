@@ -2,8 +2,10 @@
 //! the app's speaker (`yap_speaker`, AAudio on Android):
 //!
 //! - [`spawn`]: `Realtime::spawn_audio`, the soundboard clips the room
-//!   plays. Listen Together's stream is held back until the phone has
-//!   controls for it.
+//!   plays and its Listen Together stream (the call page's
+//!   ListenTogetherSheet stops it here and sets its volume).
+//! - [`listen_volume`]: the Listen Together volume this phone saved, which
+//!   the stream starts at when a call joins a room that is already playing.
 //! - [`play`] / [`stop`]: the core's UI sounds, gated by the sound settings
 //!   as on the desktop. The phone has no switches for them yet, so a fresh
 //!   install plays the defaults.
@@ -12,10 +14,9 @@
 //! and sounds follow the call's route and volume; outside one, UI sounds
 //! play as system sounds.
 
-use tokio::sync::mpsc;
 use yap_cache::settings::{self, DesktopSettings};
 use yap_core::shell::Sound;
-use yap_core::store::apps::{AppsCommand, AudioCommand};
+use yap_core::store::apps::AppsCommand;
 use yap_core::{AudioEvents, AudioHandle};
 
 /// The sound settings saved in the app's folder (the defaults until the
@@ -33,21 +34,34 @@ pub fn spawn(http: reqwest::Client, events: AudioEvents) -> AudioHandle {
         builder.use_preconfigured_tls(crate::platform::tls_config())
     });
     let volume = || saved().sound_settings.soundboard_volume;
-    let player = yap_audio::player::spawn(http, events, Box::new(volume));
-    let Some(player) = player.commands else {
-        return AudioHandle::none();
-    };
-    // Clips only: the phone has no Listen Together controls (volume, stop)
-    // yet, so its stream would play with no way to turn it down.
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    tokio::spawn(async move {
-        while let Some((token, command)) = rx.recv().await {
-            if is_clip(&command) && player.send((token, command)).is_err() {
-                return;
-            }
+    yap_audio::player::spawn(http, events, Box::new(volume))
+}
+
+/// The Listen Together volume a phone starts at before its first change:
+/// half, so a room already playing does not come in at full volume.
+const DEFAULT_LISTEN_VOLUME: u8 = 50;
+/// The file in the app's folder that keeps it (one number, 0..=100).
+const LISTEN_VOLUME_FILE: &str = "listen-volume";
+
+/// The saved Listen Together volume, 0..=100.
+pub fn listen_volume() -> u8 {
+    settings::app_dir()
+        .and_then(|dir| std::fs::read_to_string(dir.join(LISTEN_VOLUME_FILE)).ok())
+        .and_then(|text| text.trim().parse::<u8>().ok())
+        .map_or(DEFAULT_LISTEN_VOLUME, |volume| volume.min(100))
+}
+
+/// Saves the Listen Together volume (the core already has it).
+pub fn set_listen_volume(volume: u8) {
+    let volume = volume.min(100);
+    if listen_volume() == volume {
+        return;
+    }
+    if let Some(dir) = settings::app_dir() {
+        if let Err(error) = std::fs::write(dir.join(LISTEN_VOLUME_FILE), volume.to_string()) {
+            eprintln!("[sound] listen volume not saved: {error}");
         }
-    });
-    AudioHandle { commands: Some(tx) }
+    }
 }
 
 /// The soundboard volume setting, 0..=100 (the sheet's slider).
@@ -81,18 +95,7 @@ pub fn send_local_settings() {
         sound_volume: s.sound_settings.sound_volume,
         soundboard_volume: s.sound_settings.soundboard_volume,
     });
-}
-
-/// A soundboard command, not one of the Listen Together stream's.
-fn is_clip(command: &AudioCommand) -> bool {
-    !matches!(
-        command,
-        AudioCommand::StreamLoad { .. }
-            | AudioCommand::StreamSeek(_)
-            | AudioCommand::StreamPause(_)
-            | AudioCommand::StreamStop
-            | AudioCommand::StreamAudio { .. }
-    )
+    yap_ui::apps::send(AppsCommand::LtVolume(f64::from(listen_volume()) / 100.0));
 }
 
 /// A UI sound, unless the settings switch it off. The incoming ring is not
