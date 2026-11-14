@@ -638,6 +638,7 @@ impl State {
         apps.listen.loaded = None;
         apps.listen.position = None;
         apps.listen.failed_entry = None;
+        apps.listen.listening = true;
         apps.listen.playback_error.clear();
         apps.listen.results = LtResults::default();
         apps.listen.resolve = None;
@@ -1085,6 +1086,22 @@ impl State {
             AppsCommand::LtVolume(volume) => {
                 self.apps.listen.volume = clamp01(volume);
                 self.lt_audio(fx);
+            }
+            AppsCommand::LtListen(listening) => {
+                if self.apps.listen.listening == listening {
+                    return;
+                }
+                eprintln!(
+                    "[listen] {}",
+                    if listening { "listen" } else { "stop here" }
+                );
+                self.apps.listen.listening = listening;
+                if listening {
+                    // Listening again retries a stream that failed for good.
+                    self.apps.listen.failed_entry = None;
+                    self.apps.listen.playback_error.clear();
+                }
+                self.lt_sync(fx);
             }
             AppsCommand::LtLoudness { enabled, preset } => {
                 self.apps.listen.loudness = enabled;
@@ -2315,7 +2332,9 @@ impl State {
         let l = &self.apps.listen;
         let current = l.snapshot.as_ref().and_then(|s| s.current_entry.as_ref());
         let path = match (current, &context) {
-            (Some(entry), Some(context)) if l.failed_entry.as_deref() != Some(&entry.entry_id) => {
+            (Some(entry), Some(context))
+                if l.listening && l.failed_entry.as_deref() != Some(&entry.entry_id) =>
+            {
                 if entry.track.is_radio() {
                     // The station's own stream, as the room resolved it; only a
                     // public https URL is ever fetched.
@@ -3071,6 +3090,7 @@ impl State {
             skipped: l.results.skipped,
             error: l.error.clone(),
             playback_error: l.playback_error.clone(),
+            listening: l.listening,
             volume: l.volume,
             loudness: l.loudness,
             preset: l.preset.clone(),

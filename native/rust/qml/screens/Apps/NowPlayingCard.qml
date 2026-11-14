@@ -27,44 +27,20 @@ Item {
     // cards that share a corner.
     required property FloatingArea area
 
-    // The state is parsed afresh on every change, and a new object would
-    // rebuild every Repeater under it; this slice is replaced only when its
-    // content differs (as FriendsView and SearchPanel do).
-    readonly property var parsed: JSON.parse(Apps.state || "{}")
-    property var l: ({})
-    property string lKey: "{}"
-
-    function syncL() {
-        const next = parsed.listen ?? {}
-        const key = JSON.stringify(next)
-        if (key !== lKey) {
-            lKey = key
-            l = next
-        }
-    }
-    onParsedChanged: syncL()
-    readonly property var now: l.now ?? null
-    readonly property int queueCount: (l.queue ?? []).length
-    property real position: 0
+    // The room's state, its clock and its rules (Yap.Ui's ListenCore,
+    // shared with the phone's sheet); the clock ticks while the card shows.
+    readonly property ListenCore core: ListenCore { active: root.visible }
+    readonly property var l: core.l
+    readonly property var now: core.now
+    readonly property int queueCount: core.queueCount
+    readonly property real position: core.position
     // A keyboard seek being previewed (ms), or -1: committed on key up,
     // dropped by Escape (ListenTogetherNowPlayingCard.tsx handleSeekKey*).
     property real previewMs: -1
     readonly property real shownMs: previewMs >= 0 ? previewMs : position
 
-    // The position is the core's (clamped to the track; 0:00 for a live
-    // radio, playing or paused, as the web's clamp to `durationMs ?? 0`).
-    // While it runs, the next tick lands just after the label flips
-    // (useListenTogetherClockNow aligns to the second the same way).
-    function tick() {
-        position = Apps.ltPositionMs()
-        if (visible && l.running === true)
-            clockTimer.restart()
-        else
-            clockTimer.stop()
-    }
     function clock(ms) {
-        const total = Math.max(0, Math.floor(ms / 1000))
-        return qsTr("%1:%2").arg(Math.floor(total / 60)).arg(String(total % 60).padStart(2, "0"))
+        return core.clock(ms)
     }
 
     // Where it parks (kept for the session on ShellState): 0 bottom-left, 1
@@ -143,16 +119,13 @@ Item {
         NumberAnimation { duration: Theme.dur4; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeInOut }
     }
 
-    onLChanged: tick()
     onVisibleChanged: {
         syncStack()
         present()
-        tick()
     }
     onCornerChanged: syncStack()
     onHeightChanged: syncStack()
     Component.onCompleted: {
-        syncL()
         syncStack()
         present()
         Qt.callLater(() => root.placed = true)
@@ -161,12 +134,6 @@ Item {
 
     Accessible.role: Accessible.Pane
     Accessible.name: qsTr("Now playing")
-
-    Timer {
-        id: clockTimer
-        interval: 1000 - root.position % 1000 + 5
-        onTriggered: root.tick()
-    }
 
     // Drag from anywhere that is not a control (the bubble included).
     FloatingDrag {
@@ -443,8 +410,7 @@ Item {
                         width: parent.width
                         textFormat: Text.PlainText
                         elide: Text.ElideRight
-                        text: (root.now?.artist ?? "").length > 0 ? root.now.artist
-                            : root.now?.radio ? qsTr("Live Radio") : ""
+                        text: root.core.nowArtist
                         color: Theme.ink2
                         font: Theme.type.description
                     }
