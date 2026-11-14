@@ -686,6 +686,16 @@ and a DM call's ring (`kind: call_ring | call_ring_stop`,
   from Java with the stored session. Sign-out unregisters first
   (`DELETE /api/push-tokens`; the session's revoke waits for it, at most
   3 s).
+- **Text.** A message push carries ids only (FCM never sees the text or
+  any name). The service fetches what it shows,
+  `GET /api/notifications/:id/push` (the sender, the conversation, the
+  first 180 characters), with the stored session, for at most 5 s. The
+  server answers only the notification's recipient while they can still
+  see the message; its 404 (`NOTIFICATION_NOT_FOUND`: deleted, left,
+  blocked) shows nothing. Any other failure (offline, signed out, slow)
+  shows "New message from Ada", with the names the last fetch gave
+  (`PushStore`, cleared at sign-out), or "New message". A ring fetches
+  nothing first.
 - **Drawing** (`push/MessageNotifier.java`, a port of the Expo app's
   `MessageNotifier.kt`): one MessagingStyle notification per conversation,
   with the sender's avatar, the last eight messages and the brand accent,
