@@ -393,7 +393,8 @@ Rectangle {
                 }
                 LinkRow {
                     text: qsTr("Privacy")
-                    url: "https://github.com/115jon/yap/blob/main/PRIVACY.md"
+                    // The site's page (PRIVACY.md), on the core's web origin.
+                    url: Admin.webOrigin + "/privacy"
                 }
                 PageRow {
                     text: qsTr("Open source licences")

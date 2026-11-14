@@ -63,8 +63,8 @@ Each release follows this sequence:
 
 ## Privacy policy
 
-Yap's privacy policy is available at [PRIVACY.md](PRIVACY.md) and will be
-published at <https://yap.115jon.com/privacy>. The installer must present this
+Yap's privacy policy is published at <https://yap.115jon.com/privacy>, which
+renders [PRIVACY.md](PRIVACY.md). The installer must present this
 policy and required choices before a first installation that enables automatic
 data transfers.
 

@@ -73,9 +73,9 @@ export function HomeFooter({ isSignedIn, onStartRoom }: HomeFooterProps) {
               <External href={`${REPO_URL}/releases`}>Releases</External>
             </li>
             <li>
-              <External href={`${REPO_URL}/blob/main/PRIVACY.md`}>
+              <a href="/privacy" className={LINK}>
                 Privacy
-              </External>
+              </a>
             </li>
             <li>
               <External href={`${REPO_URL}/blob/main/SECURITY.md`}>
