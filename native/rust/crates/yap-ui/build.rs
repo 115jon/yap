@@ -47,6 +47,7 @@ fn main() {
         QmlFile::from("qml/components/MessageActionModel.qml"),
         QmlFile::from("qml/components/MessageEditor.qml"),
         QmlFile::from("qml/components/PendingDeletionView.qml"),
+        QmlFile::from("qml/components/PinsModel.qml"),
         QmlFile::from("qml/components/PlatformIcons.qml"),
         QmlFile::from("qml/components/PresenceAvatar.qml"),
         QmlFile::from("qml/components/ProfileDraft.qml"),

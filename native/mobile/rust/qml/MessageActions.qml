@@ -3,15 +3,16 @@ import Yap.Mobile
 import Yap.Ui
 
 // What a phone does with a message: the long-press sheet and everything it
-// leads to (the emoji picker, who reacted, the delete confirmation, the
-// selectable text page). A page puts one over itself and calls
+// leads to (the emoji picker, who reacted, the pin and delete
+// confirmations, the selectable text page). A page puts one over itself and calls
 // `openFor(row)` from its MessageDelegate's `menuRequested`; replying,
 // editing, threads and profiles are the page's, so those come back as
 // signals. Each
 // surface is built the first time it is asked for.
 //
 // Haptics (the app's policy): a long-press tick when the sheet opens, a
-// tick for a reaction, a confirm when a delete is confirmed. Nothing for
+// tick for a reaction, a confirm when a pin, an unpin or a delete is
+// confirmed. Nothing for
 // navigation or a plain pick.
 Item {
     id: root
@@ -25,7 +26,7 @@ Item {
     property bool prefetchEmoji: false
     // One of the surfaces is up: the page under it holds still (the pager
     // does not pan under a sheet).
-    readonly property bool shown: [messageSheet, emojiSheet, reactionSheet, deleteSheet, selectPage]
+    readonly property bool shown: [messageSheet, emojiSheet, reactionSheet, deleteSheet, pinSheet, selectPage]
         .some(surface => surface.item !== null && surface.item.up)
 
     signal replyRequested(string messageId, string author, string text)
@@ -40,12 +41,25 @@ Item {
         onEditRequested: id => root.editRequested(id)
         onThreadRequested: id => root.threadRequested(id)
         onDeleteRequested: deleteSheet.load().open()
+        onPinRequested: (id, author, text, pin) => {
+            root.pinWanted = pin
+            pinSheet.load().open()
+        }
         onCopyRequested: text => Native.copy(text)
         onLinkRequested: id => Native.copy(Chat.messageLink(id))
         onShareRequested: Native.share(root.message.body.trim().length > 0 ? root.message.body : Chat.messageLink(root.message.id))
         onSelectRequested: text => selectPage.load().open(text)
         onProfileRequested: userId => root.profileRequested(userId)
     }
+
+    // The pin confirmation's copy and the pin itself (Yap.Ui); the list is
+    // PinsPage's, so this one loads nothing.
+    PinsModel {
+        id: pins
+        active: false
+    }
+    // Pin (true) or unpin, for the confirmation.
+    property bool pinWanted: true
 
     // The sheet for a MessageDelegate `row`.
     function openFor(row) {
@@ -188,6 +202,19 @@ Item {
             onConfirmed: {
                 Native.haptic(Native.Confirm)
                 actionModel.remove()
+            }
+        }
+    }
+    Lazy {
+        id: pinSheet
+        sourceComponent: ConfirmSheet {
+            title: pins.confirmTitle(root.pinWanted)
+            body: pins.confirmBody(root.pinWanted)
+            quote: root.message.preview ?? ""
+            confirmText: pins.confirmKey(root.pinWanted)
+            onConfirmed: {
+                Native.haptic(Native.Confirm)
+                pins.setPinned(root.message.id, root.pinWanted)
             }
         }
     }
