@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/115jon/yap/compare/qt-android-v0.10.0...qt-android-v0.11.0) (2026-11-14)
+
+
+### Features
+
+* **chat:** block stops direct messages and hides blocked users' messages ([e2077b0](https://github.com/115jon/yap/commit/e2077b069185f89eca2c0aac55ce10af308c23cb))
+* **native:** ✨ show blocks in the phone's dm composer and call page ([534d9f3](https://github.com/115jon/yap/commit/534d9f3e5ffc446e33b6256fd5bc22818271ce84))
+
 ## [0.10.0](https://github.com/115jon/yap/compare/qt-android-v0.9.0...qt-android-v0.10.0) (2026-11-14)
 
 
