@@ -30,6 +30,7 @@
 //   DesktopShell.quitting                               (closing must not hide)
 
 #include <QtCore/QObject>
+#include <QtCore/QUrl>
 #include <QtCore/QPointer>
 #include <QtCore/QRect>
 #include <QtCore/QString>
@@ -48,6 +49,10 @@ class DesktopShell : public QObject
   Q_PROPERTY(QString badgeTooltip READ badgeTooltip WRITE setBadgeTooltip NOTIFY badgeChanged)
   // The named profile (YAP_PROFILE / --profile), "" for the default one.
   Q_PROPERTY(QString profile READ profile CONSTANT)
+  // The licenses folder beside the exe (the third-party licence texts
+  // tools/package.ps1 ships), as a file URL; empty where there is none
+  // (a build tree).
+  Q_PROPERTY(QUrl licensesUrl READ licensesUrl CONSTANT)
   // True once quit() (or the session's end) began: the window's close
   // handler must then let the close through, not hide it to the tray.
   Q_PROPERTY(bool quitting READ quitting NOTIFY quittingChanged)
@@ -89,6 +94,7 @@ public:
   void setBadgeDot(bool dot);
   QString badgeTooltip() const { return m_badgeTooltip; }
   QString profile() const;
+  QUrl licensesUrl() const;
   bool quitting() const { return m_quitting; }
   void setBadgeTooltip(const QString& tooltip);
 
