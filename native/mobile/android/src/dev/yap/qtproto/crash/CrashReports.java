@@ -203,19 +203,36 @@ public final class CrashReports {
         for (ApplicationExitInfo exit : exits) newest = Math.max(newest, exit.getTimestamp());
         if (newest != seen) prefs.edit().putLong(SEEN_EXIT, newest).commit();
         if (seen < 0) return found;
-        // Newest first from Android.
+        // Newest first from Android. One record per process: a native
+        // crash on a Java thread (a Rust panic called from Java) can leave
+        // a CRASH next to its CRASH_NATIVE, and the native one has the
+        // tombstone.
+        Map<Integer, Integer> byPid = new HashMap<>();
         for (int i = exits.size() - 1; i >= 0; i--) {
             ApplicationExitInfo exit = exits.get(i);
             if (exit.getTimestamp() <= seen) continue;
             if (!context.getPackageName().equals(exit.getProcessName())) continue;
-            int reason = exit.getReason();
-            if (reason == ApplicationExitInfo.REASON_CRASH
-                    || reason == ApplicationExitInfo.REASON_CRASH_NATIVE
-                    || reason == ApplicationExitInfo.REASON_ANR) {
+            int rank = rank(exit.getReason());
+            if (rank == 0) continue;
+            Integer at = byPid.get(exit.getPid());
+            if (at == null) {
+                byPid.put(exit.getPid(), found.size());
                 found.add(exit);
+            } else if (rank > rank(found.get(at).getReason())) {
+                found.set(at, exit);
             }
         }
         return found;
+    }
+
+    /** Which record of a process makes its report: 0 none. */
+    private static int rank(int reason) {
+        return switch (reason) {
+            case ApplicationExitInfo.REASON_CRASH_NATIVE -> 3;
+            case ApplicationExitInfo.REASON_CRASH -> 2;
+            case ApplicationExitInfo.REASON_ANR -> 1;
+            default -> 0;
+        };
     }
 
     /** The report's body for one exit record and the files of its pid. */
@@ -226,7 +243,7 @@ public final class CrashReports {
                 : reason == ApplicationExitInfo.REASON_ANR ? "not responding (ANR)" : "native crash")
                 .append('\n');
         out.append("Time: ").append(utc(exit.getTimestamp())).append('\n');
-        out.append("Exit status: ").append(exit.getStatus()).append('\n');
+        if (exit.getStatus() != 0) out.append("Exit status: ").append(exit.getStatus()).append('\n');
         String description = Redactor.text(exit.getDescription());
         if (!description.isEmpty()) out.append("Description: ").append(description).append('\n');
         out.append('\n');
