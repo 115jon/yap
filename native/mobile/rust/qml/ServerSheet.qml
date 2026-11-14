@@ -7,7 +7,11 @@ import Yap.Ui
 // makes a link (a week, no use limit, for the server; the channel's 7-day
 // link for a channel) and hands it to the system share sheet; Mark as read;
 // and a channel's Copy link. A link that could not be made says why under
-// its row and the sheet stays up.
+// its row and the sheet stays up. The server's menu also has Create
+// channel (with Manage channels: CreateChannelPage) and, for members but
+// not the owner (ChannelSidebar.tsx: the owner can't leave), Leave server,
+// confirmed in place; the sheet closes once the server is left, or says
+// why it could not be.
 BottomSheet {
     id: sheet
 
@@ -18,6 +22,15 @@ BottomSheet {
     readonly property bool onChannel: channelId.length > 0
     property string serverId: ""
     property string serverName: ""
+    // Leave server asked: the confirm shows in place of the rows.
+    property bool leaving: false
+    readonly property var leaveAct: JSON.parse(Admin.state).acts["leave-server"] ?? { busy: false, error: "", done: 0 }
+    // The leave's finished count when it was asked for.
+    property int leaveDone: 0
+    onLeaveActChanged: {
+        if (leaving && leaveAct.done > leaveDone)
+            close()
+    }
 
     function openServer() {
         channelId = ""
@@ -34,13 +47,22 @@ BottomSheet {
     function start() {
         serverId = Nav.activeServerId
         serverName = Nav.activeServerName
+        leaving = false
         maker.reset()
         open()
+    }
+    function askLeave() {
+        Admin.clear("leave-server")
+        leaveDone = leaveAct.done
+        leaving = true
     }
 
     title: onChannel ? (voice ? channelName : "#" + channelName) : serverName
     contentHeight: column.implicitHeight
-    onClosed: maker.reset()
+    onClosed: {
+        maker.reset()
+        leaving = false
+    }
 
     InviteMaker {
         id: maker
@@ -57,7 +79,7 @@ BottomSheet {
         bottomPadding: 8
 
         SheetRow {
-            visible: Admin.canCreateInvite
+            visible: Admin.canCreateInvite && !sheet.leaving
             iconName: "invite"
             text: maker.busy ? qsTr("Making a link…")
                 : sheet.onChannel ? qsTr("Invite to channel") : qsTr("Invite people")
@@ -80,6 +102,7 @@ BottomSheet {
             font: Theme.type.caption
         }
         SheetRow {
+            visible: !sheet.leaving
             iconName: "markRead"
             text: qsTr("Mark as read")
             onTriggered: {
@@ -97,6 +120,38 @@ BottomSheet {
             onTriggered: {
                 sheet.close()
                 Native.copy(Admin.webOrigin + "/chat/" + sheet.serverId + "/" + sheet.channelId)
+            }
+        }
+        SheetRow {
+            visible: !sheet.onChannel && !sheet.leaving && Admin.canManageChannels
+            iconName: "add"
+            text: qsTr("Create channel")
+            onTriggered: {
+                sheet.close()
+                Router.open("CreateChannelPage", { categoryId: "" })
+            }
+        }
+        SheetRow {
+            visible: !sheet.onChannel && !sheet.leaving && !Admin.isOwner
+            iconName: "logout"
+            text: qsTr("Leave server")
+            danger: true
+            onTriggered: sheet.askLeave()
+        }
+        Item {
+            visible: sheet.leaving
+            x: 16
+            width: parent.width - 32
+            height: visible ? leaveConfirm.implicitHeight + 8 : 0
+            InlineConfirm {
+                id: leaveConfirm
+                consequence: qsTr("You will leave %1 and need a new invite to rejoin.").arg(sheet.serverName)
+                confirmLabel: qsTr("Leave server")
+                irreversible: true
+                busy: sheet.leaveAct.busy
+                error: sheet.leaveAct.error
+                onConfirmed: Admin.leaveServer(sheet.serverId)
+                onCancelled: sheet.leaving = false
             }
         }
     }

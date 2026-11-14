@@ -12,8 +12,10 @@ import Yap.Ui
 // progress, you, mic and deafen; a tap grows the account panel out of it).
 // A voice channel's row joins it (or opens the call you are in there). A
 // tap on the server's name opens its menu (ServerSheet: Invite people, Mark
-// as read); a long press on a channel opens the channel's. The search key
-// beside it searches the server's messages (SearchPage).
+// as read, Create channel, Leave server); a long press on a channel opens
+// the channel's. The search key beside it searches the server's messages
+// (SearchPage). The rail ends in the desktop's outlined + key: Add a server
+// (CreateServerPage: create one, or join one by its invite).
 Item {
     id: root
 
@@ -145,6 +147,38 @@ Item {
                 active: !Nav.home && icon.serverId === Nav.activeServerId
                 onSelected: {
                     Nav.selectServer(icon.serverId)
+                }
+            }
+
+            // Add a server: the desktop rail's outlined tile, 8 under the
+            // last server.
+            footer: Item {
+                width: servers.width
+                height: Theme.railTile + 8
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottom: parent.bottom
+                    width: Theme.railTile
+                    height: Theme.railTile
+                    radius: Theme.radius
+                    color: addTap.pressed ? Theme.tint1 : "transparent"
+                    border.width: 2
+                    border.color: Theme.lineStrong
+                    scale: addTap.pressed ? Theme.scalePressIcon : 1
+                    Behavior on scale { NumberAnimation { duration: Theme.dur1 } }
+                    Accessible.role: Accessible.Button
+                    Accessible.name: qsTr("Add a server")
+                    Accessible.onPressAction: Router.open("CreateServerPage")
+                    Icon {
+                        anchors.centerIn: parent
+                        name: "add"
+                        size: Theme.iconLg
+                        color: Theme.ink2
+                    }
+                    TapHandler {
+                        id: addTap
+                        onTapped: Router.open("CreateServerPage")
+                    }
                 }
             }
         }
