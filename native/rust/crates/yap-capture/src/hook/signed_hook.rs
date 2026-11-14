@@ -4,7 +4,7 @@
 //! The app injects OBS Studio's own `graphics-hook{64,32}.dll`, run through
 //! OBS's own `inject-helper` and `get-graphics-offsets`, unmodified and signed
 //! by the OBS Project. The exact files are pinned in
-//! `desktop-native/packaging/obs-signed-hook.lock.json`, embedded here. Before
+//! `native/packaging/obs-signed-hook.lock.json`, embedded here. Before
 //! every injection each file is opened without write or delete sharing, its
 //! SHA-256 is checked against the lock, and its Authenticode signature and
 //! signer are checked with `WinVerifyTrust`. The handles stay open until the
@@ -432,7 +432,7 @@ mod tests {
     }
 
     /// Runs against the fetched files when they are present
-    /// (`desktop-native/tools/fetch-obs-signed-hook.ps1`).
+    /// (`native/tools/fetch-obs-signed-hook.ps1`).
     #[test]
     fn the_fetched_files_verify_when_present() {
         let Some(dir) = std::env::var_os("YAP_OBS_SIGNED_DIR").map(PathBuf::from) else {

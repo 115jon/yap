@@ -34,7 +34,7 @@ yap-realtime = { path = "../yap-realtime", default-features = false }
 cxx-qt-build = "0.10"
 
 [features]
-# The desktop's patched qt-build-utils (desktop-native/patches/qt-build-utils):
+# The desktop's patched qt-build-utils (native/patches/qt-build-utils):
 # QML compiled to bytecode only, and the .qml sources left out of the
 # resources. An unpatched qt-build-utils ignores it.
 slim-qml = []

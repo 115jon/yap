@@ -6,7 +6,7 @@ import Yap.Ui
 // picker's "Powered by" line in both apps: KLIPY's wordmark through a mask
 // in `color` (ink-2), so it holds in every theme; Tenor is its name in 600.
 // The wordmark is the app's resource `qrc:/svg/klipy-text-light.svg`
-// (desktop-native/assets/svg).
+// (native/assets/svg).
 Item {
     id: mark
 
