@@ -93,10 +93,64 @@ case "$cmd" in
       done
       # Everything but this ABI's libraries, the library list, the ABI list
       # and the licence notices must be the first stage's.
-      if ! diff -r -q \
-        --exclude="$abi" --exclude="${abis[0]}" --exclude=libs.xml \
-        --exclude=gradle.properties --exclude=licenses \
-        "$first" "$stage"; then
+      if ! python3 -I - "$first" "$stage" "${abis[0]}" "$abi" <<'PY'
+# The two Gradle projects, file by file, outside the ABIs' libraries, the
+# library and ABI lists and the licences. Each ABI's Qt build stamps its own
+# jars (META-INF/MANIFEST.MF's Created-By) and androiddeployqt's resource
+# bundle (each entry's modification time), so those compare by content.
+import os, struct, sys, zipfile
+
+first, other, abi_a, abi_b = sys.argv[1:]
+skip_dirs = {os.path.join("libs", abi_a), os.path.join("libs", abi_b),
+             os.path.join("assets", "licenses")}
+skip_files = {os.path.join("res", "values", "libs.xml"), "gradle.properties"}
+
+def files(root):
+    out = set()
+    for d, dirs, names in os.walk(root):
+        rel = os.path.relpath(d, root)
+        dirs[:] = [x for x in dirs if os.path.normpath(os.path.join(rel, x)) not in skip_dirs]
+        for n in names:
+            r = os.path.normpath(os.path.join(rel, n))
+            if r not in skip_files:
+                out.add(r)
+    return out
+
+def jar_entries(path):
+    with zipfile.ZipFile(path) as z:
+        return {i.filename: i.CRC for i in z.infolist() if i.filename != "META-INF/MANIFEST.MF"}
+
+def rcc_without_times(path):
+    # Qt's rcc format 2+: a header (magic, version, then the tree, data and
+    # names offsets), the tree's 22-byte entries each ending in an 8-byte
+    # modification time, which is zeroed here.
+    b = bytearray(open(path, "rb").read())
+    if b[:4] != b"qres":
+        return bytes(b)
+    version, tree, data, names = struct.unpack(">IIII", b[4:20])
+    if version < 2:
+        return bytes(b)
+    end = min([o for o in (data, names) if o > tree] or [len(b)])
+    for at in range(tree, end - 21, 22):
+        b[at + 14:at + 22] = bytes(8)
+    return bytes(b)
+
+a, b = files(first), files(other)
+bad = sorted(a ^ b)
+for r in sorted(a & b):
+    pa, pb = os.path.join(first, r), os.path.join(other, r)
+    if open(pa, "rb").read() == open(pb, "rb").read():
+        continue
+    if r.endswith(".jar") and jar_entries(pa) == jar_entries(pb):
+        continue
+    if r.endswith(".rcc") and rcc_without_times(pa) == rcc_without_times(pb):
+        continue
+    bad.append(r)
+for r in bad:
+    print(f"differs: {r}", file=sys.stderr)
+sys.exit(1 if bad else 0)
+PY
+      then
         echo "$stage differs from $first beyond its ABI (one commit and configuration?)" >&2
         exit 1
       fi
