@@ -302,6 +302,55 @@ describe("DeviceActivation", () => {
     expect(mocks.launchNativeApp).toHaveBeenCalledTimes(1);
   });
 
+  it("opens the Android app once, by an intent with the code", async () => {
+    mocks.getDeviceRequest.mockResolvedValue({
+      ok: true,
+      request: {
+        ...REQUEST,
+        device: { label: "Yap", platform: "android", hostname: "phone" },
+      },
+    });
+    mocks.approveDeviceRequest.mockResolvedValue({
+      ok: true,
+      status: "approved",
+    });
+    render(<DeviceActivation initialCode="ABCD-EFGH" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Approve sign-in" }),
+    );
+    await screen.findByRole("heading", { name: "You're signed in on Yap" });
+    const link =
+      "intent://signin?code=ABCD-EFGH#Intent;scheme=yap;package=dev.yap.app;end";
+    expect(mocks.launchNativeApp).toHaveBeenCalledTimes(1);
+    expect(mocks.launchNativeApp).toHaveBeenCalledWith(link);
+    expect(screen.getByRole("link", { name: "Open Yap" })).toHaveAttribute(
+      "href",
+      link,
+    );
+  });
+
+  it("sends an app on iOS or an unknown platform back by hand", async () => {
+    for (const platform of ["ios", undefined]) {
+      mocks.launchNativeApp.mockClear();
+      mocks.getDeviceRequest.mockResolvedValue({
+        ok: true,
+        request: { ...REQUEST, device: { label: "Yap", platform } },
+      });
+      mocks.approveDeviceRequest.mockResolvedValue({
+        ok: true,
+        status: "approved",
+      });
+      const view = render(<DeviceActivation initialCode="ABCD-EFGH" />);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Approve sign-in" }),
+      );
+      await screen.findByText("You can close this tab and go back to the app.");
+      expect(mocks.launchNativeApp).not.toHaveBeenCalled();
+      expect(screen.queryByRole("link", { name: "Open Yap" })).toBeNull();
+      view.unmount();
+    }
+  });
+
   it("does not open the native app when it is denied", async () => {
     mocks.getDeviceRequest.mockResolvedValue({
       ok: true,
