@@ -277,6 +277,17 @@ impl Platform for Mobile {
         crate::sound::set_soundboard_volume(volume);
     }
 
+    /// The call page's per-person volume and mute (`voice.rs`).
+    #[cfg(target_os = "android")]
+    fn peer_audio(&self, user_id: &str) -> Option<(u16, bool)> {
+        Some(crate::voice::peer_audio(user_id))
+    }
+
+    #[cfg(target_os = "android")]
+    fn set_peer_audio(&self, user_id: &str, volume: u16, muted: bool, save: bool) {
+        crate::voice::set_peer_audio(user_id, volume, muted, save);
+    }
+
     fn on_update(&self, update: ViewUpdate) -> bool {
         // The session for private media (attachments, custom emoji).
         if let ViewUpdate::MediaAuth(token) = update {
