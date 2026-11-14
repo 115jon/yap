@@ -288,7 +288,7 @@ releases send the same set):
 - voice (`features/voice/gateways.ts`, `features/voice/connection.ts`): 100,
   3, 5, 11, 12, 13, 106, 109.
 
-**Native client spec** (`desktop-native/VOICE_PROTOCOL.md` on
+**Native client spec** (`native/VOICE_PROTOCOL.md` on
 `spike/qt-desktop`):
 
 - global: 0, 3, 33, 34 (optional sidebar presence).

@@ -52,8 +52,8 @@ const ignoredWatchPaths = [
   "**/*.spec.*",
   "**/*.gz",
   "**/*.log",
-  "**/desktop/**",
-  "**/mobile/**",
+  // The native apps (Rust, C++, QML) and their build trees.
+  "**/native/**",
   "**/.codex-logs/**",
 ];
 

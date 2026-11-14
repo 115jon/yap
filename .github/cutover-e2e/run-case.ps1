@@ -567,7 +567,7 @@ function Assert-Cutover([object] $run) {
   $runDetail = "Run\Yap -> $runValue (Run key present before seeding: $($script:RunKeyBefore), as the bridge started: $($script:RunKeyAtBridge))"
   if ($Case -eq 'native-installed' -and -not $runOk -and -not $script:RunKeyAtBridge -and $NativeMajor -lt 4) {
     # KNOWN BUG in native releases before 4.0.0: DesktopShell::setAutostart
-    # (desktop-native/cpp/desktopshell.cpp) opened the Run key with
+    # (native/cpp/desktopshell.cpp) opened the Run key with
     # RegOpenKeyExW, which fails when the key does not exist, so open on
     # startup was never written there. 4.0.0 creates the key
     # (RegCreateKeyExW), so from 4.0.0 this is the hard check below.

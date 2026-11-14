@@ -1,8 +1,8 @@
 name: "Desktop Native Release"
 
-# Builds the native client (desktop-native/), signs it, packs it with
+# Builds the native client (native/), signs it, packs it with
 # Velopack and publishes it as a GitHub release that the in-app updater reads
-# (desktop-native/docs/INSTALLER.md, "Updates" and "Publishing a release").
+# (native/docs/INSTALLER.md, "Updates" and "Publishing a release").
 #
 # Two modes:
 #
@@ -10,7 +10,7 @@ name: "Desktop Native Release"
 #   release-please.yml creates v<x.y.z> (x >= 4), marks it a draft and calls
 #   this workflow with release_tag. The run builds that tag, uploads into the
 #   existing draft (release-please's changelog is the release notes), carries
-#   the Tauri bridge's latest.json (desktop-native/packaging/tauri-bridge.json,
+#   the Tauri bridge's latest.json (native/packaging/tauri-bridge.json,
 #   repo variable TAURI_BRIDGE_TAG) so Tauri installs still find the bridge,
 #   and publishes it as GitHub's "latest". A manual dispatch with release_tag
 #   rebuilds a release whose call failed (it must still be a draft).
@@ -28,7 +28,7 @@ name: "Desktop Native Release"
 # release as a draft, which never creates the tag.
 #
 # Toolchain: the static, patched Qt 6.11.3 and LiveKit's libwebrtc come from
-# the release named in desktop-native/tools/toolchain.lock.json
+# the release named in native/tools/toolchain.lock.json
 # (tools/package-toolchain.ps1 makes it; tools/fetch-toolchain.ps1 checks
 # and unpacks it).
 on:
@@ -46,7 +46,7 @@ on:
         default: ""
         type: string
       version:
-        description: "Manual: version, e.g. 4.1.0-beta.1 (beta) or 0.2.27 (pre-4.0 stable). Its x.y.z must equal [workspace.package] in desktop-native/rust/Cargo.toml. Empty: that version."
+        description: "Manual: version, e.g. 4.1.0-beta.1 (beta) or 0.2.27 (pre-4.0 stable). Its x.y.z must equal [workspace.package] in native/rust/Cargo.toml. Empty: that version."
         required: false
         default: ""
         type: string
@@ -74,7 +74,7 @@ permissions:
 
 concurrency:
   # One native release at a time: each one reads the previous release's feed.
-  group: desktop-native-release
+  group: native-release
   cancel-in-progress: false
 
 env:
@@ -125,9 +125,9 @@ jobs:
           GIT_REF: ${{ github.ref }}
           REPO: ${{ github.repository }}
         run: |
-          $cargo = Get-Content -Raw desktop-native/rust/Cargo.toml
+          $cargo = Get-Content -Raw native/rust/Cargo.toml
           $base = [regex]::Match($cargo, '(?m)^version = "(\d+\.\d+\.\d+)"').Groups[1].Value
-          if (-not $base) { throw "No [workspace.package] version in desktop-native/rust/Cargo.toml" }
+          if (-not $base) { throw "No [workspace.package] version in native/rust/Cargo.toml" }
           $releases = @(gh api "repos/$env:REPO/releases?per_page=100" --paginate --jq '.[] | {tag_name, draft, prerelease}' | ConvertFrom-Json)
           if ($LASTEXITCODE) { throw "Could not list the releases ($LASTEXITCODE)" }
 
@@ -141,7 +141,7 @@ jobs:
             }
             $version = $m.Groups[1].Value
             if ($version -ne $base) {
-              throw "release_tag $tag does not match desktop-native/rust/Cargo.toml's $base at that tag (release-please-config.json's extra-files bump it)."
+              throw "release_tag $tag does not match native/rust/Cargo.toml's $base at that tag (release-please-config.json's extra-files bump it)."
             }
             if ($env:EVENT_NAME -eq "workflow_dispatch" -and $env:INPUT_DRY_RUN -eq "true") {
               throw "dry_run with release_tag is not supported: it would upload unsigned files into the real release."
@@ -158,8 +158,8 @@ jobs:
             }
             if ($release[0].prerelease) { throw "Release $tag is a pre-release; a release-please release is stable." }
             # The build runs cargo --locked.
-            node desktop-native/tools/sync-cargo-lock-version.mjs --check
-            if ($LASTEXITCODE) { throw "desktop-native/rust/Cargo.lock at $tag is out of date with Cargo.toml (release-please.yml syncs it on the release PR)." }
+            node native/tools/sync-cargo-lock-version.mjs --check
+            if ($LASTEXITCODE) { throw "native/rust/Cargo.lock at $tag is out of date with Cargo.toml (release-please.yml syncs it on the release PR)." }
             $mode = "release"; $channel = "win"; $pre = $false; $dryRun = "false"
           } else {
             # Manual mode.
@@ -203,9 +203,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BRIDGE_TAG: ${{ vars.TAURI_BRIDGE_TAG }}
-        run: ./desktop-native/tools/tauri-bridge.ps1 -Mode Fetch -BridgeTag "$env:BRIDGE_TAG" -OutFile "$env:RUNNER_TEMP/bridge/latest.json"
+        run: ./native/tools/tauri-bridge.ps1 -Mode Fetch -BridgeTag "$env:BRIDGE_TAG" -OutFile "$env:RUNNER_TEMP/bridge/latest.json"
 
-  # The dependency audit (desktop-native/rust/deny.toml; LIBRARIES.md §18),
+  # The dependency audit (native/rust/deny.toml; LIBRARIES.md §18),
   # with cargo-deny's release binary rather than a 4-minute `cargo install`.
   # The [patch] path crates must exist for cargo metadata (vendor.ps1).
   deny:
@@ -229,9 +229,9 @@ jobs:
 
       - name: Dependency audit (cargo deny)
         run: |
-          ./desktop-native/patches/vendor.ps1
+          ./native/patches/vendor.ps1
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          Push-Location desktop-native/rust
+          Push-Location native/rust
           cargo deny check
           $code = $LASTEXITCODE
           Pop-Location
@@ -270,17 +270,17 @@ jobs:
       - name: Toolchain (static Qt, libwebrtc)
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./desktop-native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir "$env:TOOLCHAIN_DIR-download"
+        run: ./native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir "$env:TOOLCHAIN_DIR-download"
 
       - name: Cargo test
         run: |
-          ./desktop-native/patches/vendor.ps1
+          ./native/patches/vendor.ps1
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vs = & $vswhere -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
           Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
           Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64" | Out-Null
-          Push-Location desktop-native/rust
+          Push-Location native/rust
           cargo test --workspace --locked --exclude yap_native --exclude yap-ui --exclude yap-audio --target-dir ../build/test-target
           $code = $LASTEXITCODE
           Pop-Location
@@ -303,8 +303,8 @@ jobs:
       run:
         shell: pwsh
     env:
-      YAP_NATIVE_BUILD_DIR: ${{ github.workspace }}\desktop-native\build\ci
-      YAP_ORT_DIR: ${{ github.workspace }}\desktop-native\build\onnxruntime
+      YAP_NATIVE_BUILD_DIR: ${{ github.workspace }}\native\build\ci
+      YAP_ORT_DIR: ${{ github.workspace }}\native\build\onnxruntime
       TOOLCHAIN_DIR: ${{ github.workspace }}\..\toolchain
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_IDLE_TIMEOUT: "0"
@@ -333,15 +333,15 @@ jobs:
           $wrapper = "$env:RUNNER_TEMP\sccache-wrapper"
           New-Item -ItemType Directory -Force $wrapper | Out-Null
           $jobs = @(
-            @{ Name = "vendor.ps1"; File = "pwsh"; Args = @("-NoProfile", "-File", "desktop-native/patches/vendor.ps1") }
-            @{ Name = "sccache-wrapper.rs"; File = "rustc"; Args = @("-O", "--edition", "2021", "desktop-native/tools/ci/sccache-wrapper.rs", "-o", "$wrapper\sccache.exe") }
+            @{ Name = "vendor.ps1"; File = "pwsh"; Args = @("-NoProfile", "-File", "native/patches/vendor.ps1") }
+            @{ Name = "sccache-wrapper.rs"; File = "rustc"; Args = @("-O", "--edition", "2021", "native/tools/ci/sccache-wrapper.rs", "-o", "$wrapper\sccache.exe") }
           ) | ForEach-Object {
             $log = Join-Path $env:RUNNER_TEMP $_.Name
             $p = Start-Process $_.File -ArgumentList $_.Args -NoNewWindow -PassThru -RedirectStandardOutput "$log.out" -RedirectStandardError "$log.err"
             $null = $p.Handle
             [pscustomobject]@{ Name = $_.Name; Process = $p; Log = $log }
           }
-          ./desktop-native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir "$env:TOOLCHAIN_DIR-download"
+          ./native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir "$env:TOOLCHAIN_DIR-download"
           foreach ($j in $jobs) {
             $j.Process.WaitForExit()
             Write-Host "==> $($j.Name)"
@@ -355,7 +355,7 @@ jobs:
       # MSVC that compiled them (toolchain.lock.json's msvc).
       - name: MSVC
         run: |
-          $want = (Get-Content -Raw desktop-native/tools/toolchain.lock.json | ConvertFrom-Json).msvc
+          $want = (Get-Content -Raw native/tools/toolchain.lock.json | ConvertFrom-Json).msvc
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vs = & $vswhere -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
           if (-not $vs) { throw "No Visual Studio 2022 with the x64 C++ tools on this runner" }
@@ -394,7 +394,7 @@ jobs:
           CMAKE_CXX_COMPILER_LAUNCHER: sccache
           YAP_CARGO_FLAGS: --timings
         run: |
-          ./desktop-native/build.ps1 -QtDir $env:YAP_QT_DIR -BuildDir $env:YAP_NATIVE_BUILD_DIR
+          ./native/build.ps1 -QtDir $env:YAP_QT_DIR -BuildDir $env:YAP_NATIVE_BUILD_DIR
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $exe = Get-Item "$env:YAP_NATIVE_BUILD_DIR\Yap.exe"
           Write-Host "==> Yap.exe $([math]::Round($exe.Length / 1MB, 1)) MB"
@@ -408,8 +408,8 @@ jobs:
         with:
           name: yap-native-build
           path: |
-            desktop-native/build/ci/Yap.exe
-            desktop-native/build/onnxruntime/
+            native/build/ci/Yap.exe
+            native/build/onnxruntime/
           if-no-files-found: error
           retention-days: 3
 
@@ -419,8 +419,8 @@ jobs:
         with:
           name: yap-native-timings
           path: |
-            desktop-native/build/ci/cargo/build/cargo-timings/cargo-timing.html
-            desktop-native/build/ci/.ninja_log
+            native/build/ci/cargo/build/cargo-timings/cargo-timing.html
+            native/build/ci/.ninja_log
           if-no-files-found: warn
           include-hidden-files: true
           retention-days: 7
@@ -554,7 +554,7 @@ jobs:
 
       # OIDC federated credential on AZURE_CLIENT_ID: main and v* tags only.
       # The service principal holds only Artifact Signing Certificate Profile
-      # Signer (desktop-native/docs/code-signing.md).
+      # Signer (native/docs/code-signing.md).
       - name: Azure login for Artifact Signing
         if: needs.plan.outputs.dry_run != 'true'
         uses: azure/login@053f7285eb20bf5469ef084617b0b24d3cec53fc # v3.1.0
@@ -601,7 +601,7 @@ jobs:
             ObsSourcesDir = $env:OBS_SOURCES
           }
           if ($env:DRY_RUN -ne "true") { $pack.Sign = $true }
-          ./desktop-native/tools/package.ps1 @pack
+          ./native/tools/package.ps1 @pack
 
       - name: Verify signatures
         if: needs.plan.outputs.dry_run != 'true'
@@ -613,7 +613,7 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $files = @("$env:OUT\$env:PACK_ID-$env:CHANNEL-Setup.exe") + (Get-ChildItem "$x\lib\app" -Filter *.exe).FullName
           if ($files.Count -ne 4) { throw "Expected Setup.exe and three exes in the package, found $($files.Count)" }
-          ./desktop-native/tools/verify-authenticode.ps1 -ExpectedSigner $env:ARTIFACT_SIGNING_SIGNER -Path $files
+          ./native/tools/verify-authenticode.ps1 -ExpectedSigner $env:ARTIFACT_SIGNING_SIGNER -Path $files
 
       # Manual mode. A draft first, so nothing is visible while files
       # upload; packages and the OBS source archives before the feed file, so
@@ -698,7 +698,7 @@ jobs:
         if: needs.plan.outputs.mode == 'release'
         env:
           BRIDGE_TAG: ${{ vars.TAURI_BRIDGE_TAG }}
-        run: ./desktop-native/tools/tauri-bridge.ps1 -Mode Fetch -BridgeTag "$env:BRIDGE_TAG" -OutFile "$env:RUNNER_TEMP\bridge\latest.json"
+        run: ./native/tools/tauri-bridge.ps1 -Mode Fetch -BridgeTag "$env:BRIDGE_TAG" -OutFile "$env:RUNNER_TEMP\bridge\latest.json"
 
       # Release mode: into release-please's draft (it made the tag and the
       # changelog). Everything but the feed first, the feed last, --clobber so
@@ -718,7 +718,7 @@ jobs:
           $draft = @(gh api "repos/$repo/releases?per_page=100" --paginate --jq ".[] | select(.draft and .tag_name == `"$env:TAG`") | {id, tag_name}" | ConvertFrom-Json)
           if ($LASTEXITCODE -or $draft.Count -ne 1) { throw "Expected one draft release $env:TAG, found $($draft.Count)" }
           $id = $draft[0].id
-          $bridgeTag = if ($env:BRIDGE_TAG) { $env:BRIDGE_TAG } else { (Get-Content -Raw desktop-native/packaging/tauri-bridge.json | ConvertFrom-Json).tag }
+          $bridgeTag = if ($env:BRIDGE_TAG) { $env:BRIDGE_TAG } else { (Get-Content -Raw native/packaging/tauri-bridge.json | ConvertFrom-Json).tag }
 
           $setup = Get-Item "$env:OUT\$env:PACK_ID-$env:CHANNEL-Setup.exe"
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\alias" | Out-Null
@@ -779,7 +779,7 @@ jobs:
           BRIDGE_TAG: ${{ vars.TAURI_BRIDGE_TAG }}
         run: |
           try {
-            ./desktop-native/tools/tauri-bridge.ps1 -Mode VerifyLatest -BridgeTag "$env:BRIDGE_TAG" -ExpectedLatest $env:TAG
+            ./native/tools/tauri-bridge.ps1 -Mode VerifyLatest -BridgeTag "$env:BRIDGE_TAG" -ExpectedLatest $env:TAG
           } catch {
             $msg = $_.Exception.Message
             Write-Host "::error title=releases/latest is wrong after publishing $env:TAG::$($msg -replace "`r?`n", ' ')"

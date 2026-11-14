@@ -6,16 +6,16 @@
     ".": {
       "release-type": "node",
       "include-component-in-tag": false,
-      "exclude-paths": ["desktop-native/mobile/qt"],
+      "exclude-paths": ["native/mobile"],
       "extra-files": [
         {
           "type": "toml",
-          "path": "desktop-native/rust/Cargo.toml",
+          "path": "native/rust/Cargo.toml",
           "jsonpath": "$.workspace.package.version"
         }
       ]
     },
-    "desktop-native/mobile/qt": {
+    "native/mobile": {
       "release-type": "simple",
       "component": "qt-android",
       "package-name": "qt-android",

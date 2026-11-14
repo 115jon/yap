@@ -6,7 +6,7 @@ REST bodies. JSON only, no code. Every id, token and credential is fake
 
 Both sides may test against these files:
 
-- Rust: `desktop-native/rust/crates/yap-protocol/tests/fixtures.rs` decodes
+- Rust: `native/rust/crates/yap-protocol/tests/fixtures.rs` decodes
   each one into its typed struct.
 - TypeScript: a vitest can decode the same files with the schemas in `src/`.
 

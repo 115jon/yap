@@ -1,6 +1,6 @@
 # Writes a Chromium localStorage LevelDB (the Tauri app's CEF profile) for
 # the cutover E2E (.github/workflows/desktop-cutover-e2e.yml), so the native
-# app's import (desktop-native yap_core::tauri::import) has values to read.
+# app's import (native yap_core::tauri::import) has values to read.
 # The same crate and version the import reads it with.
 [package]
 name = "localstorage-fixture"

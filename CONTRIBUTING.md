@@ -36,13 +36,13 @@ breaking changes on main into release PRs (`release-please-config.json`):
 
 - The root package is the desktop's semver line (`vX.Y.Z`, `CHANGELOG.md`).
   It counts every commit except those that touch only
-  `desktop-native/mobile/qt/`.
-- The Qt Android app (`desktop-native/mobile/qt/`, tags `qt-android-vX.Y.Z`,
+  `native/mobile/`.
+- The Qt Android app (`native/mobile/`, tags `qt-android-vX.Y.Z`,
   its own `CHANGELOG.md`) counts the commits that touch that folder. Use
-  scope `desktop-native` there too, e.g.
-  `fix(desktop-native): keep the call bar above the keyboard on android`;
+  scope `native`, as for anything under `native/`, e.g.
+  `fix(native): keep the call bar above the keyboard on android`;
   `feat`/`fix` there release the app, other types release nothing. See
-  `desktop-native/mobile/README.md`, "Releases".
+  `native/mobile/README.md`, "Releases".
 
 Keep `feat`/`fix` for user-facing changes: a commit that touches both the
 app and other paths shows up in both changelogs.
@@ -51,7 +51,7 @@ The root's `exclude-paths` also drops commits that change no files, so an
 empty commit with a `Release-As: x.y.z` footer does not pin the root's next
 version. Pin it with `"release-as"` in `release-please-config.json` (remove
 it after the release), or put the footer on a commit that changes a file
-outside `desktop-native/mobile/qt/`.
+outside `native/mobile/`.
 
 ## Review expectations
 

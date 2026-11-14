@@ -24,7 +24,7 @@ jobs:
   #
   # Two packages (release-please-config.json), each with its own release PR:
   # the root (".", the desktop line, tags vX.Y.Z) and the Qt Android app
-  # (desktop-native/mobile/qt, tags qt-android-vX.Y.Z). The action's
+  # (native/mobile, tags qt-android-vX.Y.Z). The action's
   # unprefixed outputs (release_created, tag_name) are the root's; the Qt
   # app's carry the path as a prefix. releases_created is true for either,
   # so nothing below keys on it.
@@ -34,8 +34,8 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
-      qt_release_created: ${{ steps.release.outputs['desktop-native/mobile/qt--release_created'] }}
-      qt_tag_name: ${{ steps.release.outputs['desktop-native/mobile/qt--tag_name'] }}
+      qt_release_created: ${{ steps.release.outputs['native/mobile--release_created'] }}
+      qt_tag_name: ${{ steps.release.outputs['native/mobile--tag_name'] }}
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
@@ -73,7 +73,7 @@ jobs:
         if: ${{ steps.release.outputs.release_created == 'true' }}
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          sparse-checkout: desktop-native/packaging/tauri-bridge.json
+          sparse-checkout: native/packaging/tauri-bridge.json
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
@@ -84,7 +84,7 @@ jobs:
           PREVIOUS: ${{ steps.before.outputs.tag }}
           BRIDGE_TAG: ${{ vars.TAURI_BRIDGE_TAG }}
         run: |
-          bridge=${BRIDGE_TAG:-$(jq -r .tag desktop-native/packaging/tauri-bridge.json)}
+          bridge=${BRIDGE_TAG:-$(jq -r .tag native/packaging/tauri-bridge.json)}
           pick=$bridge
           if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$TAG" ] && [ "$PREVIOUS" != "$bridge" ] &&
             [[ "$PREVIOUS" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]] && [ "${BASH_REMATCH[1]}" -ge 4 ]; then
@@ -113,10 +113,10 @@ jobs:
         # !cancelled(): also after a failed root step, so the Qt release is
         # hidden even when this job fails (the qt-android job is then
         # skipped; rerun it with a dispatch from main with release_tag).
-        if: ${{ !cancelled() && steps.release.outputs['desktop-native/mobile/qt--release_created'] == 'true' }}
+        if: ${{ !cancelled() && steps.release.outputs['native/mobile--release_created'] == 'true' }}
         continue-on-error: true
         env:
-          TAG: ${{ steps.release.outputs['desktop-native/mobile/qt--tag_name'] }}
+          TAG: ${{ steps.release.outputs['native/mobile--tag_name'] }}
           ROOT_RELEASED: ${{ steps.release.outputs.release_created }}
           PREVIOUS: ${{ steps.before.outputs.tag }}
         run: |
@@ -133,7 +133,7 @@ jobs:
               echo "::warning::Could not mark $PREVIOUS latest again (now: ${now:-none})."
           fi
 
-  # The native app (desktop-native/) is the desktop release from 4.0.0. The
+  # The native app (native/) is the desktop release from 4.0.0. The
   # Tauri app is archived on the archive/tauri-desktop branch.
   desktop:
     name: desktop release
@@ -147,7 +147,7 @@ jobs:
     # whichever token created the tag, signs under this run's refs/heads/main
     # OIDC subject, and saves its caches on main. No secrets: the native
     # workflow uses github.token, OIDC and repository variables only.
-    uses: ./.github/workflows/desktop-native-release.yml
+    uses: ./.github/workflows/native-release.yml
     with:
       release_tag: ${{ needs.release.outputs.tag_name }}
 
@@ -225,7 +225,7 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           skip-github-release: true
 
-      # release-please bumps desktop-native/rust/Cargo.toml's
+      # release-please bumps native/rust/Cargo.toml's
       # [workspace.package] version but not Cargo.lock, and the native
       # release builds with --locked. Sync the workspace crates' lock entries
       # on the release PR's branch, with main's copy of the script.
@@ -235,7 +235,7 @@ jobs:
       # and the pulls REST API (not `gh pr list`, whose search index can miss
       # a PR made seconds ago), same-repo release-please--* branches only.
       # ci.yml checks the lock too, so a stale one cannot merge.
-      - name: Sync desktop-native Cargo.lock on the release PR
+      - name: Sync native Cargo.lock on the release PR
         if: ${{ steps.guard.outputs.skip != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -246,7 +246,7 @@ jobs:
           PRS: ${{ steps.rp.outputs.prs }}
         run: |
           script="$RUNNER_TEMP/sync-cargo-lock-version.mjs"
-          cp desktop-native/tools/sync-cargo-lock-version.mjs "$script"
+          cp native/tools/sync-cargo-lock-version.mjs "$script"
           auth() { printf 'http.https://github.com/.extraheader=AUTHORIZATION: basic %s' "$(printf 'x-access-token:%s' "$1" | base64 -w0)"; }
 
           reported=$(jq -r '.[]?.headBranchName // empty' <<<"${PRS:-[]}")
@@ -273,13 +273,13 @@ jobs:
             git -c "$(auth "$GH_TOKEN")" fetch --no-tags origin "refs/heads/$branch"
             git checkout --quiet --detach FETCH_HEAD
             # The mobile prototypes' workspaces use the same crates by path.
-            locks="desktop-native/rust/Cargo.lock desktop-native/mobile/qt/rust/Cargo.lock"
-            node "$script" --also desktop-native/mobile/qt/rust/Cargo.lock desktop-native/rust
+            locks="native/rust/Cargo.lock native/mobile/rust/Cargo.lock"
+            node "$script" --also native/mobile/rust/Cargo.lock native/rust
             if git diff --quiet -- $locks; then
               echo "Cargo.lock is in sync on $branch."
               continue
             fi
             git add $locks
-            git commit --quiet -m "chore(release): sync desktop-native Cargo.lock"
+            git commit --quiet -m "chore(release): sync native Cargo.lock"
             git -c "$(auth "$PUSH_TOKEN")" push origin "HEAD:refs/heads/$branch"
           done

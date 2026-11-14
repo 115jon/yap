@@ -1,35 +1,35 @@
 name: "Desktop Native Mobile Prototype"
 
-# The mobile prototypes on the native core (desktop-native/mobile/README.md).
+# The mobile prototypes on the native core (native/mobile/README.md).
 #
 # The Compose + UniFFI baseline was archived at the tag
 # archive/compose-baseline and no longer builds here.
 #
-# - qt-android: the Qt Quick app (desktop-native/mobile/qt) for x86_64 and
+# - qt-android: the Qt Quick app (native/mobile) for x86_64 and
 #   arm64-v8a, signed with the public CI debug key, as artifacts (tester
 #   builds with the release key: qt-android-release.yml). Anyone can sign
 #   with that key, so these builds are their own app, dev.yap.app.ci ("Yap
 #   CI"), without push notifications: an APK signed with it can never
 #   update an installed dev.yap.app. Qt comes from download.qt.io, pinned by
-#   mobile/qt/qt-sdk.lock.json. The session vault's tests run first.
+#   native/mobile/qt-sdk.lock.json. The session vault's tests run first.
 # - qt-android-smoke: the x86_64 APK cold-started on an emulator.
 # - qt-ios: the same CMake project for the iOS simulator, a compile and link
-#   check (no signing, no run). It runs when mobile/qt changes, by hand, and
+#   check (no signing, no run). It runs when native/mobile changes, by hand, and
 #   weekly, not for every core change.
 on:
   pull_request:
     paths:
-      - ".github/workflows/desktop-native-mobile.yml"
-      - "desktop-native/mobile/**"
-      - "desktop-native/rust/Cargo.toml"
-      - "desktop-native/rust/Cargo.lock"
-      - "desktop-native/rust/crates/**"
+      - ".github/workflows/native-mobile.yml"
+      - "native/mobile/**"
+      - "native/rust/Cargo.toml"
+      - "native/rust/Cargo.lock"
+      - "native/rust/crates/**"
       # The Qt app's voice builds the patched LiveKit crates (vendor.ps1).
-      - "desktop-native/patches/**"
+      - "native/patches/**"
       # The Qt app embeds the desktop's fonts and icons; its iOS check scans
       # the desktop QML for the QML plugins to link.
-      - "desktop-native/rust/qml/**"
-      - "desktop-native/assets/**"
+      - "native/rust/qml/**"
+      - "native/assets/**"
   workflow_dispatch:
   schedule:
     - cron: "41 5 * * 1"
@@ -39,7 +39,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: desktop-native-mobile-${{ github.event.pull_request.number || github.ref }}
+  group: native-mobile-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -64,21 +64,20 @@ jobs:
         with:
           filters: |
             qt:
-              - '.github/workflows/desktop-native-mobile.yml'
-              - 'desktop-native/mobile/qt/**'
-              - 'desktop-native/mobile/common/**'
-              - 'desktop-native/rust/Cargo.toml'
-              - 'desktop-native/rust/Cargo.lock'
+              - '.github/workflows/native-mobile.yml'
+              - 'native/mobile/**'
+              - 'native/rust/Cargo.toml'
+              - 'native/rust/Cargo.lock'
               # The crates include yap-ui (the shared Yap.Ui QML and C++).
-              - 'desktop-native/rust/crates/**'
-              - 'desktop-native/patches/**'
-              - 'desktop-native/rust/qml/**'
-              - 'desktop-native/assets/**'
+              - 'native/rust/crates/**'
+              - 'native/patches/**'
+              - 'native/rust/qml/**'
+              - 'native/assets/**'
             ios:
-              - '.github/workflows/desktop-native-mobile.yml'
-              - 'desktop-native/mobile/qt/**'
-              - 'desktop-native/rust/crates/yap-ui/**'
-              - 'desktop-native/patches/**'
+              - '.github/workflows/native-mobile.yml'
+              - 'native/mobile/**'
+              - 'native/rust/crates/yap-ui/**'
+              - 'native/patches/**'
 
   qt-android:
     name: qt-android (${{ matrix.abi }})
@@ -154,12 +153,12 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .yapm/qt-download
-          key: qt-sdk-${{ matrix.qt }}-host-linux-${{ hashFiles('desktop-native/mobile/qt/qt-sdk.lock.json') }}
+          key: qt-sdk-${{ matrix.qt }}-host-linux-${{ hashFiles('native/mobile/qt-sdk.lock.json') }}
 
       - name: Qt 6.11.3 (host and target)
         shell: pwsh
         run: |
-          ./desktop-native/mobile/qt/fetch-qt.ps1 -Dest .yapm/qt -DownloadDir .yapm/qt-download `
+          ./native/mobile/fetch-qt.ps1 -Dest .yapm/qt -DownloadDir .yapm/qt-download `
             -Set host-linux,${{ matrix.qt }}
 
       # Swatinem/rust-cache v2.9.3. Corrosion's target folder is inside the
@@ -168,13 +167,13 @@ jobs:
         uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
           # A re-pinned Qt invalidates cxx-qt's compiled objects too.
-          key: qt-${{ matrix.abi }}-${{ hashFiles('desktop-native/mobile/qt/qt-sdk.lock.json') }}
-          workspaces: desktop-native/mobile/qt/rust -> ../../../../.yapm/build/qt-${{ matrix.abi }}-Release/cargo/build
+          key: qt-${{ matrix.abi }}-${{ hashFiles('native/mobile/qt-sdk.lock.json') }}
+          workspaces: native/mobile/rust -> ../../../.yapm/build/qt-${{ matrix.abi }}-Release/cargo/build
 
       # The session token's sealed file and its migration (no Qt needed).
       - name: Session vault tests
         if: ${{ matrix.abi == 'x86_64' }}
-        run: cargo test --locked --manifest-path desktop-native/mobile/qt/vault/Cargo.toml
+        run: cargo test --locked --manifest-path native/mobile/vault/Cargo.toml
 
       # No Firebase configuration (YAP_GOOGLE_SERVICES_JSON unset): the
       # Firebase project knows dev.yap.app only, and a CI build is not a
@@ -186,10 +185,10 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           # Below every release build's code (qt-android-release.yml); the
-          # name marks a CI build of mobile/qt/VERSION.
+          # name marks a CI build of native/mobile/VERSION.
           code=$(( RUN * 10 + ${{ matrix.digit }} ))
-          base="$(head -n 1 desktop-native/mobile/qt/VERSION)"
-          bash desktop-native/mobile/qt/build.sh ${{ matrix.abi }} Release \
+          base="$(head -n 1 native/mobile/VERSION)"
+          bash native/mobile/build.sh ${{ matrix.abi }} Release \
             -DYAP_ANDROID_APP_ID="$YAP_CI_APP_ID" \
             -DYAP_ANDROID_APP_NAME="Yap CI" \
             -DYAP_ANDROID_VERSION_CODE="$code" \
@@ -197,13 +196,13 @@ jobs:
             -DYAP_ANDROID_COMPILE_SDK=android-36 \
             -DYAP_ANDROID_BUILD_TOOLS="$BUILD_TOOLS"
 
-      # The public CI debug key (mobile/qt/ci/README.md): one run's APK
+      # The public CI debug key (native/mobile/ci/README.md): one run's APK
       # installs over another's (dev.yap.app.ci only). Not a release key.
       - name: Sign
         run: |
           mkdir -p out
-          YAP_KEYSTORE=desktop-native/mobile/qt/ci/debug.keystore YAP_BUILD_TOOLS="$BUILD_TOOLS" \
-            bash desktop-native/mobile/qt/sign.sh \
+          YAP_KEYSTORE=native/mobile/ci/debug.keystore YAP_BUILD_TOOLS="$BUILD_TOOLS" \
+            bash native/mobile/sign.sh \
             "$YAPM/build/qt-${{ matrix.abi }}-Release/android-build/build/outputs/apk/release/android-build-release-unsigned.apk" \
             "out/yap-qt-${{ matrix.abi }}.apk"
 
@@ -255,7 +254,7 @@ jobs:
       # for), and a miss downloads it here with retries; the action then
       # finds it installed. The AVD is not cached: the smoke is a cold boot
       # (-no-snapshot), which a cached AVD would not speed up. The same two
-      # steps are in desktop-native-mobile.yml and qt-android-release.yml.
+      # steps are in native-mobile.yml and qt-android-release.yml.
       - name: Cache the emulator system image
         id: system-image
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -288,7 +287,7 @@ jobs:
           target: ${{ env.EMULATOR_TARGET }}
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: YAP_ANDROID_APP_ID=${{ env.YAP_CI_APP_ID }} bash desktop-native/mobile/qt/smoke.sh out/yap-qt-x86_64.apk 180
+          script: YAP_ANDROID_APP_ID=${{ env.YAP_CI_APP_ID }} bash native/mobile/smoke.sh out/yap-qt-x86_64.apk 180
 
   qt-ios:
     needs: changes
@@ -319,21 +318,21 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .yapm/qt-download
-          key: qt-sdk-ios-host-mac-${{ hashFiles('desktop-native/mobile/qt/qt-sdk.lock.json') }}
+          key: qt-sdk-ios-host-mac-${{ hashFiles('native/mobile/qt-sdk.lock.json') }}
 
       - name: Qt 6.11.3 (host and iOS)
         shell: pwsh
         run: |
-          ./desktop-native/mobile/qt/fetch-qt.ps1 -Dest .yapm/qt -DownloadDir .yapm/qt-download -Set host-mac,ios
+          ./native/mobile/fetch-qt.ps1 -Dest .yapm/qt -DownloadDir .yapm/qt-download -Set host-mac,ios
 
       - name: Cargo cache
         uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: qt-ios-simulator-${{ hashFiles('desktop-native/mobile/qt/qt-sdk.lock.json') }}
-          workspaces: desktop-native/mobile/qt/rust -> ../../../../.yapm/build/qt-ios-simulator-Release/cargo/build
+          key: qt-ios-simulator-${{ hashFiles('native/mobile/qt-sdk.lock.json') }}
+          workspaces: native/mobile/rust -> ../../../.yapm/build/qt-ios-simulator-Release/cargo/build
 
       - name: Build for the iOS simulator (x86_64, release)
-        run: bash desktop-native/mobile/qt/build.sh ios-simulator Release
+        run: bash native/mobile/build.sh ios-simulator Release
 
       # The static plugins linked in (Q_IMPORT_PLUGIN's initializers): the
       # platform, image formats and the QML modules' plugins.

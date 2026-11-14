@@ -1,6 +1,6 @@
 name: "Desktop Native Validation"
 
-# Builds and tests the native desktop app (desktop-native/) on pull requests,
+# Builds and tests the native desktop app (native/) on pull requests,
 # so a change to code it shares with the Qt mobile app (the yap-ui crate, the
 # core crates, the patched crates) cannot break the desktop unnoticed.
 #
@@ -11,7 +11,7 @@ name: "Desktop Native Validation"
 # - build: build.ps1's Release Yap.exe, unsigned; its size goes to the job
 #   summary and the exe to a short-lived artifact.
 #
-# The steps follow desktop-native-release.yml's test and build jobs: the
+# The steps follow native-release.yml's test and build jobs: the
 # same toolchain (tools/fetch-toolchain.ps1, tools/toolchain.lock.json), the
 # same runner image (Visual Studio 2022, whose MSVC Qt's LTCG libraries
 # need) and the same sccache setup. sccache's GitHub cache is scoped by ref,
@@ -19,27 +19,27 @@ name: "Desktop Native Validation"
 on:
   pull_request:
     paths:
-      - ".github/workflows/desktop-native-validation.yml"
-      - "desktop-native/**"
-      # The mobile apps build in desktop-native-mobile.yml; the crates they
-      # share with the desktop are under desktop-native/rust and stay in.
-      - "!desktop-native/mobile/**"
-      - "!desktop-native/**/*.md"
+      - ".github/workflows/native-validation.yml"
+      - "native/**"
+      # The mobile apps build in native-mobile.yml; the crates they
+      # share with the desktop are under native/rust and stay in.
+      - "!native/mobile/**"
+      - "!native/**/*.md"
   push:
     branches:
       - main
     paths:
-      - ".github/workflows/desktop-native-validation.yml"
-      - "desktop-native/**"
-      - "!desktop-native/mobile/**"
-      - "!desktop-native/**/*.md"
+      - ".github/workflows/native-validation.yml"
+      - "native/**"
+      - "!native/mobile/**"
+      - "!native/**/*.md"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: desktop-native-validation-${{ github.event.pull_request.number || github.ref }}
+  group: native-validation-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -74,7 +74,7 @@ jobs:
       - name: Cargo registry cache
         uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          workspaces: desktop-native/rust -> ../build/test-target
+          workspaces: native/rust -> ../build/test-target
           # sccache keeps the compiled crates; this keeps the registry.
           cache-targets: false
           cache-bin: false
@@ -83,7 +83,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.TOOLCHAIN_DOWNLOAD_DIR }}
-          key: native-toolchain-${{ hashFiles('desktop-native/tools/toolchain.lock.json') }}
+          key: native-toolchain-${{ hashFiles('native/tools/toolchain.lock.json') }}
 
       # As the release build: the patched crates and the rustc wrapper
       # (tools/ci/sccache-wrapper.rs keeps yap_native's over-long command
@@ -95,15 +95,15 @@ jobs:
           $wrapper = "$env:RUNNER_TEMP\sccache-wrapper"
           New-Item -ItemType Directory -Force $wrapper | Out-Null
           $jobs = @(
-            @{ Name = "vendor.ps1"; File = "pwsh"; Args = @("-NoProfile", "-File", "desktop-native/patches/vendor.ps1") }
-            @{ Name = "sccache-wrapper.rs"; File = "rustc"; Args = @("-O", "--edition", "2021", "desktop-native/tools/ci/sccache-wrapper.rs", "-o", "$wrapper\sccache.exe") }
+            @{ Name = "vendor.ps1"; File = "pwsh"; Args = @("-NoProfile", "-File", "native/patches/vendor.ps1") }
+            @{ Name = "sccache-wrapper.rs"; File = "rustc"; Args = @("-O", "--edition", "2021", "native/tools/ci/sccache-wrapper.rs", "-o", "$wrapper\sccache.exe") }
           ) | ForEach-Object {
             $log = Join-Path $env:RUNNER_TEMP $_.Name
             $p = Start-Process $_.File -ArgumentList $_.Args -NoNewWindow -PassThru -RedirectStandardOutput "$log.out" -RedirectStandardError "$log.err"
             $null = $p.Handle
             [pscustomobject]@{ Name = $_.Name; Process = $p; Log = $log }
           }
-          ./desktop-native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir $env:TOOLCHAIN_DOWNLOAD_DIR
+          ./native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir $env:TOOLCHAIN_DOWNLOAD_DIR
           foreach ($j in $jobs) {
             $j.Process.WaitForExit()
             Write-Host "==> $($j.Name)"
@@ -123,7 +123,7 @@ jobs:
           Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
           Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64" | Out-Null
           Write-Host "==> QMAKE $env:QMAKE"
-          Push-Location desktop-native/rust
+          Push-Location native/rust
           cargo test --workspace --locked --exclude yap-audio --target-dir ../build/test-target
           $code = $LASTEXITCODE
           Pop-Location
@@ -140,8 +140,8 @@ jobs:
       run:
         shell: pwsh
     env:
-      YAP_NATIVE_BUILD_DIR: ${{ github.workspace }}\desktop-native\build\ci
-      YAP_ORT_DIR: ${{ github.workspace }}\desktop-native\build\onnxruntime
+      YAP_NATIVE_BUILD_DIR: ${{ github.workspace }}\native\build\ci
+      YAP_ORT_DIR: ${{ github.workspace }}\native\build\onnxruntime
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -157,7 +157,7 @@ jobs:
       - name: Cargo registry cache
         uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          workspaces: desktop-native/rust -> ../build/ci/cargo/build
+          workspaces: native/rust -> ../build/ci/cargo/build
           cache-targets: false
           cache-bin: false
 
@@ -165,7 +165,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.TOOLCHAIN_DOWNLOAD_DIR }}
-          key: native-toolchain-${{ hashFiles('desktop-native/tools/toolchain.lock.json') }}
+          key: native-toolchain-${{ hashFiles('native/tools/toolchain.lock.json') }}
 
       - name: Toolchain (static Qt, libwebrtc), patched crates, sccache wrapper
         env:
@@ -174,15 +174,15 @@ jobs:
           $wrapper = "$env:RUNNER_TEMP\sccache-wrapper"
           New-Item -ItemType Directory -Force $wrapper | Out-Null
           $jobs = @(
-            @{ Name = "vendor.ps1"; File = "pwsh"; Args = @("-NoProfile", "-File", "desktop-native/patches/vendor.ps1") }
-            @{ Name = "sccache-wrapper.rs"; File = "rustc"; Args = @("-O", "--edition", "2021", "desktop-native/tools/ci/sccache-wrapper.rs", "-o", "$wrapper\sccache.exe") }
+            @{ Name = "vendor.ps1"; File = "pwsh"; Args = @("-NoProfile", "-File", "native/patches/vendor.ps1") }
+            @{ Name = "sccache-wrapper.rs"; File = "rustc"; Args = @("-O", "--edition", "2021", "native/tools/ci/sccache-wrapper.rs", "-o", "$wrapper\sccache.exe") }
           ) | ForEach-Object {
             $log = Join-Path $env:RUNNER_TEMP $_.Name
             $p = Start-Process $_.File -ArgumentList $_.Args -NoNewWindow -PassThru -RedirectStandardOutput "$log.out" -RedirectStandardError "$log.err"
             $null = $p.Handle
             [pscustomobject]@{ Name = $_.Name; Process = $p; Log = $log }
           }
-          ./desktop-native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir $env:TOOLCHAIN_DOWNLOAD_DIR
+          ./native/tools/fetch-toolchain.ps1 -Dest $env:TOOLCHAIN_DIR -DownloadDir $env:TOOLCHAIN_DOWNLOAD_DIR
           foreach ($j in $jobs) {
             $j.Process.WaitForExit()
             Write-Host "==> $($j.Name)"
@@ -196,7 +196,7 @@ jobs:
       # MSVC that compiled them (toolchain.lock.json's msvc).
       - name: MSVC
         run: |
-          $want = (Get-Content -Raw desktop-native/tools/toolchain.lock.json | ConvertFrom-Json).msvc
+          $want = (Get-Content -Raw native/tools/toolchain.lock.json | ConvertFrom-Json).msvc
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vs = & $vswhere -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
           if (-not $vs) { throw "No Visual Studio 2022 with the x64 C++ tools on this runner" }
@@ -228,7 +228,7 @@ jobs:
         env:
           CMAKE_CXX_COMPILER_LAUNCHER: sccache
         run: |
-          ./desktop-native/build.ps1 -QtDir $env:YAP_QT_DIR -BuildDir $env:YAP_NATIVE_BUILD_DIR
+          ./native/build.ps1 -QtDir $env:YAP_QT_DIR -BuildDir $env:YAP_NATIVE_BUILD_DIR
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $exe = Get-Item "$env:YAP_NATIVE_BUILD_DIR\Yap.exe"
           $mb = [math]::Round($exe.Length / 1MB, 2)
@@ -244,6 +244,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: yap-native-pr-build
-          path: desktop-native/build/ci/Yap.exe
+          path: native/build/ci/Yap.exe
           if-no-files-found: error
           retention-days: 3

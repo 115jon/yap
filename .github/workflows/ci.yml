@@ -83,11 +83,16 @@ jobs:
       - name: Setup pnpm workspace
         uses: ./.github/actions/setup-pnpm
 
+      # The native apps moved from desktop-native/ to native/. A branch that
+      # predates the move can bring the old folder back on a rebase.
+      - name: Check that desktop-native/ is gone
+        run: test ! -e desktop-native
+
       # The native release builds with cargo --locked, and release-please
-      # bumps desktop-native/rust/Cargo.toml without Cargo.lock: a release PR
+      # bumps native/rust/Cargo.toml without Cargo.lock: a release PR
       # whose lock sync (release-please.yml) has not landed fails here.
-      - name: Check desktop-native Cargo.lock
-        run: node desktop-native/tools/sync-cargo-lock-version.mjs --check --also desktop-native/mobile/qt/rust/Cargo.lock
+      - name: Check native Cargo.lock
+        run: node native/tools/sync-cargo-lock-version.mjs --check --also native/mobile/rust/Cargo.lock
 
       - name: Check formatting
         run: pnpm run format:check

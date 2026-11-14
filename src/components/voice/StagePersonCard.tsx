@@ -118,7 +118,7 @@ export interface StagePersonCardProps {
 
 /**
  * A person without media on the focused stage, lit by their own picture
- * (YouTube's ambient mode; desktop-native FocusedStage.qml). A 16:9 card, or
+ * (YouTube's ambient mode; native/ FocusedStage.qml). A 16:9 card, or
  * 4:5 on a portrait stage (foundation.css `.rm-stage-person`):
  *
  *   glow   a soft shadow in the picture's colourful average (ambient-color),

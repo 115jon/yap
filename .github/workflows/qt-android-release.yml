@@ -1,7 +1,7 @@
 name: "Qt Android Release"
 
-# Builds of the Qt Quick app (desktop-native/mobile/qt, application id
-# dev.yap.app), signed with its release key (desktop-native/mobile/README.md,
+# Builds of the Qt Quick app (native/mobile, application id
+# dev.yap.app), signed with its release key (native/mobile/README.md,
 # "Releases").
 #
 # Two modes:
@@ -48,7 +48,7 @@ name: "Qt Android Release"
 # digit (2 arm64-v8a, 4 x86_64), from the plan job's clock: every build is
 # above the one before, whichever workflow run started it, and above the
 # earlier (1000000 + run) * 10 + digit release builds and every CI build of
-# desktop-native-mobile.yml (run * 10 + digit). The run number cannot be
+# native-mobile.yml (run * 10 + digit). The run number cannot be
 # used: a called workflow sees the caller's.
 on:
   workflow_call:
@@ -137,9 +137,9 @@ jobs:
           GIT_REF: ${{ github.ref }}
           REPO: ${{ github.repository }}
         run: |
-          base="$(head -n 1 desktop-native/mobile/qt/VERSION)"
+          base="$(head -n 1 native/mobile/VERSION)"
           if ! [[ "$base" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::desktop-native/mobile/qt/VERSION must be x.y.z, got '$base'"
+            echo "::error::native/mobile/VERSION must be x.y.z, got '$base'"
             exit 1
           fi
           # The signing environment admits main only; fail here, before the
@@ -160,7 +160,7 @@ jobs:
             fi
             version="${BASH_REMATCH[1]}"
             if [ "$version" != "$base" ]; then
-              echo "::error::release_tag $tag does not match desktop-native/mobile/qt/VERSION ($base) at that tag"
+              echo "::error::release_tag $tag does not match native/mobile/VERSION ($base) at that tag"
               exit 1
             fi
             git fetch -q --no-tags origin main
@@ -276,7 +276,7 @@ jobs:
       - name: Qt 6.11.3 (host and target)
         shell: pwsh
         run: |
-          ./desktop-native/mobile/qt/fetch-qt.ps1 -Dest .yapm/qt -DownloadDir .yapm/qt-download `
+          ./native/mobile/fetch-qt.ps1 -Dest .yapm/qt -DownloadDir .yapm/qt-download `
             -Set host-linux,${{ matrix.qt }}
 
       # Push notifications need the dev.yap.app Firebase client
@@ -299,7 +299,7 @@ jobs:
           CODE: ${{ needs.plan.outputs.code_base }}
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
-          bash desktop-native/mobile/qt/build.sh ${{ matrix.abi }} Release \
+          bash native/mobile/build.sh ${{ matrix.abi }} Release \
             -DYAP_ANDROID_APP_ID="$APP_ID" \
             -DYAP_ANDROID_VERSION_CODE="$(( CODE + ${{ matrix.digit }} ))" \
             -DYAP_ANDROID_VERSION_NAME="$VERSION" \
@@ -337,7 +337,7 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
-          sparse-checkout: desktop-native/mobile/qt/sign.sh
+          sparse-checkout: native/mobile/sign.sh
           sparse-checkout-cone-mode: false
 
       - name: Build tools
@@ -379,7 +379,7 @@ jobs:
           for abi_digit in arm64-v8a:2 x86_64:4; do
             abi="${abi_digit%%:*}" digit="${abi_digit##*:}"
             apk="out/yap-qt-$VERSION-$abi.apk"
-            bash desktop-native/mobile/qt/sign.sh "unsigned/yap-qt-$abi-unsigned.apk" "$apk"
+            bash native/mobile/sign.sh "unsigned/yap-qt-$abi-unsigned.apk" "$apk"
             certs="$("$bt/apksigner" verify --min-sdk-version 28 --print-certs "$apk")"
             echo "$certs"
             actual="$(echo "$certs" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
@@ -449,7 +449,7 @@ jobs:
       # for), and a miss downloads it here with retries; the action then
       # finds it installed. The AVD is not cached: the smoke is a cold boot
       # (-no-snapshot), which a cached AVD would not speed up. The same two
-      # steps are in desktop-native-mobile.yml and qt-android-release.yml.
+      # steps are in native-mobile.yml and qt-android-release.yml.
       - name: Cache the emulator system image
         id: system-image
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -482,7 +482,7 @@ jobs:
           target: ${{ env.EMULATOR_TARGET }}
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: YAP_ANDROID_APP_ID=${{ env.APP_ID }} bash desktop-native/mobile/qt/smoke.sh out/yap-qt-${{ needs.plan.outputs.version }}-x86_64.apk 180
+          script: YAP_ANDROID_APP_ID=${{ env.APP_ID }} bash native/mobile/smoke.sh out/yap-qt-${{ needs.plan.outputs.version }}-x86_64.apk 180
 
   publish:
     needs: [plan, sign, smoke]

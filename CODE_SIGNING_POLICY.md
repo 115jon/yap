@@ -23,21 +23,21 @@ assist review but do not hold a signing role.
 
 ## Signing scope
 
-From 4.0.0 the Windows app is the native client (`desktop-native/`). Its
-release workflow (`.github/workflows/desktop-native-release.yml`) signs:
+From 4.0.0 the Windows app is the native client (`native/`). Its
+release workflow (`.github/workflows/native-release.yml`) signs:
 
 | File                                                               | Origin                               |
 | ------------------------------------------------------------------ | ------------------------------------ |
-| `Yap.exe` (the app)                                                | this repository (`desktop-native/`)  |
+| `Yap.exe` (the app)                                                | this repository (`native/`)          |
 | `Update.exe`, the root `Yap.exe` stub, and `Yap.App-win-Setup.exe` | Velopack (`vpk`), signed when packed |
 
 `YapSetup.exe` on a 4.x release is a byte-for-byte copy of
 `Yap.App-win-Setup.exe`. It never signs or re-signs the OBS Studio capture
 files (`graphics-hook*.dll`, `inject-helper*.exe`, `get-graphics-offsets*.exe`)
 or Microsoft's ONNX Runtime: they ship as their vendors released them, with
-their vendors' signatures. `desktop-native/tools/package.ps1` fails the build
+their vendors' signatures. `native/tools/package.ps1` fails the build
 if the OBS files' hashes differ from
-`desktop-native/packaging/obs-signed-hook.lock.json`.
+`native/packaging/obs-signed-hook.lock.json`.
 
 The Tauri app's releases (3.x, built by `desktop-release.yml`, now on the
 `archive/tauri-desktop` branch) signed its app, launcher stub, `YapSetup.exe`
@@ -56,7 +56,7 @@ Each release follows this sequence:
    scripts, gets neither the OIDC token nor a write token.
 3. CI signs `Yap.exe`, then Velopack signs `Update.exe`, the stub and
    `Setup.exe` as it packs them.
-4. `desktop-native/tools/verify-authenticode.ps1` runs `signtool verify /pa` on every
+4. `native/tools/verify-authenticode.ps1` runs `signtool verify /pa` on every
    signed file and checks the signer name and timestamp. Any failure stops the
    release.
 5. Only then does CI upload the packages and publish the release.

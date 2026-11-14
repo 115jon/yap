@@ -1,7 +1,7 @@
 //! `localstorage-fixture <out dir> <origin> <items.json>`: a Chromium
 //! localStorage database in `<out dir>` (a `Local Storage\leveldb` folder)
 //! holding the string items of the JSON object `<items.json>` for
-//! `<origin>`. The encoding mirrors desktop-native
+//! `<origin>`. The encoding mirrors the native app's
 //! `yap_core::tauri::write_local_storage_fixture`: keys `_<origin>\0<key>`,
 //! strings as a format byte then Latin-1 (1) or UTF-16LE (0), and a
 //! `VERSION` entry, flushed to a table file as Chromium's compacted
