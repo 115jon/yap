@@ -41,6 +41,40 @@ pub const CAMERA_SIMULCAST: [CameraEncoding; 3] = [
     },
 ];
 
+/// A phone's camera: one layer at the capture's size (720p), 30 fps and
+/// 1.2 Mbps, the single layer the Expo app sent. No rid: one encoding is
+/// not simulcast, and the call announces no `simulcast_rids` for it.
+pub const PHONE_CAMERA: CameraEncoding = CameraEncoding {
+    rid: "",
+    scale_down_by: 1.0,
+    max_bitrate: Some(1_200_000),
+    max_framerate: Some(30.0),
+};
+
+/// A phone's camera on a metered network or warm: half the size (360p),
+/// 24 fps, 0.6 Mbps.
+pub const PHONE_CAMERA_LOW: CameraEncoding = CameraEncoding {
+    rid: "",
+    scale_down_by: 2.0,
+    max_bitrate: Some(600_000),
+    max_framerate: Some(24.0),
+};
+
+/// What a phone may send from its camera: [`PHONE_CAMERA`], or
+/// [`PHONE_CAMERA_LOW`] on a metered network or from
+/// [`crate::demand::THERMAL_MODERATE`]; nothing (the camera goes off) from
+/// [`crate::demand::THERMAL_SEVERE`]. `thermal` is Android's
+/// `THERMAL_STATUS_*` (below 0: unknown).
+pub fn phone_camera(thermal: i32, metered: bool) -> Option<CameraEncoding> {
+    if thermal >= crate::demand::THERMAL_SEVERE {
+        None
+    } else if thermal >= crate::demand::THERMAL_MODERATE || metered {
+        Some(PHONE_CAMERA_LOW)
+    } else {
+        Some(PHONE_CAMERA)
+    }
+}
+
 /// A simulcast layer, by quality.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Quality {
@@ -145,6 +179,29 @@ mod tests {
 
     fn rids() -> Vec<String> {
         ["f", "h", "q"].map(str::to_owned).to_vec()
+    }
+
+    #[test]
+    fn a_phone_camera_should_drop_to_360p24_when_warm_or_metered() {
+        assert_eq!(phone_camera(0, false), Some(PHONE_CAMERA));
+        assert_eq!(phone_camera(-1, false), Some(PHONE_CAMERA));
+        assert_eq!(phone_camera(1, false), Some(PHONE_CAMERA));
+        assert_eq!(phone_camera(0, true), Some(PHONE_CAMERA_LOW));
+        assert_eq!(phone_camera(2, false), Some(PHONE_CAMERA_LOW));
+        assert_eq!(phone_camera(3, false), None);
+        assert_eq!(phone_camera(6, true), None);
+        let low = PHONE_CAMERA_LOW;
+        assert_eq!(
+            (low.scale_down_by, low.max_bitrate, low.max_framerate),
+            (2.0, Some(600_000), Some(24.0))
+        );
+        let full = PHONE_CAMERA;
+        assert_eq!(
+            (full.scale_down_by, full.max_bitrate, full.max_framerate),
+            (1.0, Some(1_200_000), Some(30.0))
+        );
+        // One layer is not simulcast: no rid to announce.
+        assert!(full.rid.is_empty() && low.rid.is_empty());
     }
 
     #[test]

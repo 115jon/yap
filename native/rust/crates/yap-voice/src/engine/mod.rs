@@ -9,6 +9,7 @@ use std::future::Future;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::audio::Processing;
+use crate::layers::CameraEncoding;
 use crate::machine::MediaState;
 use crate::share::ShareEncoding;
 use crate::wire::IceServer;
@@ -253,7 +254,8 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
     ) -> impl Future<Output = Result<String, MediaError>> + Send;
 
     /// Adds our camera as a send-only VP8 transceiver in `stream_id` with
-    /// the camera simulcast encodings ([`crate::CAMERA_SIMULCAST`]), parked
+    /// the encodings [`Self::set_camera_encodings`] last gave (until then
+    /// the camera simulcast, [`crate::CAMERA_SIMULCAST`]), parked
     /// on the keepalive, and sets and returns the local offer. A camera
     /// pushed before is retired first (its transceiver stays, fed nothing,
     /// so it sends nothing, as PartyTracks' `republishTrack` leaves it).
@@ -268,6 +270,12 @@ pub trait MediaSession: Clone + Send + Sync + 'static {
 
     /// Camera frames (`true`) or the keepalive's black frames.
     fn set_camera_live(&self, live: bool);
+
+    /// The camera's encodings, highest first: kept for the next
+    /// [`Self::publish_camera`], and applied in place to a camera already
+    /// pushed with as many layers (one with another count keeps its own
+    /// until it is pushed again).
+    fn set_camera_encodings(&self, encodings: &[CameraEncoding]);
 
     /// The parked camera's keepalive stalled long enough that the SFU may
     /// have dropped its track, or there is no camera send at all: it must

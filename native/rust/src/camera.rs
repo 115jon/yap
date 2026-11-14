@@ -82,6 +82,8 @@ pub unsafe extern "C" fn yap_camera_frame(
         height,
         planes,
         strides: [stride0, stride1, stride2],
+        // Qt Multimedia's frames come upright.
+        rotation: 0,
     })
 }
 

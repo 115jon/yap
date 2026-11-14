@@ -95,3 +95,46 @@ extern "C" int yap_i420_scale(const uint8_t* src_y,
                            src_width, src_height, dst_y, dst_stride_y, dst_u, dst_stride_u,
                            dst_v, dst_stride_v, dst_width, dst_height, libyuv::kFilterBox);
 }
+
+#include "third_party/libyuv/include/libyuv/rotate.h"
+
+// An I420 frame turned `rotation` degrees clockwise (0, 90, 180, 270) into
+// a buffer of the turned size: a phone sensor's frame made upright. Returns
+// 0 on success.
+extern "C" int yap_i420_rotate(const uint8_t* src_y,
+                               int src_stride_y,
+                               const uint8_t* src_u,
+                               int src_stride_u,
+                               const uint8_t* src_v,
+                               int src_stride_v,
+                               int width,
+                               int height,
+                               uint8_t* dst_y,
+                               int dst_stride_y,
+                               uint8_t* dst_u,
+                               int dst_stride_u,
+                               uint8_t* dst_v,
+                               int dst_stride_v,
+                               int rotation)
+{
+  libyuv::RotationMode mode;
+  switch (rotation) {
+    case 0:
+      mode = libyuv::kRotate0;
+      break;
+    case 90:
+      mode = libyuv::kRotate90;
+      break;
+    case 180:
+      mode = libyuv::kRotate180;
+      break;
+    case 270:
+      mode = libyuv::kRotate270;
+      break;
+    default:
+      return -1;
+  }
+  return libyuv::I420Rotate(src_y, src_stride_y, src_u, src_stride_u, src_v, src_stride_v, dst_y,
+                            dst_stride_y, dst_u, dst_stride_u, dst_v, dst_stride_v, width, height,
+                            mode);
+}

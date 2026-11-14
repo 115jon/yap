@@ -72,7 +72,9 @@
 //!   app's [`background::Segmenter`] computes.
 //! - `SetCamera(true)` pushes our camera once the mic is published (one
 //!   send-only VP8 transceiver, simulcast `f`/`h`/`q` as
-//!   [`CAMERA_SIMULCAST`]), or resumes the SFU track it kept; when that
+//!   [`CAMERA_SIMULCAST`], or the encodings the host gave with
+//!   `SetCameraEncodings`: a phone sends one layer, [`layers::phone_camera`],
+//!   and changes it in place), or resumes the SFU track it kept; when that
 //!   lands it goes live, is announced (op 12 with `simulcast_rids`) and
 //!   op 15 says `self_video: true`. `SetCamera(false)` parks it on the
 //!   keepalive (black frames each second), sends op 13 for
@@ -140,7 +142,9 @@ pub use audio::{
     peer_gain, resolve, AudioDevice, AudioDevices, Playback, Processing, MAX_GAIN, MAX_PEER_VOLUME,
     MAX_VOLUME,
 };
-pub use camera::{push_camera_frame, CameraFrame, PixelFormat, LOCAL_CAMERA_KEY};
+pub use camera::{
+    push_camera_frame, set_camera_preview, CameraFrame, PixelFormat, LOCAL_CAMERA_KEY,
+};
 pub use driver::{run_call, AdmissionApi, ApiFailure, CallEnv, Commands};
 pub use engine::{
     FakeEngine, FakeOp, FakeSession, I420Frame, InboundVideo, LocalOffer, MediaEngine, MediaError,

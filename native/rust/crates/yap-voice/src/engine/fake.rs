@@ -7,6 +7,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use super::{LocalOffer, MediaEngine, MediaError, MediaSession, MediaStats};
 use crate::audio::Processing;
+use crate::layers::CameraEncoding;
 use crate::machine::MediaState;
 use crate::share::ShareEncoding;
 use crate::wire::IceServer;
@@ -43,6 +44,7 @@ pub enum FakeOp {
         stream_id: String,
     },
     SetCameraLive(bool),
+    SetCameraEncodings(Vec<CameraEncoding>),
     PublishScreen {
         stream_id: String,
         encoding: ShareEncoding,
@@ -341,6 +343,10 @@ impl MediaSession for FakeSession {
 
     fn set_camera_live(&self, live: bool) {
         record(&self.shared, FakeOp::SetCameraLive(live));
+    }
+
+    fn set_camera_encodings(&self, encodings: &[CameraEncoding]) {
+        record(&self.shared, FakeOp::SetCameraEncodings(encodings.to_vec()));
     }
 
     fn camera_stale(&self) -> bool {

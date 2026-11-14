@@ -1,10 +1,16 @@
 //! Our camera's frames on their way into the call.
 //!
-//! The app captures (Qt Multimedia, or the synthetic test pattern) and hands
-//! every frame to [`push_camera_frame`] on whatever thread it arrives. While
-//! a call's camera is live (on), the frame is converted once, by libyuv,
-//! straight into the I420 buffer the encoder takes. While nothing is live,
+//! The app captures (Qt Multimedia, the synthetic test pattern, or the
+//! phone's Camera2) and hands every frame to [`push_camera_frame`] on
+//! whatever thread it arrives. While a call's camera is live (on), the
+//! frame is converted once, by libyuv, straight into the I420 buffer the
+//! encoder takes, turned upright when the frame says it is not (a phone's
+//! sensor), so receivers need not honour a rotation. While nothing is live,
 //! a frame costs one atomic load and nothing else.
+//!
+//! An app that draws no preview of its own (the phone) turns on
+//! [`set_camera_preview`]: every converted frame then also shows under
+//! [`LOCAL_CAMERA_KEY`], from the first frame on, live or not.
 //!
 //! With a camera background on (`crate::background`), frames come here for
 //! the preview too: each is scaled to at most 1280x720, composited, shown
@@ -46,6 +52,10 @@ pub struct CameraFrame<'a> {
     pub height: u32,
     pub planes: [&'a [u8]; 3],
     pub strides: [u32; 3],
+    /// Clockwise degrees (0, 90, 180 or 270) that turn the frame upright;
+    /// it is turned before it is sent, so a 90 or 270 frame goes out
+    /// `height` x `width`. Anything else is refused.
+    pub rotation: u16,
 }
 
 impl CameraFrame<'_> {
@@ -53,7 +63,8 @@ impl CameraFrame<'_> {
     /// plus one row, with strides wide enough for a row.
     pub fn is_valid(&self) -> bool {
         let (w, h) = (self.width as usize, self.height as usize);
-        if w == 0 || h == 0 || w > 8192 || h > 8192 {
+        if w == 0 || h == 0 || w > 8192 || h > 8192 || !matches!(self.rotation, 0 | 90 | 180 | 270)
+        {
             return false;
         }
         let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
@@ -81,6 +92,26 @@ pub fn push_camera_frame(frame: &CameraFrame<'_>) -> bool {
     {
         let _ = frame;
         false
+    }
+}
+
+/// Every converted frame also shows under [`LOCAL_CAMERA_KEY`] (`true`),
+/// for an app that has no preview of its own; the desktop draws its own
+/// and leaves it off. Any thread.
+pub fn set_camera_preview(on: bool) {
+    #[cfg(feature = "libwebrtc")]
+    live::set_preview(on);
+    #[cfg(not(feature = "libwebrtc"))]
+    let _ = on;
+}
+
+/// The size a frame goes out at once turned upright.
+#[cfg_attr(not(feature = "libwebrtc"), allow(dead_code))]
+pub(crate) fn upright_size(width: u32, height: u32, rotation: u16) -> (u32, u32) {
+    if rotation == 90 || rotation == 270 {
+        (height, width)
+    } else {
+        (width, height)
     }
 }
 
@@ -119,7 +150,7 @@ pub(crate) mod live {
     use tokio::task::JoinHandle;
 
     use super::{
-        keepalive_luma, CameraFrame, PixelFormat, KEEPALIVE_EVERY, KEEPALIVE_SIZE,
+        keepalive_luma, upright_size, CameraFrame, PixelFormat, KEEPALIVE_EVERY, KEEPALIVE_SIZE,
         LOCAL_CAMERA_KEY, STALE_AFTER,
     };
     use crate::background::{camera_effect, effect_size, FrameMut};
@@ -161,12 +192,35 @@ pub(crate) mod live {
             dst_width: i32,
             dst_height: i32,
         ) -> i32;
+        fn yap_i420_rotate(
+            src_y: *const u8,
+            src_stride_y: i32,
+            src_u: *const u8,
+            src_stride_u: i32,
+            src_v: *const u8,
+            src_stride_v: i32,
+            width: i32,
+            height: i32,
+            dst_y: *mut u8,
+            dst_stride_y: i32,
+            dst_u: *mut u8,
+            dst_stride_u: i32,
+            dst_v: *mut u8,
+            dst_stride_v: i32,
+            rotation: i32,
+        ) -> i32;
     }
 
     /// The live camera's source; `None` while no call camera is on.
     static SINK: RwLock<Option<NativeVideoSource>> = RwLock::new(None);
     /// A cheap check before the lock, for the common nothing-live case.
     static LIVE: AtomicBool = AtomicBool::new(false);
+    /// Frames show under the local key ([`super::set_camera_preview`]).
+    static PREVIEW: AtomicBool = AtomicBool::new(false);
+
+    pub(crate) fn set_preview(on: bool) {
+        PREVIEW.store(on, Ordering::Relaxed);
+    }
 
     pub(crate) fn set_sink(source: Option<NativeVideoSource>) {
         let mut sink = SINK.write().unwrap_or_else(PoisonError::into_inner);
@@ -192,18 +246,72 @@ pub(crate) mod live {
 
     pub(crate) fn push(frame: &CameraFrame<'_>) -> bool {
         let effect = camera_effect();
-        if (effect.is_none() && !LIVE.load(Ordering::Acquire)) || !frame.is_valid() {
+        let preview_on = PREVIEW.load(Ordering::Relaxed);
+        if (effect.is_none() && !preview_on && !LIVE.load(Ordering::Acquire)) || !frame.is_valid() {
             return false;
         }
         let source = SINK.read().unwrap_or_else(PoisonError::into_inner).clone();
-        if source.is_none() && effect.is_none() {
+        if source.is_none() && effect.is_none() && !preview_on {
             return false;
+        }
+        let Some(mut buffer) = upright(frame) else {
+            return false;
+        };
+        let shown = effect.is_some() || preview_on;
+        if let Some(effect) = effect {
+            let (w, h) = effect_size(buffer.width(), buffer.height());
+            if (w, h) != (buffer.width(), buffer.height()) {
+                match scaled(&buffer, w, h) {
+                    Some(smaller) => buffer = smaller,
+                    None => return false,
+                }
+            }
+            let (width, height) = (buffer.width() as usize, buffer.height() as usize);
+            let (sy, su, sv) = buffer.strides();
+            let (y, u, v) = buffer.data_mut();
+            effect.apply(&mut FrameMut {
+                width,
+                height,
+                y,
+                u,
+                v,
+                stride_y: sy as usize,
+                stride_u: su as usize,
+                stride_v: sv as usize,
+            });
+        }
+        if shown {
+            preview(&buffer);
+        }
+        let Some(source) = source else {
+            return false;
+        };
+        source.capture_frame(&VideoFrame {
+            rotation: VideoRotation::VideoRotation0,
+            timestamp_us: 0,
+            frame_metadata: None,
+            buffer,
+        })
+    }
+
+    /// The frame in a fresh I420 buffer, upright: converted by libyuv,
+    /// then turned by its rotation (an I420 frame is turned straight from
+    /// its planes, one pass).
+    fn upright(frame: &CameraFrame<'_>) -> Option<I420Buffer> {
+        let [p0, p1, p2] = frame.planes;
+        let [s0, s1, s2] = frame.strides;
+        if frame.rotation != 0 && frame.format == PixelFormat::I420 {
+            return rotated(
+                [p0.as_ptr(), p1.as_ptr(), p2.as_ptr()],
+                [s0, s1, s2],
+                frame.width,
+                frame.height,
+                frame.rotation,
+            );
         }
         let mut buffer = I420Buffer::new(frame.width, frame.height);
         let (sy, su, sv) = buffer.strides();
         let (y, u, v) = buffer.data_mut();
-        let [p0, p1, p2] = frame.planes;
-        let [s0, s1, s2] = frame.strides;
         // SAFETY: `is_valid` checked every source plane against the rows
         // and strides this format reads; the destination planes are the
         // buffer's own, sized for `width` x `height`. libyuv reads and
@@ -228,40 +336,59 @@ pub(crate) mod live {
             )
         };
         if converted != 0 {
-            return false;
+            return None;
         }
-        if let Some(effect) = effect {
-            let (w, h) = effect_size(frame.width, frame.height);
-            if (w, h) != (frame.width, frame.height) {
-                match scaled(&buffer, w, h) {
-                    Some(smaller) => buffer = smaller,
-                    None => return false,
-                }
-            }
-            let (width, height) = (buffer.width() as usize, buffer.height() as usize);
-            let (sy, su, sv) = buffer.strides();
-            let (y, u, v) = buffer.data_mut();
-            effect.apply(&mut FrameMut {
-                width,
-                height,
-                y,
-                u,
-                v,
-                stride_y: sy as usize,
-                stride_u: su as usize,
-                stride_v: sv as usize,
-            });
-            preview(&buffer);
+        if frame.rotation == 0 {
+            return Some(buffer);
         }
-        let Some(source) = source else {
-            return false;
+        let (sy, su, sv) = buffer.strides();
+        let (y, u, v) = buffer.data();
+        rotated(
+            [y.as_ptr(), u.as_ptr(), v.as_ptr()],
+            [sy, su, sv],
+            frame.width,
+            frame.height,
+            frame.rotation,
+        )
+    }
+
+    /// I420 planes of a `width` x `height` frame, turned `rotation`
+    /// degrees clockwise into a new buffer.
+    fn rotated(
+        planes: [*const u8; 3],
+        strides: [u32; 3],
+        width: u32,
+        height: u32,
+        rotation: u16,
+    ) -> Option<I420Buffer> {
+        let (w, h) = upright_size(width, height, rotation);
+        let mut out = I420Buffer::new(w, h);
+        let (dy, du, dv) = out.strides();
+        let (oy, ou, ov) = out.data_mut();
+        // SAFETY: the planes are an I420 frame of `width` x `height` at
+        // these strides (checked by `is_valid`, or a libwebrtc buffer of its
+        // own size); the destination is the new buffer at its turned size.
+        // libyuv reads and writes nothing else and keeps no pointer.
+        let code = unsafe {
+            yap_i420_rotate(
+                planes[0],
+                stride(strides[0]),
+                planes[1],
+                stride(strides[1]),
+                planes[2],
+                stride(strides[2]),
+                stride(width),
+                stride(height),
+                oy.as_mut_ptr(),
+                stride(dy),
+                ou.as_mut_ptr(),
+                stride(du),
+                ov.as_mut_ptr(),
+                stride(dv),
+                i32::from(rotation),
+            )
         };
-        source.capture_frame(&VideoFrame {
-            rotation: VideoRotation::VideoRotation0,
-            timestamp_us: 0,
-            frame_metadata: None,
-            buffer,
-        })
+        (code == 0).then_some(out)
     }
 
     /// `buffer` scaled down to `w` x `h`.
@@ -431,6 +558,7 @@ mod tests {
             height: 2,
             planes: [&data, &data, &data],
             strides: [stride, stride, stride],
+            rotation: 0,
         }
         .is_valid()
     }
@@ -445,6 +573,32 @@ mod tests {
     fn strides_narrower_than_a_row_should_be_refused() {
         assert!(!frame(PixelFormat::Yuy2, 64, 7));
         assert!(frame(PixelFormat::Yuy2, 64, 8));
+    }
+
+    #[test]
+    fn only_quarter_turns_should_be_taken() {
+        let data = vec![0u8; 64];
+        let turned = |rotation| {
+            CameraFrame {
+                format: PixelFormat::Bgra,
+                width: 4,
+                height: 2,
+                planes: [&data, &[], &[]],
+                strides: [16, 0, 0],
+                rotation,
+            }
+            .is_valid()
+        };
+        assert!(turned(0) && turned(90) && turned(180) && turned(270));
+        assert!(!turned(45) && !turned(360));
+    }
+
+    #[test]
+    fn a_quarter_turn_should_swap_the_size() {
+        assert_eq!(upright_size(1280, 720, 90), (720, 1280));
+        assert_eq!(upright_size(1280, 720, 270), (720, 1280));
+        assert_eq!(upright_size(1280, 720, 180), (1280, 720));
+        assert_eq!(upright_size(1280, 720, 0), (1280, 720));
     }
 
     #[test]
