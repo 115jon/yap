@@ -1,7 +1,8 @@
 # Installer (Velopack)
 
 The native client ships as one static `Yap.exe` and replaces the Tauri
-desktop app (`desktop/`) under its name: "Yap". Until 0.2.21 it was "Yap
+desktop app (`desktop/`, now on the `archive/tauri-desktop` branch) under
+its name: "Yap". Until 0.2.21 it was "Yap
 Native" (`YapNative.exe`, pack id `YapNative.App`) and ran beside the Tauri
 app; see "Rename from Yap Native" for what moved. Its installer is
 [Velopack](https://docs.velopack.io): `vpk pack` wraps the exe into a native
@@ -700,21 +701,21 @@ python tools/build-splash.py --version 0.2.12 --out <scratch>/yapn/tmp/splash.pn
 The hook (`rust/crates/yap-capture/src/hook`) injects OBS Studio's own
 `graphics-hook{64,32}.dll` through OBS's `inject-helper{64,32}.exe` and
 `get-graphics-offsets{64,32}.exe`, unmodified and signed by the OBS Project,
-the same six files the Tauri app ships. They are pinned once, in
-`desktop/packaging/obs-signed-hook.lock.json` (OBS 33.0.1, hook 1.8.8: the
+the same six files the Tauri app shipped. They are pinned once, in
+`packaging/obs-signed-hook.lock.json` (OBS 33.0.1, hook 1.8.8: the
 release zip's SHA-256, each file's SHA-256, signer and thumbprint), and the
-native app embeds that same lock.
+native app embeds that lock.
 
-- **Packaging.** `tools/package.ps1` runs the Tauri build's
-  `desktop/scripts/fetch-obs-signed-hook.ps1` into
+- **Packaging.** `tools/package.ps1` runs
+  `tools/fetch-obs-signed-hook.ps1` into
   `stage\obs-capture\obs-signed\`. The script downloads the pinned OBS
   release zip (cached in `-ObsCacheDir`, `%TEMP%
 alph-obs-signed-hook` by
   default, or `-ObsZip`), checks the zip's SHA-256, extracts the six files
   and checks each against the lock: SHA-256, a valid Authenticode
   signature, the signer subject and certificate thumbprint, the file
-  version. The package script then checks the staged hashes once more, as
-  `desktop/scripts/stage-payload.ps1` does. Any mismatch stops the build.
+  version. The package script then checks the staged hashes once more.
+  Any mismatch stops the build.
   `-NoCaptureHook` leaves them out (shares then always use WGC).
 - **Signing.** With `-Sign`, `vpk` gets `--signExclude obs-capture[\\/]`:
   OBS's files are never re-signed, since a changed byte voids the OBS
@@ -746,7 +747,7 @@ alph-obs-signed-hook` by
 `publictrust`; overridable through `ARTIFACT_SIGNING_*`) and passes it to
 `vpk pack --azureTrustedSignFile`. vpk signs with `DefaultAzureCredential`,
 so a local `az login` with the Artifact Signing Certificate Profile Signer
-role works; CI logs in with OIDC first. See `docs/desktop/code-signing.md`
+role works; CI logs in with OIDC first. See `docs/code-signing.md`
 for the account. Signing happens inside `vpk pack`, before the package and
 Setup.exe hash the files, so the signatures are part of what ships.
 
@@ -772,8 +773,8 @@ someone with Owner must first assign the Signer role to that user.
   Cargo.toml's), `channel` (`beta`, or `win` before 4.0.0), `notes`, and
   `dry_run`. Tags `desktop-native-v<version>`, `make_latest=false`.
 
-`desktop-release.yml` (the Tauri app) is no longer called by
-release-please; it stays, dispatch only, until `desktop/` is removed.
+`desktop-release.yml` (the Tauri app) and `desktop/` were removed from
+`main`; both are on the `archive/tauri-desktop` branch.
 
 | job       | runner        | token                                | does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | --------- | ------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -793,7 +794,7 @@ job refuses to run while it exists.
 
 **Signing** needs the run to come from `main`: the federated credentials on
 `AZURE_CLIENT_ID` trust `refs/heads/main` and `v*` tags only (immutable
-subject form, docs/desktop/code-signing.md). The job's OIDC subject is the
+subject form, docs/code-signing.md). The job's OIDC subject is the
 ref the workflow runs from, not the release tag, so a dispatch from `main`
 that creates `desktop-native-v*`, and release-please's call (its run is a
 push to `main`; a called workflow's subject is the caller's ref), need no

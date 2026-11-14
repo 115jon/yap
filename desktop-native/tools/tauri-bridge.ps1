@@ -33,7 +33,8 @@
 
     The signature is not cryptographically verified (no minisign verifier
     here): the key id must match, and the bytes are the ones the Tauri
-    release workflow published and checked (desktop/scripts/validate-latest-json.ps1).
+    release workflow published and checked (validate-latest-json.ps1, on the
+    archive/tauri-desktop branch).
 
 .EXAMPLE
     ./desktop-native/tools/tauri-bridge.ps1 -Mode Fetch -OutFile $env:RUNNER_TEMP/bridge/latest.json

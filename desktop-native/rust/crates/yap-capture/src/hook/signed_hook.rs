@@ -4,11 +4,12 @@
 //! The app injects OBS Studio's own `graphics-hook{64,32}.dll`, run through
 //! OBS's own `inject-helper` and `get-graphics-offsets`, unmodified and signed
 //! by the OBS Project. The exact files are pinned in
-//! `desktop/packaging/obs-signed-hook.lock.json`, embedded here. Before every
-//! injection each file is opened without write or delete sharing, its SHA-256
-//! is checked against the lock, and its Authenticode signature and signer are
-//! checked with `WinVerifyTrust`. The handles stay open until the helper has
-//! exited, so the files cannot be swapped between the check and the use.
+//! `desktop-native/packaging/obs-signed-hook.lock.json`, embedded here. Before
+//! every injection each file is opened without write or delete sharing, its
+//! SHA-256 is checked against the lock, and its Authenticode signature and
+//! signer are checked with `WinVerifyTrust`. The handles stay open until the
+//! helper has exited, so the files cannot be swapped between the check and the
+//! use.
 //!
 //! The stock DLL stays loaded in a game until the game exits. To keep a locked
 //! DLL out of the versioned `app-<ver>` folders (which the updater deletes),
@@ -31,9 +32,7 @@ use sha2::{Digest, Sha256};
 
 use crate::hook::inject::Bitness;
 
-// The desktop app's lock: one pin for both apps.
-const LOCK_JSON: &str =
-    include_str!("../../../../../../desktop/packaging/obs-signed-hook.lock.json");
+const LOCK_JSON: &str = include_str!("../../../../../packaging/obs-signed-hook.lock.json");
 
 /// The folder, next to the binary, that the installer ships the set in.
 pub const BUNDLED_SUBDIR: &str = r"obs-capture\obs-signed";
@@ -433,7 +432,7 @@ mod tests {
     }
 
     /// Runs against the fetched files when they are present
-    /// (`desktop/scripts/fetch-obs-signed-hook.ps1`).
+    /// (`desktop-native/tools/fetch-obs-signed-hook.ps1`).
     #[test]
     fn the_fetched_files_verify_when_present() {
         let Some(dir) = std::env::var_os("YAP_OBS_SIGNED_DIR").map(PathBuf::from) else {

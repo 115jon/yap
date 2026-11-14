@@ -16,8 +16,6 @@ name: "Desktop Native Mobile Prototype"
 # - qt-ios: the same CMake project for the iOS simulator, a compile and link
 #   check (no signing, no run). It runs when mobile/qt changes, by hand, and
 #   weekly, not for every core change.
-#
-# Nothing here touches the Expo app (apps/mobile) or its releases.
 on:
   pull_request:
     paths:

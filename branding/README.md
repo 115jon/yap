@@ -16,27 +16,18 @@ interaction or state colour (see DESIGN.md, Colors).
 
 ## App icon
 
-`app-icon.png` (1024 px, the master) is the source for the desktop and
-favicon icons. Every shipped copy is generated from it:
+`app-icon.png` (1024 px, the master) and the `app-icon-<size>.png` files
+(16 and 24 are the hand-pixelled art; 32, 48, 64, 96, 128 and 256 are exact
+grid multiples) are the sources for the shipped icons:
 
-```bash
-pnpm icons:app                    # from branding/app-icon.png
-pnpm icons:app path/to/new.png    # from another file
-```
-
-The script (`scripts/generate-app-icons.mjs`) writes:
-
-- `desktop/src-tauri/icons/`: the Tauri bundle PNGs, `icon.icns` and
-  `icon.ico` (its 32 px entry is the tray icon and the unread badge's base)
-- `desktop/installer/Assets/icon.ico`
 - `public/favicon.ico`
 - `public/favicon-dev.ico`, the green dev-server variant, from
   `app-icon-dev-16/32/48.png`
+- `desktop-native/assets/app/yap.ico`, the Windows client's executable icon
 
-`app-icon-<size>.png` files replace the resized copy at that size: 16 and 24
-are the hand-pixelled art, 32, 48, 64, 96, 128 and 256 are exact grid
-multiples. Sizes without one (20, 30, 36, 40, 60, 72, 80) are resized by
-the Tauri CLI and are slightly soft. It needs `pnpm install` in `desktop/`.
+The script that generated them belonged to the Tauri app and was removed
+with it (it lives on the `archive/tauri-desktop` branch). Until a
+favicon-only replacement lands, rebuild these by hand from the sized PNGs.
 
 ## Rendered from the SVGs, not by the script
 
@@ -49,19 +40,11 @@ if the art changes:
   `public/icon-512.png` (the web manifest): the adaptive composition on the
   `#0b0b0d` plate.
 - `public/og-image.png` (1200 x 630): the dark lockup centred on `#0b0b0d`.
-- `apps/mobile/assets/`: `icon.png` (plate), `adaptive-icon.png` and
-  `adaptive-monochrome.png` (adaptive layers), `splash-icon.png` (master),
-  `notification-icon.png` (white silhouette).
 
 ## Drawn in code from the same grid
 
 - `src/assets/splash-logo.svg` (master) and `public/icons/home-*.svg`
   (24 px art, the rail home mark).
 - `src/components/ui/yap-bark.tsx`: the dithered, barking loader mark.
-- `desktop/installer/Assets/LogoGeometry.xaml` and `Ui/Dither.cs`
-  (`DitherMark`): the installer's mark and its bark.
-- `apps/mobile/modules/ralph-notify/.../drawable/ralph_notify_small.xml`: the
-  Android status-bar glyph.
-
-Not updated: the Tauri-generated Android project under `mobile/`
-(`mobile/src-tauri/gen/android`), which keeps the old launcher icons.
+- `desktop-native/mobile/qt/android/res/`: the Qt Android app's adaptive
+  launcher layers.

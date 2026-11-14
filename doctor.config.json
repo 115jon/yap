@@ -1,8 +1,5 @@
 {
   "$schema": "https://react.doctor/schema/config.json",
-  "ignore": {
-    "files": ["desktop/src-tauri/tauri-fork/**", "desktop/src-tauri/vendor/**"]
-  },
   "surfaces": {
     "score": {
       "excludeCategories": ["Security", "Bugs", "Maintainability"]

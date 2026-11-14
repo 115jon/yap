@@ -2,9 +2,10 @@
 
 The native Yap desktop client: a Rust core behind a QML UI via
 [cxx-qt](https://github.com/KDAB/cxx-qt), linked against a static Qt into one
-`Yap.exe`. It replaces the Tauri desktop app (`desktop/`) under its name;
-until 0.2.21 it was "Yap Native" (`YapNative.exe`) and ran beside it
-(docs/INSTALLER.md, "Rename from Yap Native").
+`Yap.exe`. It replaces the Tauri desktop app (`desktop/`, archived on the
+`archive/tauri-desktop` branch) under its name; until 0.2.21 it was "Yap
+Native" (`YapNative.exe`) and ran beside it (docs/INSTALLER.md, "Rename
+from Yap Native").
 
 [FEASIBILITY.md](FEASIBILITY.md) covers the assessment, the measurements and
 the decisions.
@@ -177,7 +178,7 @@ the decisions.
   hook (on by default, `gameCaptureHook`). The blocklist, the web app's
   remote blocklist, the learned skips and OBS's `OpenProcess` preflight
   run before anything is injected; the six files pinned in
-  `desktop/packaging/obs-signed-hook.lock.json` are verified (SHA-256,
+  `packaging/obs-signed-hook.lock.json` are verified (SHA-256,
   Authenticode, signer) and staged under the profile's `capture-hook`
   folder. WGC keeps running underneath and carries the share whenever the
   hook is not delivering. DX11 and DX12 games; Vulkan only when an
