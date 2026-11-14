@@ -185,6 +185,81 @@ describe("authorizeGenericMediaRequest", () => {
       await authorizeGenericMediaRequest(request, target, key, noBearer),
     ).toBeNull();
   });
+
+  describe("an account waiting for deletion", () => {
+    const deleteAfter = "2026-12-13T00:00:00.000Z";
+    const pendingFor =
+      (...ids: string[]) =>
+      async (userId: string) =>
+        ids.includes(userId) ? deleteAfter : null;
+
+    it("gets nothing from a pass issued before it asked", async () => {
+      const pass = issueMediaPass(key, "user-1").value;
+      const request = new Request(proxyUrl({ url: target }), {
+        headers: { Cookie: `${MEDIA_PASS_COOKIE}=${pass}` },
+      });
+      const checkPendingDeletion = vi.fn(pendingFor("user-1"));
+      expect(
+        await authorizeGenericMediaRequest(
+          request,
+          target,
+          key,
+          noBearer,
+          checkPendingDeletion,
+        ),
+      ).toEqual({ via: "pending-deletion", deleteAfter });
+      expect(checkPendingDeletion).toHaveBeenCalledWith("user-1");
+    });
+
+    it("gets nothing from its bearer, even one the memo remembers", async () => {
+      const request = new Request(proxyUrl({ url: target }), {
+        headers: { Authorization: "Bearer session" },
+      });
+      expect(
+        await authorizeGenericMediaRequest(
+          request,
+          target,
+          key,
+          async () => "user-2",
+          pendingFor("user-2"),
+        ),
+      ).toEqual({ via: "pending-deletion", deleteAfter });
+    });
+
+    it("leaves another account's bearer and a signature alone", async () => {
+      const pass = issueMediaPass(key, "user-1").value;
+      const withBoth = new Request(proxyUrl({ url: target }), {
+        headers: {
+          Cookie: `${MEDIA_PASS_COOKIE}=${pass}`,
+          Authorization: "Bearer session",
+        },
+      });
+      expect(
+        await authorizeGenericMediaRequest(
+          withBoth,
+          target,
+          key,
+          async () => "user-2",
+          pendingFor("user-1"),
+        ),
+      ).toEqual({ via: "bearer", userId: "user-2" });
+
+      const checkPendingDeletion = vi.fn(pendingFor("user-1"));
+      const signedRequest = new Request(proxyUrl(signed(target)), {
+        headers: { Cookie: `${MEDIA_PASS_COOKIE}=${pass}` },
+      });
+      expect(
+        await authorizeGenericMediaRequest(
+          signedRequest,
+          target,
+          key,
+          noBearer,
+          checkPendingDeletion,
+        ),
+      ).toEqual({ via: "signature" });
+      expect(checkPendingDeletion).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe("handleProxyMedia", () => {
@@ -355,6 +430,49 @@ describe("handleProxyMedia", () => {
     );
     expect(fromOtherIp.status).toBe(200);
     expect(signedIp).toHaveBeenLastCalledWith("198.51.100.7");
+  });
+
+  it("refuses a pass whose account waits for deletion before fetching", async () => {
+    const target = "https://cdn.example.com/og.png";
+    const fetchMock = stubNetwork({
+      [target]: () =>
+        new Response(PNG, { headers: { "Content-Type": "image/png" } }),
+    });
+    const user = vi.fn(allow);
+    const pendingDeletion = async (userId: string) =>
+      userId === "user-1" ? "2026-12-13T00:00:00.000Z" : null;
+    const pass = issueMediaPass(key, "user-1").value;
+    const response = await handleProxyMedia(
+      new Request(proxyUrl({ url: target }), {
+        headers: { Cookie: `${MEDIA_PASS_COOKIE}=${pass}` },
+      }),
+      true,
+      false,
+      { user, pendingDeletion },
+    );
+    expect(response.status).toBe(403);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toMatchObject({
+      code: "ACCOUNT_PENDING_DELETION",
+    });
+    expect(user).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // The allowlisted hosts stay open to everyone, unsigned.
+    const gif = "https://static.klipy.com/ii/a.gif";
+    stubNetwork({
+      [gif]: () =>
+        new Response(PNG, { headers: { "Content-Type": "image/gif" } }),
+    });
+    const allowlisted = await handleProxyMedia(
+      new Request(proxyUrl({ url: gif }), {
+        headers: { Cookie: `${MEDIA_PASS_COOKIE}=${pass}` },
+      }),
+      true,
+      false,
+      { user, pendingDeletion },
+    );
+    expect(allowlisted.status).toBe(200);
   });
 
   it("refuses non-default ports, signed or not", async () => {

@@ -4,6 +4,7 @@ import ChatPageClient from "@/components/chat/ChatPageClient";
 import { ConnectionReturn } from "@/components/chat/ConnectionReturn";
 import { ConnectionOverlay } from "@/components/chat/ConnectionOverlay";
 import { ImageViewerModal } from "@/components/chat/ImageViewerModal";
+import { PendingDeletionGate } from "@/components/chat/PendingDeletionGate";
 import { SettingsHost } from "@/components/chat/SettingsHost";
 import {
   getDesktopToken,
@@ -121,7 +122,8 @@ function ChatLayout() {
   }
 
   return (
-    <>
+    // An account waiting for deletion gets the restore screen instead.
+    <PendingDeletionGate>
       <ChatGateway authenticatedUserId={userId} />
       {/* The app is inert while the cold-load screen covers it. */}
       <ConnectionOverlay>
@@ -131,7 +133,7 @@ function ChatLayout() {
         <ConnectionReturn />
         <CommandMenu />
       </ConnectionOverlay>
-    </>
+    </PendingDeletionGate>
   );
 }
 

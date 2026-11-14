@@ -81,8 +81,9 @@ function errorStatus(error: unknown): number | null {
 
 /**
  * The server's own sentence for a feature a site admin switched off (503
- * FEATURE_PAUSED, services/site-flags.service.ts), or a suspended account
- * (403 ACCOUNT_SUSPENDED). Both are written for people, not logs.
+ * FEATURE_PAUSED, services/site-flags.service.ts), a suspended account
+ * (403 ACCOUNT_SUSPENDED) or one waiting for deletion (403
+ * ACCOUNT_PENDING_DELETION). All are written for people, not logs.
  */
 /** The `error` sentence of a 415's body, when it had one. */
 function refusedMediaMessage(error: unknown): string | null {
@@ -98,6 +99,11 @@ function refusedMediaMessage(error: unknown): string | null {
 function pausedMessage(error: unknown): string | null {
   if (!error || typeof error !== "object") return null;
   const { code, message } = error as { code?: unknown; message?: unknown };
-  if (code !== "FEATURE_PAUSED" && code !== "ACCOUNT_SUSPENDED") return null;
+  if (
+    code !== "FEATURE_PAUSED" &&
+    code !== "ACCOUNT_SUSPENDED" &&
+    code !== "ACCOUNT_PENDING_DELETION"
+  )
+    return null;
   return typeof message === "string" && message.trim() ? message : null;
 }

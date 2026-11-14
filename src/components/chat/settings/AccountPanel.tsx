@@ -4,14 +4,14 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
-import { apiGet, apiPatch } from "@/lib/api-client";
+import { apiGet, apiPatch, apiPost } from "@/lib/api-client";
 import { describeApiError } from "@/lib/api-errors";
 import {
-  clearDesktopAuthSession,
-  markAuthLogoutIntent,
-} from "@/lib/desktop-auth";
+  deletionDateFrom,
+  formatDeletionDate,
+} from "@/lib/account-deletion-events";
 import { getDisplayInitial, getDisplayName } from "@/lib/display-name";
-import { endKovaBrowserSession } from "@/lib/kova-sign-out";
+import { signOutToSignIn } from "@/lib/sign-out-to-sign-in";
 import { getAuthAssetUrl } from "@/lib/platform";
 import { safeParse } from "@/lib/schema";
 import { signInMethodLabels } from "@/lib/sign-in-methods";
@@ -313,6 +313,141 @@ function ProfileFieldRow({
   );
 }
 
+/** Error copy for a refused deletion request. */
+function deletionError(error: unknown): string {
+  const failure = error as {
+    code?: string;
+    message?: string;
+    body?: { servers?: Array<{ name?: string }> };
+  } | null;
+  if (failure?.code === "OWNS_SERVERS") {
+    const names = (failure.body?.servers ?? [])
+      .map((server) => server.name)
+      .filter((name): name is string => !!name);
+    return names.length > 0
+      ? `You own ${names.join(", ")}. Delete ${names.length === 1 ? "it" : "them"} in server settings first.`
+      : (failure.message ?? "Delete the servers you own first.");
+  }
+  if (failure?.code === "CONFIRMATION_MISMATCH") {
+    return "That isn't your username. Type it exactly as shown.";
+  }
+  return describeApiError(error, "delete your account");
+}
+
+/**
+ * Settings → Account → Delete account: a warning, the username typed to
+ * confirm, then a request that schedules deletion in 30 days and signs out.
+ */
+function DeleteAccountRow({ username }: { username: string }) {
+  const { signOut } = useAuth();
+  const { armed, arm, cancel, triggerRef } = useConfirm();
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // The date the warning names, fixed when the warning opens.
+  const [deleteOn, setDeleteOn] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const matches =
+    typed.trim().replace(/^@/, "").toLowerCase() === username.toLowerCase();
+
+  useEffect(() => {
+    if (armed) inputRef.current?.focus({ preventScroll: true });
+  }, [armed]);
+
+  const confirm = async () => {
+    if (busy) return;
+    if (!matches) {
+      setError("Type your username exactly as shown to confirm.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await apiPost("/api/account/deletion", { confirm_username: typed });
+      // Signed out from here on; every other device already is.
+      signOutToSignIn(signOut);
+    } catch (requestError) {
+      setError(deletionError(requestError));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SettingsRow
+      id="delete-account"
+      layout="inline"
+      footer={
+        armed ? (
+          <ConfirmStrip
+            irreversible
+            busy={busy}
+            error={error}
+            confirmLabel="Delete account"
+            onCancel={() => {
+              setTyped("");
+              setError(null);
+              cancel();
+            }}
+            onConfirm={() => void confirm()}
+            consequence={
+              <>
+                <strong className="font-semibold">
+                  Delete your account on{" "}
+                  {deleteOn
+                    ? formatDeletionDate(deleteOn)
+                    : "this day next month"}
+                  ?
+                </strong>{" "}
+                You leave every server and are signed out everywhere now. Then
+                your profile, board, friends, settings and uploaded files are
+                deleted. Messages you sent stay where they are, from
+                &ldquo;Deleted user&rdquo;. Sign in before that date to restore
+                your account. Your Kova sign-in is not deleted. Type{" "}
+                <strong className="font-semibold">@{username}</strong> to
+                confirm.
+                <Input
+                  ref={inputRef}
+                  value={typed}
+                  aria-label={`Type ${username} to confirm`}
+                  placeholder={username}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => {
+                    setTyped(event.target.value);
+                    setError(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void confirm();
+                  }}
+                  className="mt-2 block max-md:min-h-11"
+                />
+              </>
+            }
+          />
+        ) : null
+      }
+    >
+      {(ids) =>
+        armed ? null : (
+          <Button
+            ref={triggerRef}
+            type="button"
+            variant="destructive"
+            aria-describedby={ids.descId}
+            onClick={() => {
+              setDeleteOn(deletionDateFrom(Date.now()));
+              arm();
+            }}
+          >
+            <Icon name="trash" size="sm" />
+            Delete account
+          </Button>
+        )
+      }
+    </SettingsRow>
+  );
+}
+
 export default function AccountPanel() {
   const { user, isLoaded } = useUser();
   const { signOut } = useAuth();
@@ -399,17 +534,7 @@ export default function AccountPanel() {
 
   const handleSignOut = () => {
     setSigningOut(true);
-    markAuthLogoutIntent();
-    clearDesktopAuthSession();
-    // Auth-domain session first, so the SDK can't mint a new token from it
-    // mid sign-out and land /sign-in signed in again.
-    void endKovaBrowserSession()
-      .then(() => signOut("/sign-in"))
-      .finally(() => {
-        if (typeof window !== "undefined") {
-          window.location.replace("/sign-in");
-        }
-      });
+    signOutToSignIn(signOut);
   };
 
   return (
@@ -515,6 +640,10 @@ export default function AccountPanel() {
             </Button>
           )}
         </SettingsRow>
+      </SettingsCard>
+
+      <SettingsCard id="delete-account">
+        <DeleteAccountRow username={profileValues.username} />
       </SettingsCard>
     </>
   );

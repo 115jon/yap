@@ -60,6 +60,11 @@ pub mod qobject {
         #[qproperty(QString, me_name_style, cxx_name = "meNameStyle")]
         /// Our stored avatar display (JSON), or empty.
         #[qproperty(QString, me_display, cxx_name = "meDisplay")]
+        /// Delete account and the restore screen, as JSON
+        /// (`yap_core::store::deletion::DeletionView`): `{pending,
+        /// checking, date, purging, restoring, restoreError, deleting,
+        /// deleteError}`.
+        #[qproperty(QString, deletion)]
         type Session = super::SessionRust;
 
         /// Starts the core (once).
@@ -81,6 +86,34 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "signOut"]
         fn sign_out(self: &Session);
+
+        /// Settings → Account → Delete account, with the username as typed.
+        /// Once scheduled the session signs out as Sign out does.
+        #[qinvokable]
+        #[cxx_name = "deleteAccount"]
+        fn delete_account(self: &Session, confirm_username: &QString);
+
+        /// The delete confirm closed: its error goes.
+        #[qinvokable]
+        #[cxx_name = "dismissDeleteAccount"]
+        fn dismiss_delete_account(self: &Session);
+
+        /// The restore screen's Restore account; the signed-in load then
+        /// starts over. (Continue deletion is `signOut`.)
+        #[qinvokable]
+        #[cxx_name = "restoreAccount"]
+        fn restore_account(self: &Session);
+
+        /// `typed` confirms our username: any case, an optional `@`.
+        #[qinvokable]
+        #[cxx_name = "confirmsUsername"]
+        fn confirms_username(self: &Session, typed: &QString) -> bool;
+
+        /// The local date an account deleted now is purged on
+        /// ("December 13, 2026").
+        #[qinvokable]
+        #[cxx_name = "deletionDateFromNow"]
+        fn deletion_date_from_now(self: &Session) -> QString;
 
         /// The status picker: `online`, `idle`, `dnd` or `offline`
         /// (Invisible), and the custom status (empty clears it).
@@ -720,8 +753,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QList, QString, QStringList};
+use yap_core::account_deletion;
+use yap_core::store::deletion::DeletionCommand;
 use yap_core::store::favorites::FavoritesCommand;
-use yap_core::store::time::format_rfc3339;
+use yap_core::store::time::{format_rfc3339, local_date};
 use yap_core::{Phase, ViewUpdate};
 
 use crate::client::{self, Command};
@@ -766,6 +801,7 @@ pub struct SessionRust {
     me_frame: QString,
     me_name_style: QString,
     me_display: QString,
+    deletion: QString,
 }
 
 impl Drop for SessionRust {
@@ -924,6 +960,32 @@ impl qobject::Session {
 
     pub fn sign_out(&self) {
         client::command(Command::SignOut);
+    }
+
+    pub fn delete_account(&self, confirm_username: &QString) {
+        client::command(Command::Deletion(DeletionCommand::Request {
+            confirm_username: confirm_username.to_string(),
+        }));
+    }
+
+    pub fn dismiss_delete_account(&self) {
+        client::command(Command::Deletion(DeletionCommand::Dismiss));
+    }
+
+    pub fn restore_account(&self) {
+        client::command(Command::Deletion(DeletionCommand::Restore));
+    }
+
+    pub fn confirms_username(&self, typed: &QString) -> bool {
+        account_deletion::username_matches(&typed.to_string(), &self.me_username().to_string())
+    }
+
+    pub fn deletion_date_from_now(&self) -> QString {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+        let at = account_deletion::deletion_date_from(now);
+        QString::from(&local_date(at, client::LOCAL, true))
     }
 
     pub fn choose_status(&self, status: &QString, custom_status: &QString) {

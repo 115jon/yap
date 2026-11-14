@@ -6,6 +6,7 @@ mod apps;
 mod backgrounds;
 mod board;
 mod calls;
+mod deletion;
 mod embeds;
 mod extras;
 mod favorites;
@@ -145,6 +146,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
     state.sync_friends(&mut fx);
     state.sync_invites(&mut fx);
     state.sync_apps(&mut fx);
+    state.sync_deletion(&mut fx);
     fx.0
 }
 
@@ -1816,6 +1818,7 @@ impl State {
             Command::Backgrounds(command) => self.on_backgrounds(fx, command),
             Command::RemoveEmbeds(id) => self.remove_embeds(fx, &id),
             Command::Extras(command) => self.on_extras(fx, command),
+            Command::Deletion(command) => self.on_deletion(fx, command),
             Command::Calls(command) => self.on_calls(fx, command),
             Command::Quit => {
                 if let Some(standby) = self.standby.take() {
@@ -2052,6 +2055,7 @@ impl State {
     }
 
     fn end_session(&mut self, fx: &mut Effects, revoke: bool) {
+        self.reset_deletion();
         // A sign-out during a drop: the next session starts with no strip.
         self.set_link(fx, 0, false);
         // The next account registers the push token again.
@@ -2143,6 +2147,10 @@ impl State {
 
     /// A request failed: a 401 ends the session, anything else is a status line.
     fn fail(&mut self, fx: &mut Effects, error: &ApiError) {
+        if error.is_pending_deletion() {
+            // The restore screen says it (`hold_for_deletion`).
+            return;
+        }
         if error.is_unauthorized() {
             self.forget_user(fx);
             self.end_session(fx, false);
@@ -2202,6 +2210,11 @@ impl State {
     // HTTP results
 
     fn on_http(&mut self, fx: &mut Effects, id: RequestId, result: Result<ApiResponse, ApiError>) {
+        // Any answer may say the account is waiting for deletion: the
+        // restore screen, whichever request heard it first.
+        if result.as_ref().is_err_and(ApiError::is_pending_deletion) {
+            self.hold_for_deletion(fx);
+        }
         self.route_http(fx, id, result);
         self.settle_refresh(fx);
     }
@@ -2217,7 +2230,8 @@ impl State {
             self.on_presence_saved(fx, id, result.is_ok());
         }
         let mut answer = Some(result);
-        if self.route_push_http(id, &mut answer)
+        if self.route_deletion_http(fx, id, &mut answer)
+            || self.route_push_http(id, &mut answer)
             || self.route_prefetch(fx, id, &mut answer)
             || self.route_calls_http(fx, id, &mut answer)
             || self.route_settings_http(fx, id, &mut answer)
@@ -2382,6 +2396,11 @@ impl State {
     }
 
     fn me_failed(&mut self, fx: &mut Effects, error: &ApiError) {
+        if error.is_pending_deletion() {
+            // The session stays (held) for the restore screen; Restore
+            // starts the load over.
+            return;
+        }
         if self.me().is_some() {
             // A cached session: a 401 signs out (and wipes the snapshot);
             // anything else keeps the cached view up, offline.
@@ -2453,6 +2472,10 @@ impl State {
         let Some((session, _)) = self.signed_in() else {
             return;
         };
+        // Refused until the account is restored.
+        if self.deletion.held {
+            return;
+        }
         if session.gateway.ready {
             return;
         }
@@ -3778,6 +3801,7 @@ impl State {
                 fx.push(Effect::ClearToken);
                 self.set_status(fx, SESSION_ENDED);
             }
+            GatewayEvent::PendingDeletion => self.hold_for_deletion(fx),
             GatewayEvent::Dispatch(dispatch) => self.on_dispatch(fx, dispatch),
         }
     }
@@ -4659,7 +4683,7 @@ fn unreachable(error: &ApiError) -> bool {
     match error {
         ApiError::Network(_) => true,
         ApiError::Http { status, .. } => *status == 429 || *status >= 500,
-        ApiError::Unauthorized | ApiError::Decode(_) => false,
+        ApiError::Unauthorized | ApiError::Decode(_) | ApiError::Deletion(_) => false,
     }
 }
 

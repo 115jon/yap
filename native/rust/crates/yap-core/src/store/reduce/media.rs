@@ -90,6 +90,13 @@ pub(super) fn describe_error(error: &ApiError, action: &str) -> String {
         ApiError::Http { status, .. } if *status < 500 => {
             format!("Unable to {action}. Check the details and try again.")
         }
+        ApiError::Deletion(refusal) => describe_error(
+            &ApiError::Http {
+                status: refusal.status(),
+                message: refusal.to_string(),
+            },
+            action,
+        ),
         ApiError::Http { .. } | ApiError::Decode(_) => {
             format!("Unable to {action}. Try again in a moment.")
         }

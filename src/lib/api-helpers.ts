@@ -5,6 +5,11 @@
 import { env } from "cloudflare:workers";
 import { clog } from "@/lib/console-logger";
 import {
+  ACCOUNT_PENDING_DELETION,
+  pendingDeletionDate,
+  pendingDeletionMessage,
+} from "@/lib/account-deletion";
+import {
   ACCOUNT_SUSPENDED,
   isSuspended,
   SUSPENDED_MESSAGE,
@@ -358,9 +363,10 @@ export async function requireActiveVoiceChannelSession(
  */
 export async function requireAuth(
   req?: Request,
+  options: { allowPendingDeletion?: boolean } = {},
 ): Promise<{ userId: string } | Response> {
   const { requestCredentials } = await import("@/lib/kova-auth-server");
-  return requireCredentials(req, requestCredentials(req));
+  return requireCredentials(req, requestCredentials(req), options);
 }
 
 /**
@@ -370,6 +376,7 @@ export async function requireAuth(
 export async function requireCredentials(
   req: Request | undefined,
   credentials: Credentials,
+  options: { allowPendingDeletion?: boolean } = {},
 ): Promise<{ userId: string } | Response> {
   const { checkCredentials } = await import("@/lib/kova-auth-server");
   const requestContext = getRequestLogContext(req);
@@ -381,6 +388,11 @@ export async function requireCredentials(
       if (await isSuspended(check.user.id)) {
         authLog.warn("Suspended account refused", requestContext);
         return suspendedResponse(req);
+      }
+      // An account waiting for deletion may only see or undo that.
+      if (!options.allowPendingDeletion) {
+        const deleteAfter = await pendingDeletionDate(check.user.id);
+        if (deleteAfter) return pendingDeletionResponse(deleteAfter, req);
       }
       return { userId: check.user.id };
     }
@@ -417,6 +429,19 @@ export async function requireCredentials(
 /** The 403 a suspended account gets instead of its answer (lib/suspension). */
 export function suspendedResponse(req?: Request): Response {
   return apiError(SUSPENDED_MESSAGE, 403, ACCOUNT_SUSPENDED, req);
+}
+
+/** The 403 an account waiting for deletion gets (lib/account-deletion). */
+export function pendingDeletionResponse(
+  deleteAfter: string,
+  req?: Request,
+): Response {
+  return apiError(
+    pendingDeletionMessage(deleteAfter),
+    403,
+    ACCOUNT_PENDING_DELETION,
+    req,
+  );
 }
 
 /** Seconds a client should wait before retrying a 503 AUTH_UNAVAILABLE. */

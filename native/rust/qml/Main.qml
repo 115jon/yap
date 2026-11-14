@@ -11,6 +11,8 @@ ApplicationWindow {
 
     readonly property bool booting: Session.phase === Session.Boot || Session.phase === Session.Loading
     readonly property bool ready: Session.phase === Session.Ready
+    // The account waits for deletion: the restore screen covers the rest.
+    readonly property bool pendingDeletion: Session.deletion.length > 0 && JSON.parse(Session.deletion).pending === true
     // formatAppTitle (AppTitleBarModel.ts): "#general · Yap HQ".
     // A voice channel has no "#".
     // At Home: "@ada · Direct messages", else "Friends" or "Shop". Empty
@@ -171,6 +173,15 @@ ApplicationWindow {
     Shell {
         anchors.fill: parent
         visible: window.ready
+    }
+
+    // An account waiting for deletion: the restore screen over the boot
+    // screen or the shell, until it is restored or signed out.
+    Loader {
+        anchors.fill: parent
+        z: 5
+        active: window.pendingDeletion
+        sourceComponent: PendingDeletionView {}
     }
 
     // Toast actions and the taskbar thumbnail toolbar.

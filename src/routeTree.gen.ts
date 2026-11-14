@@ -77,6 +77,7 @@ import { Route as ApiAuthSyncRouteImport } from './routes/api/auth/sync'
 import { Route as ApiAuthDesktopRouteImport } from './routes/api/auth/desktop'
 import { Route as ApiAttachmentsSplatRouteImport } from './routes/api/attachments/$'
 import { Route as ApiAdminBadgesRouteImport } from './routes/api/admin/badges'
+import { Route as ApiAccountDeletionRouteImport } from './routes/api/account/deletion'
 import { Route as ApiInvitesCodeIndexRouteImport } from './routes/api/invites/$code/index'
 import { Route as ApiUsersIdWishlistRouteImport } from './routes/api/users/$id/wishlist'
 import { Route as ApiUsersIdProfilePrefsRouteImport } from './routes/api/users/$id/profile-prefs'
@@ -479,6 +480,11 @@ const ApiAdminBadgesRoute = ApiAdminBadgesRouteImport.update({
   path: '/api/admin/badges',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAccountDeletionRoute = ApiAccountDeletionRouteImport.update({
+  id: '/api/account/deletion',
+  path: '/api/account/deletion',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiInvitesCodeIndexRoute = ApiInvitesCodeIndexRouteImport.update({
   id: '/api/invites/$code/',
   path: '/api/invites/$code/',
@@ -824,6 +830,7 @@ export interface FileRoutesByFullPath {
   '/invite/$code': typeof InviteCodeRoute
   '/room/$slug': typeof RoomSlugRoute
   '/share/$token': typeof ShareTokenRoute
+  '/api/account/deletion': typeof ApiAccountDeletionRoute
   '/api/admin/badges': typeof ApiAdminBadgesRoute
   '/api/attachments/$': typeof ApiAttachmentsSplatRoute
   '/api/auth/desktop': typeof ApiAuthDesktopRoute
@@ -952,6 +959,7 @@ export interface FileRoutesByTo {
   '/invite/$code': typeof InviteCodeRoute
   '/room/$slug': typeof RoomSlugRoute
   '/share/$token': typeof ShareTokenRoute
+  '/api/account/deletion': typeof ApiAccountDeletionRoute
   '/api/admin/badges': typeof ApiAdminBadgesRoute
   '/api/attachments/$': typeof ApiAttachmentsSplatRoute
   '/api/auth/desktop': typeof ApiAuthDesktopRoute
@@ -1081,6 +1089,7 @@ export interface FileRoutesById {
   '/invite/$code': typeof InviteCodeRoute
   '/room/$slug': typeof RoomSlugRoute
   '/share/$token': typeof ShareTokenRoute
+  '/api/account/deletion': typeof ApiAccountDeletionRoute
   '/api/admin/badges': typeof ApiAdminBadgesRoute
   '/api/attachments/$': typeof ApiAttachmentsSplatRoute
   '/api/auth/desktop': typeof ApiAuthDesktopRoute
@@ -1211,6 +1220,7 @@ export interface FileRouteTypes {
     | '/invite/$code'
     | '/room/$slug'
     | '/share/$token'
+    | '/api/account/deletion'
     | '/api/admin/badges'
     | '/api/attachments/$'
     | '/api/auth/desktop'
@@ -1339,6 +1349,7 @@ export interface FileRouteTypes {
     | '/invite/$code'
     | '/room/$slug'
     | '/share/$token'
+    | '/api/account/deletion'
     | '/api/admin/badges'
     | '/api/attachments/$'
     | '/api/auth/desktop'
@@ -1467,6 +1478,7 @@ export interface FileRouteTypes {
     | '/invite/$code'
     | '/room/$slug'
     | '/share/$token'
+    | '/api/account/deletion'
     | '/api/admin/badges'
     | '/api/attachments/$'
     | '/api/auth/desktop'
@@ -1595,6 +1607,7 @@ export interface RootRouteChildren {
   InviteCodeRoute: typeof InviteCodeRoute
   RoomSlugRoute: typeof RoomSlugRoute
   ShareTokenRoute: typeof ShareTokenRoute
+  ApiAccountDeletionRoute: typeof ApiAccountDeletionRoute
   ApiAdminBadgesRoute: typeof ApiAdminBadgesRoute
   ApiAttachmentsSplatRoute: typeof ApiAttachmentsSplatRoute
   ApiAuthDesktopRoute: typeof ApiAuthDesktopRoute
@@ -2118,6 +2131,13 @@ declare module '@tanstack/react-router' {
       path: '/api/admin/badges'
       fullPath: '/api/admin/badges'
       preLoaderRoute: typeof ApiAdminBadgesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/account/deletion': {
+      id: '/api/account/deletion'
+      path: '/api/account/deletion'
+      fullPath: '/api/account/deletion'
+      preLoaderRoute: typeof ApiAccountDeletionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/invites/$code/': {
@@ -2904,6 +2924,7 @@ const rootRouteChildren: RootRouteChildren = {
   InviteCodeRoute: InviteCodeRoute,
   RoomSlugRoute: RoomSlugRoute,
   ShareTokenRoute: ShareTokenRoute,
+  ApiAccountDeletionRoute: ApiAccountDeletionRoute,
   ApiAdminBadgesRoute: ApiAdminBadgesRoute,
   ApiAttachmentsSplatRoute: ApiAttachmentsSplatRoute,
   ApiAuthDesktopRoute: ApiAuthDesktopRoute,

@@ -17,7 +17,10 @@
 //   - the media pass cookie (POST /api/proxy-media): a signed value bound to
 //     the user and valid for an hour, which the web app renews (a session
 //     check) while signed in, so URLs it builds itself need no sig.
-//   - a session bearer (Expo and native send it to the API's own URLs).
+//   - a session bearer (the native apps send it to the API's own URLs).
+// A pass or bearer whose account waits for deletion is refused on every
+// request (authorizeGenericMediaRequest in routes/api/proxy-media.ts), as
+// requireAuth does: verifyMediaPass below only proves who the pass is for.
 //
 // node:crypto (nodejs_compat) keeps signing synchronous, so payload rewriting
 // can run where messages are serialized without threading async through.

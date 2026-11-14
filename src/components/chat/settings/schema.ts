@@ -161,6 +161,27 @@ const SETTINGS_PANELS: SettingsPanelDef[] = [
           },
         ],
       },
+      {
+        id: "delete-account",
+        title: "Delete account",
+        desc: "Deletes your Yap account after 30 days. Sign in before then to restore it.",
+        rows: [
+          {
+            id: "delete-account",
+            label: "Delete account",
+            desc: 'Your profile, friends, settings and files are deleted. Messages you sent stay, from "Deleted user".',
+            keywords: [
+              "delete",
+              "remove",
+              "close account",
+              "erase",
+              "deactivate",
+              "data",
+              "privacy",
+            ],
+          },
+        ],
+      },
     ],
   },
   {

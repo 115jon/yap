@@ -46,6 +46,12 @@ pub enum ApiError {
     /// The response did not have the shape the client needs.
     #[error("{0}")]
     Decode(String),
+    /// A refusal about the account's deletion, by its `code`
+    /// ([`crate::account_deletion::refusal`]): above all 403
+    /// `ACCOUNT_PENDING_DELETION`, which every route but the deletion
+    /// routes answers while the account waits for deletion.
+    #[error("{0}")]
+    Deletion(crate::account_deletion::DeletionRefusal),
 }
 
 /// The message of an error response whose body had no `error`.
@@ -70,6 +76,25 @@ impl ApiError {
                 (!message.is_empty() && message != NO_SERVER_MESSAGE).then_some(message)
             }
             _ => None,
+        }
+    }
+
+    /// The account is waiting for deletion (403 `ACCOUNT_PENDING_DELETION`).
+    pub fn is_pending_deletion(&self) -> bool {
+        matches!(
+            self,
+            Self::Deletion(crate::account_deletion::DeletionRefusal::PendingDeletion)
+        )
+    }
+
+    /// The HTTP status, when there was an answer (a deletion refusal's
+    /// own; 401 for an ended session).
+    pub fn status(&self) -> Option<u16> {
+        match self {
+            Self::Unauthorized => Some(401),
+            Self::Http { status, .. } => Some(*status),
+            Self::Deletion(refusal) => Some(refusal.status()),
+            Self::Network(_) | Self::Decode(_) => None,
         }
     }
 
@@ -252,6 +277,9 @@ impl Api {
         }
         let body: Value = response.json().await.unwrap_or(Value::Null);
         if !status.is_success() {
+            if let Some(refusal) = crate::account_deletion::refusal(status.as_u16(), &body) {
+                return Err(ApiError::Deletion(refusal));
+            }
             let message = body
                 .get("error")
                 .and_then(Value::as_str)

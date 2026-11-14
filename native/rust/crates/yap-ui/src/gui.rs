@@ -534,6 +534,10 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
     match update {
         ViewUpdate::Phase(phase) => session.set_phase(phase.into()),
         ViewUpdate::Status(text) => session.set_status(q(&text)),
+        ViewUpdate::Deletion(view) => {
+            let json = serde_json::to_string(&view).unwrap_or_default();
+            session.set_deletion(q(&json));
+        }
         ViewUpdate::DeviceCode { user_code, url } => {
             session.as_mut().set_user_code(q(&user_code));
             session.set_verification_url(q(&url));

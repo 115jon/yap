@@ -156,11 +156,32 @@ export function createProfileBoardHandlers(deps: ProfileBoardDeps) {
     return deps.authenticate(request);
   }
 
+  /** Someone else's profile waiting for deletion: shown to nobody. */
+  async function unavailable(
+    ownerId: string,
+    viewerId: string,
+  ): Promise<Response | null> {
+    if (ownerId === viewerId) return null;
+    const pending = await deps.db
+      .prepare(`SELECT 1 FROM account_deletions WHERE user_id = ?`)
+      .bind(ownerId)
+      .first()
+      .catch(() => null);
+    return pending
+      ? error("This profile isn't available.", 404, "PROFILE_UNAVAILABLE")
+      : null;
+  }
+
   return {
     /** GET /api/users/:id/board */
     async getBoard(request: Request, id: string): Promise<Response> {
       const session = await auth(request);
       if (session instanceof Response) return session;
+      const hidden = await unavailable(
+        targetId(id, session.userId),
+        session.userId,
+      );
+      if (hidden) return hidden;
       try {
         const view = await getBoardView(deps.db, {
           ownerId: targetId(id, session.userId),
@@ -338,6 +359,11 @@ export function createProfileBoardHandlers(deps: ProfileBoardDeps) {
     async getActivity(request: Request, id: string): Promise<Response> {
       const session = await auth(request);
       if (session instanceof Response) return session;
+      const hidden = await unavailable(
+        targetId(id, session.userId),
+        session.userId,
+      );
+      if (hidden) return hidden;
       const ownerId = targetId(id, session.userId);
       if (
         ownerId !== session.userId &&
@@ -462,6 +488,11 @@ export function createProfileBoardHandlers(deps: ProfileBoardDeps) {
     async getGuestbook(request: Request, id: string): Promise<Response> {
       const session = await auth(request);
       if (session instanceof Response) return session;
+      const hidden = await unavailable(
+        targetId(id, session.userId),
+        session.userId,
+      );
+      if (hidden) return hidden;
       try {
         const page = await listGuestbook(deps.db, {
           ownerId: targetId(id, session.userId),
@@ -478,6 +509,11 @@ export function createProfileBoardHandlers(deps: ProfileBoardDeps) {
     async postGuestbook(request: Request, id: string): Promise<Response> {
       const session = await auth(request);
       if (session instanceof Response) return session;
+      const hidden = await unavailable(
+        targetId(id, session.userId),
+        session.userId,
+      );
+      if (hidden) return hidden;
       const limited = await deps.rateLimit(session.userId, "guestbook");
       if (limited) return limited;
       const body = await readJson(request);
@@ -563,6 +599,11 @@ export function createProfileBoardHandlers(deps: ProfileBoardDeps) {
     async getWishlist(request: Request, id: string): Promise<Response> {
       const session = await auth(request);
       if (session instanceof Response) return session;
+      const hidden = await unavailable(
+        targetId(id, session.userId),
+        session.userId,
+      );
+      if (hidden) return hidden;
       const ownerId = targetId(id, session.userId);
       if (
         ownerId !== session.userId &&

@@ -110,6 +110,19 @@ describe("sendFriendRequest", () => {
     ).rejects.toHaveProperty("status", 400);
   });
 
+  it("throws 403 when the target has blocked the sender", async () => {
+    db.mockQuery("FROM users WHERE username", userRow());
+    db.mockQuery("WHERE type = 1 AND user_id", { "1": 1 }, [
+      TARGET_ID,
+      USER_ID,
+    ]);
+
+    await expect(
+      sendFriendRequest(db as any, USER_ID, "bob"),
+    ).rejects.toHaveProperty("status", 403);
+    expect(db.getCalls("INSERT INTO relationships")).toHaveLength(0);
+  });
+
   it("throws 409 when already friends", async () => {
     db.mockQuery("FROM users WHERE username", userRow());
     db.mockQuery("FROM relationships WHERE user_id", { type: 0 });

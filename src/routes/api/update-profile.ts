@@ -271,9 +271,14 @@ export const PATCH = async ({ request: req }: any) => {
     if (normalizedUsername !== undefined) {
       const existingUsername = await db
         .prepare(
-          "SELECT id FROM users WHERE lower(username) = ? AND id != ? LIMIT 1",
+          // Also held while its account can still be restored.
+          `SELECT id FROM users WHERE lower(username) = ?1 AND id != ?2
+           UNION ALL
+           SELECT user_id AS id FROM account_deletions
+           WHERE reserved_username = ?1 AND user_id != ?2
+           LIMIT 1`,
         )
-        .bind(normalizedUsername, userId)
+        .bind(normalizedUsername.toLowerCase(), userId)
         .first<{ id: string }>();
       if (existingUsername) {
         return apiError("That username is already taken", 409);

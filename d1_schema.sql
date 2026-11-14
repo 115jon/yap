@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT,
     suspended_at TEXT,                 -- site admin suspension; NULL = active
-    suspended_reason TEXT
+    suspended_reason TEXT,
+    deleted_at TEXT                    -- set only on "Deleted user" rows (migration 046)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower
@@ -158,7 +159,8 @@ CREATE TABLE IF NOT EXISTS invites (
 
 CREATE TABLE IF NOT EXISTS relationships (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    target_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- No foreign key (migration 046): a block outlives a purged account.
+    target_user_id TEXT NOT NULL,
     type INTEGER NOT NULL,             -- 0=friend, 1=blocked, 2=pending_incoming, 3=pending_outgoing
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -329,7 +331,8 @@ CREATE TABLE IF NOT EXISTS message_shares (
 
 CREATE TABLE IF NOT EXISTS server_bans (
     server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- No foreign key (migration 046): a ban outlives a purged account.
+    user_id TEXT NOT NULL,
     reason TEXT,
     banned_by TEXT NOT NULL REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -697,7 +700,8 @@ CREATE INDEX IF NOT EXISTS idx_profile_guestbook_author
 
 CREATE TABLE IF NOT EXISTS profile_guestbook_blocks (
     owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    blocked_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- No foreign key (migration 046): the block outlives a purged account.
+    blocked_user_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (owner_id, blocked_user_id)
 );
@@ -736,3 +740,23 @@ CREATE INDEX IF NOT EXISTS idx_deadlock_fetch_state_due
     ON deadlock_fetch_state(next_due_at);
 CREATE INDEX IF NOT EXISTS idx_deadlock_fetch_state_user
     ON deadlock_fetch_state(user_id);
+
+-- Account deletion with a 30-day grace period (migration 046).
+CREATE TABLE IF NOT EXISTS account_deletions (
+    user_id TEXT PRIMARY KEY,
+    requested_at TEXT NOT NULL,
+    delete_after TEXT NOT NULL,
+    reserved_username TEXT NOT NULL,
+    snapshot TEXT NOT NULL,
+    tombstone_id TEXT,
+    purge_started_at TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    held_reason TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_deletions_reserved_username
+    ON account_deletions(reserved_username);
+
+CREATE INDEX IF NOT EXISTS idx_account_deletions_due
+    ON account_deletions(delete_after);

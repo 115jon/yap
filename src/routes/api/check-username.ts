@@ -25,8 +25,14 @@ const GET = async ({ request: req }: any) => {
 
   try {
     const existing = await getDB()
-      .prepare(`SELECT id FROM users WHERE lower(username) = ? LIMIT 1`)
-      .bind(username)
+      .prepare(
+        // A username is also held while its account can still be restored.
+        `SELECT id FROM users WHERE lower(username) = ?1
+         UNION ALL
+         SELECT user_id AS id FROM account_deletions WHERE reserved_username = ?1
+         LIMIT 1`,
+      )
+      .bind(username.toLowerCase())
       .first<{ id: string }>();
 
     return apiSuccess({ available: !existing || existing.id === userId });

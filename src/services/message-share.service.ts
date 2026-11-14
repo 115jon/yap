@@ -1,3 +1,4 @@
+import { DELETED_USER_DISPLAY_NAME } from "@/lib/account-deletion-events";
 import { getAttachmentUrl } from "@/lib/attachment-url";
 import { ServiceError } from "@/lib/service-error";
 import { isPlayableVideo } from "@/lib/media";
@@ -359,13 +360,31 @@ export async function getPublicMessageShare(
       .run();
   }
 
-  const snapshotAuthor = safeJson<ShareAuthorSnapshot>(row.snapshot_author, {
+  const savedAuthor = safeJson<ShareAuthorSnapshot>(row.snapshot_author, {
     id: "",
     username: "Unknown",
     display_name: null,
     avatar_url: null,
     avatar_display: null,
   });
+  // An author waiting for deletion is shown as "Deleted user" here too; the
+  // snapshot stays as it was in case the account is restored.
+  const authorPending =
+    !!savedAuthor.id &&
+    !!(await db
+      .prepare(`SELECT 1 FROM account_deletions WHERE user_id = ?`)
+      .bind(savedAuthor.id)
+      .first()
+      .catch(() => null));
+  const snapshotAuthor: ShareAuthorSnapshot = authorPending
+    ? {
+        id: savedAuthor.id,
+        username: "",
+        display_name: DELETED_USER_DISPLAY_NAME,
+        avatar_url: null,
+        avatar_display: null,
+      }
+    : savedAuthor;
   const snapshot: MessageShareSnapshot = {
     content: row.snapshot_content as string,
     author: snapshotAuthor,

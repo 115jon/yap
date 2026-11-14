@@ -81,7 +81,10 @@ export async function listBans(
 
   const { results } = await db
     .prepare(
-      `SELECT b.*, u.username, u.avatar_url, banner.username as banned_by_username
+      // A ban outlives a purged account (migration 046): no users row, so
+      // it lists as "Deleted user".
+      `SELECT b.*, COALESCE(u.username, 'Deleted user') AS username, u.avatar_url,
+              banner.username as banned_by_username
        FROM server_bans b
        LEFT JOIN users u ON u.id = b.user_id
        LEFT JOIN users banner ON banner.id = b.banned_by

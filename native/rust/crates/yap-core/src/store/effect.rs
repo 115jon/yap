@@ -460,6 +460,8 @@ pub enum ApiRequest {
     Extras(super::extras::ExtrasRequest),
     /// `POST /api/voice/move`: a moderator moves someone.
     VoiceMove(yap_protocol::payload::VoiceMoveRequest),
+    /// `/api/account/deletion`.
+    Deletion(crate::account_deletion::DeletionRequest),
 }
 
 /// A page of messages, oldest first.
@@ -518,6 +520,8 @@ pub enum ApiResponse {
     Favorites(Vec<Value>),
     Backgrounds(super::backgrounds::BackgroundsResponse),
     Extras(super::extras::ExtrasResponse),
+    /// What `/api/account/deletion` answered.
+    Deletion(crate::account_deletion::DeletionStatus),
     /// A call whose body the store does not read.
     Done,
 }
@@ -579,6 +583,7 @@ impl ApiRequest {
             Self::Embeds(request) => request.method(),
             Self::Favorites(request) => request.method(),
             Self::Backgrounds(request) => request.method(),
+            Self::Deletion(request) => request.method(),
             Self::RemoveEmbeds { .. } => Method::Patch,
             Self::VoiceMove(_) => Method::Post,
             Self::SendMessage { .. }
@@ -633,6 +638,7 @@ impl ApiRequest {
             Self::Embeds(request) => request.path(),
             Self::Favorites(request) => request.path(),
             Self::Backgrounds(request) => request.path(),
+            Self::Deletion(request) => request.path(),
             Self::RemoveEmbeds { channel_id, .. } => format!("/api/channels/{channel_id}/messages"),
             Self::VoiceMove(_) => "/api/voice/move".into(),
             Self::Me => "/api/users/me".into(),
@@ -762,6 +768,7 @@ impl ApiRequest {
             Self::Embeds(_) => Value::Null,
             Self::Favorites(request) => request.body(),
             Self::Backgrounds(request) => request.body(),
+            Self::Deletion(request) => request.body(),
             Self::VoiceMove(request) => serde_json::to_value(request).unwrap_or(Value::Null),
             Self::RemoveEmbeds { message_id, .. } => {
                 json!({ "message_id": message_id, "embeds": [] })
@@ -873,6 +880,7 @@ impl ApiRequest {
             Self::Embeds(_) => ApiResponse::Embeds(body),
             Self::Favorites(request) => ApiResponse::Favorites(request.decode(body)?),
             Self::Backgrounds(request) => ApiResponse::Backgrounds(request.decode(body)?),
+            Self::Deletion(request) => ApiResponse::Deletion(request.decode(body)?),
             Self::RemoveEmbeds { .. } | Self::VoiceMove(_) => ApiResponse::Done,
             Self::Me => ApiResponse::Me(Box::new(
                 serde_json::from_value(body).map_err(|e| ApiError::Decode(format!("me: {e}")))?,

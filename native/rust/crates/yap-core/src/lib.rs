@@ -7,6 +7,7 @@
 //! ([`store::view`]). The gateway and voice calls still live in the app
 //! crate and plug in through [`runtime::Realtime`].
 
+pub mod account_deletion;
 pub mod admin;
 pub mod api;
 pub mod auth;

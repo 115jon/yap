@@ -226,6 +226,53 @@ request access, correction, deletion, or export by contacting <115jon@proton.me>
 GPL source-offer request and fulfillment records are retained for at least three
 years from the relevant binary distribution date.
 
+## Deleting your account
+
+A user can delete their Yap account in Settings, under Account, in the web,
+desktop and mobile apps. Yap asks them to type their username to confirm. A
+user who owns a server must delete it first.
+
+When a user asks for deletion, Yap at once:
+
+- removes them from every server;
+- shows them to everyone else as "Deleted user", with no avatar, banner,
+  bio, profile board, Activity, guestbook, wishlist or connections;
+- signs them out on every device and forgets their notification tokens.
+
+Their data stays for 30 days so they can change their mind. Signing in
+during that time offers to restore the account, which puts back the profile
+and the servers that still exist and have not banned them. Nothing else on
+Yap works for the account until it is restored.
+
+After 30 days Yap deletes the account's profile, avatar, banner, nameplate,
+profile board and widgets, Activity, guestbook entries, wishlist, settings,
+friends and blocks, reactions, read states, notifications, notification
+tokens, badges, plan, usage counters, connections and favourites, and the
+files it uploaded that are not part of a kept message: avatars, profile and
+board images, generated emojis, camera backgrounds and unfinished uploads.
+Messages it sent in servers and direct messages stay, with their attachments,
+and are shown as from "Deleted user", so the other people in those
+conversations keep their history. The same goes for server soundboard sounds,
+invites, bans and server audit-log entries it made. A user who wants
+particular messages gone should delete them before deleting the account.
+Mentions of the account in other people's messages are text and are not
+rewritten.
+
+Bans and blocks against the account also stay: a server's ban of it, another
+user's block of it and a guestbook block are kept under the account's Kova
+sign-in id, so they still apply if that Kova account signs in to Yap again.
+A server's ban list shows such a ban as "Deleted user".
+
+The kept content is moved to a new "Deleted user" record that is not linked
+to the account's sign-in. The Kova sign-in account (`auth.115jon.com`) is
+not Yap's and is not deleted; it can be deleted from Kova separately, and if
+it is used to sign in to Yap again, Yap creates a new, empty account, to which
+the bans and blocks above still apply. Entries in Yap's site-admin audit log
+about the account (such as a suspension) keep its Kova id as a security
+record. Records listed under "Retention and deletion" as kept for security, legal or
+software-distribution reasons, and backups, follow their own retention
+periods.
+
 ## Security
 
 Yap uses HTTPS and transport encryption for supported network
