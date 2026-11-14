@@ -12,7 +12,8 @@ import Yap.Ui
 // progress, you, mic and deafen; a tap grows the account panel out of it).
 // A voice channel's row joins it (or opens the call you are in there). A
 // tap on the server's name opens its menu (ServerSheet: Invite people, Mark
-// as read); a long press on a channel opens the channel's.
+// as read); a long press on a channel opens the channel's. The search key
+// beside it searches the server's messages (SearchPage).
 Item {
     id: root
 
@@ -177,7 +178,7 @@ Item {
                     anchors.left: parent.left
                     anchors.leftMargin: 16
                     anchors.verticalCenter: parent.verticalCenter
-                    width: Math.min(implicitWidth, status.x - 12 - x - (caret.visible ? caret.width + 6 : 0))
+                    width: Math.min(implicitWidth, (searchKey.visible ? searchKey.x : status.x) - 12 - x - (caret.visible ? caret.width + 6 : 0))
                     textFormat: Text.PlainText
                     text: Nav.home ? qsTr("Direct messages")
                         : Nav.activeServerName.length > 0 ? Nav.activeServerName : qsTr("Yap")
@@ -198,10 +199,30 @@ Item {
                     size: Theme.iconSm
                     color: Theme.ink2
                 }
-                TapHandler {
-                    id: titleTap
-                    enabled: titleBar.menu
-                    onTapped: root.serverMenuRequested()
+                // Beside the search key, not under it: a tap there is the
+                // key's alone.
+                Item {
+                    anchors.left: parent.left
+                    anchors.right: searchKey.visible ? searchKey.left : parent.right
+                    height: parent.height
+                    TapHandler {
+                        id: titleTap
+                        enabled: titleBar.menu
+                        onTapped: root.serverMenuRequested()
+                    }
+                }
+                // Search the server's messages (a channel of it is open:
+                // the search is the open conversation's).
+                IconKey {
+                    id: searchKey
+                    anchors.right: status.left
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: titleBar.menu && Nav.activeChannelId.length > 0
+                    iconName: "search"
+                    tone: "ghost"
+                    tip: qsTr("Search %1").arg(Nav.activeServerName)
+                    onClicked: Router.open("SearchPage")
                 }
                 Led {
                     id: status
