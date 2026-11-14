@@ -1,5 +1,6 @@
 /**
- * Push Service — device push tokens and message pushes over FCM.
+ * Push Service — device push tokens and message pushes over FCM, and the
+ * notification text a device fetches for a push (pushes carry ids only).
  *
  * Token functions accept a D1Database. `sendMessagePushes` and
  * `sendReadPushes` never throw: a push is best effort and must not fail (or
@@ -8,7 +9,9 @@
 
 import type { D1Database } from "@cloudflare/workers-types";
 
+import { resolveChannelAccess } from "@/lib/channel-access";
 import type { FcmMessage, FcmSender } from "@/server/fcm";
+import { blockBetween } from "@/services/block.service";
 
 // ─── Tokens ──────────────────────────────────────────────────────────────────
 
@@ -171,13 +174,18 @@ async function deleteStaleToken(db: D1Database, token: string): Promise<void> {
 }
 
 // ─── Payload ─────────────────────────────────────────────────────────────────
+//
+// A push names no message text, attachment, person, channel or server: FCM
+// (Google) carries it. It holds ids, and the app fetches what it shows
+// (`GET /api/notifications/:id/push`, `notificationPushText` below) with
+// its own session.
 
 /** The Android channel the app creates at startup for message pushes. */
 export const MESSAGES_CHANNEL_ID = "messages";
-const BODY_MAX = 180;
 /** Marks a data-only push the app's native FCM service handles. */
 const NATIVE_FORMAT = "2";
 
+/** One message push: ids only, so no text can reach FCM. */
 export interface MessagePush {
   recipientId: string;
   notificationId: string;
@@ -186,45 +194,27 @@ export interface MessagePush {
   channelId: string;
   serverId: string | null;
   messageId: string;
-  senderName: string;
-  channelName: string | null;
-  serverName: string | null;
-  content: string;
   senderId: string;
-  /** The stored avatar URL as-is; may be a relative `/api/...` path. */
-  senderAvatarUrl: string | null;
   /** ISO time the message was sent. */
   sentAt: string;
 }
 
-function previewOf(push: MessagePush): string {
-  const text = push.content.replace(/\s+/g, " ").trim();
-  if (!text) {
-    if (push.type === "mention") return "Mentioned you";
-    if (push.type === "reply") return "Replied to you";
-    return "Sent an attachment";
-  }
-  return text.length > BODY_MAX
-    ? `${text.slice(0, BODY_MAX - 1).trimEnd()}…`
-    : text;
-}
-
-function titleOf(push: MessagePush): string {
-  if (push.type === "dm" || !push.channelName) return push.senderName;
-  const where = push.serverName
-    ? `#${push.channelName}, ${push.serverName}`
-    : `#${push.channelName}`;
-  return `${push.senderName} (${where})`;
-}
+/** The text a legacy app's system notification shows: the kind, no content. */
+const LEGACY_TEXT: Record<MessagePush["type"], string> = {
+  dm: "New direct message",
+  mention: "New mention",
+  reply: "New reply",
+};
 
 /** A message FCM renders itself: it always has a `notification` block. */
 export type SystemFcmMessage = FcmMessage &
   Required<Pick<FcmMessage, "notification">>;
 
 /**
- * The FCM message for one push: a system notification on the `messages`
- * channel, tagged per conversation so a newer message replaces the older
- * one, and data for the app's deep link.
+ * The FCM message for a legacy (system-rendered) device: a generic system
+ * notification on the `messages` channel, tagged per conversation so a
+ * newer message replaces the older one, and data for the app's deep link.
+ * That app cannot fetch the text, so it shows the kind of message only.
  */
 export function buildMessagePush(push: MessagePush): SystemFcmMessage {
   const tag = `channel:${push.channelId}`;
@@ -238,7 +228,7 @@ export function buildMessagePush(push: MessagePush): SystemFcmMessage {
     tag,
   };
   return {
-    notification: { title: titleOf(push), body: previewOf(push) },
+    notification: { title: "Yap", body: LEGACY_TEXT[push.type] },
     data: push.serverId ? { ...data, serverId: push.serverId } : data,
     android: {
       priority: "HIGH",
@@ -257,12 +247,10 @@ interface NativePushData {
 
 /**
  * The data-only FCM message for a native-format device: no `notification`
- * block, so the app renders it (and can group, reply and clear it). Null
- * values are left out. Avoids the data key `body`, which expo-notifications
- * parses as JSON.
+ * block, so the app renders it (and can group, reply and clear it) after
+ * fetching its text by `notificationId`. Null values are left out.
  */
 export function buildNativeMessagePush(push: MessagePush): FcmMessage {
-  const isChannel = push.type !== "dm" && push.channelName !== null;
   const data: NativePushData = {
     ralph: NATIVE_FORMAT,
     kind: "message",
@@ -272,15 +260,108 @@ export function buildNativeMessagePush(push: MessagePush): FcmMessage {
     notificationId: push.notificationId,
     tag: `channel:${push.channelId}`,
     senderId: push.senderId,
-    senderName: push.senderName,
-    preview: previewOf(push),
     sentAt: push.sentAt,
   };
   if (push.serverId) data.serverId = push.serverId;
-  if (push.senderAvatarUrl) data.senderAvatar = push.senderAvatarUrl;
-  if (isChannel) data.conversation = `#${push.channelName}`;
-  if (isChannel && push.serverName) data.serverName = push.serverName;
   return { data, android: { priority: "HIGH", ttl: "86400s" } };
+}
+
+// ─── Notification text (fetched by the device) ───────────────────────────────
+
+/** The longest preview: what the push itself carried before. */
+export const PREVIEW_MAX = 180;
+
+/** A message's notification line: whitespace folded, at most PREVIEW_MAX. */
+export function previewOf(type: MessagePush["type"], content: string): string {
+  const text = content.replace(/\s+/g, " ").trim();
+  if (!text) {
+    if (type === "mention") return "Mentioned you";
+    if (type === "reply") return "Replied to you";
+    return "Sent an attachment";
+  }
+  const chars = Array.from(text);
+  return chars.length > PREVIEW_MAX
+    ? `${chars
+        .slice(0, PREVIEW_MAX - 1)
+        .join("")
+        .trimEnd()}…`
+    : text;
+}
+
+/** What `GET /api/notifications/:id/push` answers: one notification's text. */
+export interface NotificationPushText {
+  type: MessagePush["type"];
+  channel_id: string;
+  server_id: string | null;
+  message_id: string;
+  sender: {
+    id: string;
+    name: string;
+    /** The stored avatar URL as-is; may be a relative `/api/...` path. */
+    avatar_url: string | null;
+  };
+  /** "#general" for a server channel; null for a DM. */
+  conversation: string | null;
+  server_name: string | null;
+  preview: string;
+}
+
+/**
+ * The text of `userId`'s notification `notificationId`, for the device that
+ * got its push, or null when there is nothing the user may see: not their
+ * notification, the message deleted, the channel no longer visible to them
+ * (left the server or the DM, lost View Channels), or a block between them
+ * and the author either way.
+ */
+export async function notificationPushText(
+  db: D1Database,
+  userId: string,
+  notificationId: string,
+): Promise<NotificationPushText | null> {
+  const row = await db
+    .prepare(
+      `SELECT n.type, n.channel_id, m.id AS message_id, m.author_id, m.content,
+              u.username, u.display_name, u.avatar_url,
+              c.name AS channel_name, c.channel_type, c.server_id,
+              s.name AS server_name
+       FROM notifications n
+       JOIN messages m ON m.id = n.message_id AND m.channel_id = n.channel_id
+       JOIN channels c ON c.id = n.channel_id
+       LEFT JOIN users u ON u.id = m.author_id
+       LEFT JOIN servers s ON s.id = c.server_id
+       WHERE n.id = ? AND n.user_id = ?`,
+    )
+    .bind(notificationId, userId)
+    .first<Record<string, unknown>>();
+  if (!row) return null;
+
+  const type = row.type as string;
+  if (type !== "mention" && type !== "reply" && type !== "dm") return null;
+  const channelId = row.channel_id as string;
+  const authorId = row.author_id as string;
+  const [access, block] = await Promise.all([
+    resolveChannelAccess(db, userId, channelId),
+    blockBetween(db, userId, authorId),
+  ]);
+  if (!access || block) return null;
+
+  const isDm = row.channel_type === "dm" || row.server_id === null;
+  const displayName = (row.display_name as string | null)?.trim();
+  const channelName = row.channel_name as string | null;
+  return {
+    type,
+    channel_id: channelId,
+    server_id: isDm ? null : (row.server_id as string),
+    message_id: row.message_id as string,
+    sender: {
+      id: authorId,
+      name: displayName || (row.username as string | null) || "Someone",
+      avatar_url: (row.avatar_url as string | null) ?? null,
+    },
+    conversation: !isDm && channelName ? `#${channelName}` : null,
+    server_name: isDm ? null : ((row.server_name as string | null) ?? null),
+    preview: previewOf(type, (row.content as string | null) ?? ""),
+  };
 }
 
 // ─── Fan-out ─────────────────────────────────────────────────────────────────

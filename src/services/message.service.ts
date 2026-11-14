@@ -1740,7 +1740,6 @@ export async function generateMessageNotifications(
       }),
     );
   };
-  const senderName = opts.authorDisplayName?.trim() || opts.authorUsername;
   const pushFor = (
     delivered: DeliveredNotification,
     recipientId: string,
@@ -1754,13 +1753,8 @@ export async function generateMessageNotifications(
           channelId: opts.channelId,
           serverId: type === "dm" ? null : serverId,
           messageId: opts.messageId,
-          senderName,
-          channelName:
-            type === "dm" ? null : (channelInfo?.channel_name ?? null),
-          serverName: type === "dm" ? null : (channelInfo?.server_name ?? null),
-          content: snippet,
+          // Ids only: the device fetches the text (push.service.ts).
           senderId: opts.authorId,
-          senderAvatarUrl: opts.authorAvatarUrl ?? null,
           sentAt: now,
         }
       : undefined;

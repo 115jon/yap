@@ -9,6 +9,7 @@ import {
   deletePushToken,
   deleteSessionPushTokens,
   hasNotificationsSinceLastRead,
+  previewOf,
   sendMessagePushes,
   sendReadPushes,
   upsertPushToken,
@@ -22,26 +23,30 @@ const MENTION: MessagePush = {
   channelId: "chan-1",
   serverId: "srv-1",
   messageId: "msg-1",
-  senderName: "Ada",
-  channelName: "general",
-  serverName: "Ralph",
-  content: "hey   @bob\n\nlook at this",
   senderId: "user-9",
-  senderAvatarUrl: "/api/avatars/user-9",
   sentAt: "2026-11-01T10:00:00.000Z",
 };
+
+/** What the message, its sender, channel and server are called. */
+const TEXT = ["hey", "look at this", "Ada", "general", "Ralph", "avatar"];
+
+/** Every key and string value in an FCM message, nested blocks included. */
+function stringsIn(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (value && typeof value === "object") {
+    return Object.entries(value).flatMap(([key, v]) => [key, ...stringsIn(v)]);
+  }
+  return [];
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("buildMessagePush", () => {
-  it("names the sender and the channel, and tags per conversation", () => {
+  it("shows the kind of message only, and tags per conversation", () => {
     expect(buildMessagePush(MENTION)).toEqual({
-      notification: {
-        title: "Ada (#general, Ralph)",
-        body: "hey @bob look at this",
-      },
+      notification: { title: "Yap", body: "New mention" },
       data: {
         type: "mention",
         channelId: "chan-1",
@@ -57,31 +62,84 @@ describe("buildMessagePush", () => {
     });
   });
 
-  it("titles a DM with the sender only and leaves serverId out", () => {
-    const push = buildMessagePush({
-      ...MENTION,
-      type: "dm",
-      serverId: null,
-      channelName: null,
-      serverName: null,
-      content: "",
-    });
+  it("says direct message for a DM and leaves serverId out", () => {
+    const push = buildMessagePush({ ...MENTION, type: "dm", serverId: null });
 
     expect(push.notification).toEqual({
-      title: "Ada",
-      body: "Sent an attachment",
+      title: "Yap",
+      body: "New direct message",
     });
     expect(push.data).not.toHaveProperty("serverId");
   });
+});
 
-  it("trims a long preview with an ellipsis", () => {
-    const { body } = buildMessagePush({
-      ...MENTION,
-      content: "a".repeat(500),
-    }).notification;
+describe("previewOf", () => {
+  it("folds whitespace", () => {
+    expect(previewOf("mention", "hey   @bob\n\nlook at this")).toBe(
+      "hey @bob look at this",
+    );
+  });
+
+  it("trims a long preview with an ellipsis, at the old 180", () => {
+    const body = previewOf("mention", "a".repeat(500));
 
     expect(body).toHaveLength(180);
     expect(body.endsWith("…")).toBe(true);
+  });
+
+  it("does not cut a character in two", () => {
+    const body = previewOf("dm", String.fromCodePoint(0x1f600).repeat(300));
+
+    expect(Array.from(body)).toHaveLength(180);
+    // A lone surrogate would show as a replacement character.
+    expect(body).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  });
+
+  it("names an empty message by its kind", () => {
+    expect(previewOf("dm", "  ")).toBe("Sent an attachment");
+    expect(previewOf("mention", "")).toBe("Mentioned you");
+    expect(previewOf("reply", "")).toBe("Replied to you");
+  });
+});
+
+describe("no message text reaches FCM", () => {
+  it.each(["mention", "reply", "dm"] as const)(
+    "a %s push in either format holds ids only",
+    (type) => {
+      const push = { ...MENTION, type };
+      for (const message of [
+        buildMessagePush(push),
+        buildNativeMessagePush(push),
+      ]) {
+        const strings = stringsIn(message).join("\n");
+        for (const text of TEXT) expect(strings).not.toContain(text);
+      }
+    },
+  );
+
+  it("sends no text to any device format", async () => {
+    const db = createMockD1();
+    db.mockQuery("FROM push_tokens t", {
+      results: [
+        { user_id: "user-2", token: "new", push_format: "native" },
+        { user_id: "user-2", token: "old", push_format: null },
+        { user_id: "user-2", token: "odd", push_format: "future" },
+      ],
+    });
+    const send = vi.fn(
+      async (_token: string, _message: unknown): Promise<FcmSendResult> => ({
+        ok: true,
+      }),
+    );
+
+    await sendMessagePushes(db as never, { send }, [MENTION]);
+
+    expect(send).toHaveBeenCalledTimes(3);
+    for (const [, message] of send.mock.calls) {
+      const strings = stringsIn(message).join("\n");
+      for (const text of TEXT) expect(strings).not.toContain(text);
+      expect(strings).not.toMatch(/preview|senderName|conversation/);
+    }
   });
 });
 
@@ -203,7 +261,7 @@ describe("sendMessagePushes", () => {
 });
 
 describe("buildNativeMessagePush", () => {
-  it("is data-only with the native contract for a channel mention", () => {
+  it("is data-only with ids for a channel mention", () => {
     const message = buildNativeMessagePush(MENTION);
 
     expect(message).not.toHaveProperty("notification");
@@ -218,36 +276,19 @@ describe("buildNativeMessagePush", () => {
       serverId: "srv-1",
       tag: "channel:chan-1",
       senderId: "user-9",
-      senderName: "Ada",
-      senderAvatar: "/api/avatars/user-9",
-      conversation: "#general",
-      serverName: "Ralph",
-      preview: "hey @bob look at this",
       sentAt: "2026-11-01T10:00:00.000Z",
     });
   });
 
-  it("leaves out server, conversation and avatar for a DM without one", () => {
+  it("leaves the server out for a DM", () => {
     const { data } = buildNativeMessagePush({
       ...MENTION,
       type: "dm",
       serverId: null,
-      channelName: null,
-      serverName: null,
-      senderAvatarUrl: null,
-      content: "",
     });
 
     expect(data.type).toBe("dm");
-    expect(data.preview).toBe("Sent an attachment");
-    for (const key of [
-      "serverId",
-      "conversation",
-      "serverName",
-      "senderAvatar",
-    ]) {
-      expect(data).not.toHaveProperty(key);
-    }
+    expect(data).not.toHaveProperty("serverId");
   });
 });
 
