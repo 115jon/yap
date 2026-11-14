@@ -1,0 +1,63 @@
+# The Qt Quick mobile prototype's Rust side (native/mobile/README.md,
+# "Qt Quick on Android"): yap-core behind the same cxx-qt QML singletons and
+# list models the desktop uses, so the desktop's QML runs on it unchanged.
+# Its own workspace, with the desktop's vendored LiveKit
+# crates patched in below (voice calls); the patched qt-build-utils is not
+# needed here.
+[workspace]
+members = ["."]
+resolver = "2"
+
+[package]
+name = "yap_mobile_qt"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+name = "yap_mobile_qt"
+
+[dependencies]
+cxx = "1"
+cxx-qt = "0.10"
+cxx-qt-lib = "0.10"
+# The desktop crates, unchanged, on the rustls backend.
+yap-core = { path = "../../rust/crates/yap-core", default-features = false, features = ["rustls"] }
+yap-cache = { path = "../../rust/crates/yap-cache" }
+yap-protocol = { path = "../../rust/crates/yap-protocol" }
+yap-realtime = { path = "../../rust/crates/yap-realtime", default-features = false, features = ["rustls"] }
+# The view layer shared with the desktop (the Yap.Ui QML module).
+yap-ui = { path = "../../rust/crates/yap-ui" }
+# The session token's sealed file (client.rs).
+yap-mobile-vault = { path = "../vault" }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "1"
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+libc = "0.2"
+# Voice calls: the desktop's call (state machine, sockets, SFU, libwebrtc
+# media, the store's driver) on rustls. Android only: the iOS build is a
+# compile and link check without voice.
+yap-voice = { path = "../../rust/crates/yap-voice", default-features = false, features = ["store", "rustls"] }
+
+[build-dependencies]
+cxx-qt-build = "0.10"
+
+# The desktop's patched LiveKit crates (native/patches, copied by
+# patches/vendor.ps1; build.sh runs it): offers that keep pulled tracks
+# receiving, no AV1. The Media Foundation and D3D11 patches in them build
+# only for Windows.
+[patch.crates-io]
+webrtc-sys = { path = "../../rust/vendor/webrtc-sys" }
+libwebrtc = { path = "../../rust/vendor/libwebrtc" }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = "s"
+strip = "symbols"

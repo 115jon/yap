@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The mark in a 32-unit box (native/assets/svg/splash-logo.svg)
+         as one path: its five blocks, then the ear, eye and nose wound the
+         other way, so they are holes under the nonzero fill rule. -->
+    <string name="yap_mark_cut" translatable="false">M2,0L12,10L2,10ZM2,10L21,10L21,24L2,24ZM21,12L32,12L32,19L21,19ZM17,22L28,22L28,26L17,26ZM4,24L18,24L18,32L4,32ZM4,5L4,9L8,9ZM13,13L13,17L17,17L17,13ZM29,12L29,15L32,15L32,12Z</string>
+
+    <color name="ic_launcher_background">#0b0b0d</color>
+    <!-- The Theme's ply-0 (native/rust/qml/theme/Theme.qml), light. -->
+    <color name="splash_background">#f4f4f5</color>
+    <!-- The Theme's accent ink (yap-ui Theme.qml), light: notifications. -->
+    <color name="yap_accent">#c0127a</color>
+</resources>
