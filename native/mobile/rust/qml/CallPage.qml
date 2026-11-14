@@ -66,7 +66,8 @@ Rectangle {
     readonly property string who: peerName.length > 0 ? peerName : Nav.activeChannelName
     readonly property string unreachable: ringEnd === "busy" ? qsTr("%1 is in another call").arg(who)
         : ringEnd === "unavailable" ? qsTr("%1 can't take calls right now").arg(who)
-        : ringEnd === "invalid" ? qsTr("That call can't be made") : ""
+        : ringEnd === "invalid" ? qsTr("That call can't be made")
+        : ringEnd === "blocked" ? qsTr("You can't call this user") : ""
     // The call's numbers (the desktop's voice details), every 5 s.
     readonly property var calls: {
         try {

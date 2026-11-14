@@ -316,7 +316,8 @@ Item {
                     id: callKey
                     DmCallModel { id: dmCall }
                     anchors.verticalCenter: parent.verticalCenter
-                    visible: root.dm && dmCall.callKey
+                    // No call key in a DM closed by a block (rings are refused).
+                    visible: root.dm && dmCall.callKey && Nav.dmBlock.length === 0
                     iconName: "call"
                     tone: "ghost"
                     tip: dmCall.callKeyLabel
@@ -661,7 +662,7 @@ Item {
         anchors.rightMargin: root.rightInset
         placeholder: root.dm ? qsTr("Message @%1").arg(Nav.activeChannelName)
             : qsTr("Message #%1").arg(Nav.activeChannelName)
-        enabled: !Chat.readOnly
+        enabled: !Chat.readOnly && Nav.dmBlock.length === 0
         onSend: (text, replyToId) => {
             scroll.followEnd = true
             Chat.sendMessage(text, replyToId)
@@ -675,6 +676,57 @@ Item {
         onAttachRequested: {
             attachSheet.active = true
             attachSheet.item.open()
+        }
+    }
+
+    // A DM closed by a block (DmBlockedComposer.tsx): over the composer, the
+    // reason, and Unblock when the block is yours.
+    Rectangle {
+        visible: Nav.dmBlock.length > 0
+        anchors.fill: composer
+        z: 1
+        color: Theme.ply0
+        Accessible.role: Accessible.StaticText
+        Accessible.name: Nav.dmBlockNotice
+        Rectangle {
+            width: parent.width
+            height: 1
+            color: Theme.line
+        }
+        Icon {
+            id: blockLock
+            x: 16
+            anchors.verticalCenter: parent.verticalCenter
+            name: "lock"
+            size: Theme.iconMd
+            color: Theme.ink3
+        }
+        Text {
+            anchors.left: blockLock.right
+            anchors.leftMargin: 12
+            anchors.right: unblockKey.visible ? unblockKey.left : parent.right
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            text: Nav.dmBlockNotice
+            wrapMode: Text.Wrap
+            color: Theme.ink3
+            font: Theme.type.message
+        }
+        KitButton {
+            id: unblockKey
+            visible: Nav.dmBlock === "you_blocked"
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            variant: "secondary"
+            text: qsTr("Unblock")
+            Accessible.name: qsTr("Unblock %1").arg(Nav.dmUsername)
+            onClicked: Friends.act("unblock", Nav.dmUserId, Nav.dmUsername, Nav.dmUsername)
+        }
+        // The composer under it takes no touches.
+        MouseArea {
+            anchors.fill: parent
+            z: -1
         }
     }
 
