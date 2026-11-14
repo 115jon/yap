@@ -760,3 +760,18 @@ CREATE INDEX IF NOT EXISTS idx_account_deletions_reserved_username
 
 CREATE INDEX IF NOT EXISTS idx_account_deletions_due
     ON account_deletions(delete_after);
+
+-- Notification levels and mutes per server, channel and DM (migration 048).
+CREATE TABLE IF NOT EXISTS notification_settings (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    target_type TEXT NOT NULL CHECK (target_type IN ('server', 'channel')),
+    target_id TEXT NOT NULL,
+    level TEXT CHECK (level IS NULL OR level IN ('all', 'mentions', 'none')),
+    muted INTEGER NOT NULL DEFAULT 0,
+    muted_until TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, target_type, target_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_settings_target
+    ON notification_settings(target_type, target_id);

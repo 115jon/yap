@@ -181,7 +181,8 @@ const NATIVE_FORMAT = "2";
 export interface MessagePush {
   recipientId: string;
   notificationId: string;
-  type: "mention" | "reply" | "dm";
+  /** "message": a plain message in a channel set to "all messages". */
+  type: "mention" | "reply" | "dm" | "message";
   channelId: string;
   serverId: string | null;
   messageId: string;

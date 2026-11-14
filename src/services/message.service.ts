@@ -26,6 +26,12 @@ import {
 } from "./embed-fetcher";
 import type { MessagePush } from "./push.service";
 import { usersWhoBlocked } from "./block.service";
+import { shouldNotify } from "@/lib/notification-levels";
+import { resolveChannelAccessForUsers } from "@/lib/channel-access";
+import {
+  effectiveSettingsForUsers,
+  usersWantingAllMessages,
+} from "./notification-settings.service";
 import { callRecordFields } from "./call.service";
 
 const messageHistoryLog = clog("message-history");
@@ -1118,6 +1124,27 @@ async function sendPostprocessingNotifications(
   });
 
   const pushes = notifBroadcasts.flatMap((n) => (n.push ? [n.push] : []));
+  // "All messages" listeners get a push for the rest; no inbox entry, as in
+  // Discord (the inbox keeps what was addressed to you).
+  pushes.push(
+    ...(await generateAllMessagePushes(db, {
+      channelId: task.channelId,
+      messageId: task.messageId,
+      authorId: String(message.author_id),
+      authorUsername: String(message.author_username ?? "User"),
+      authorDisplayName:
+        typeof message.author_display_name === "string"
+          ? message.author_display_name
+          : null,
+      authorAvatarUrl:
+        typeof message.author_avatar_url === "string"
+          ? message.author_avatar_url
+          : null,
+      content: String(message.content ?? ""),
+      contentRevision: task.revision,
+      skip: new Set(notifBroadcasts.map((n) => n.userId)),
+    })),
+  );
   const pushed =
     push && pushes.length > 0 && (await isCurrentRevision())
       ? push(pushes)
@@ -1413,6 +1440,102 @@ export async function getDMRecipients(
   return (results ?? []).map((r) => r.user_id as string);
 }
 
+// ─── generateAllMessagePushes ────────────────────────────────────────────────
+
+/**
+ * Pushes for a server-channel message to the members who chose "all
+ * messages" there and are not muted, can see the channel, did not block the
+ * author, and are not in `skip` (already notified as a mention or reply).
+ * Each goes out once per message: a redelivered task finds its marker and
+ * sends nothing. DMs are left to generateMessageNotifications.
+ */
+export async function generateAllMessagePushes(
+  db: D1Database,
+  opts: {
+    channelId: string;
+    messageId: string;
+    authorId: string;
+    authorUsername: string;
+    authorDisplayName: string | null;
+    authorAvatarUrl: string | null;
+    content: string;
+    contentRevision: number;
+    skip: ReadonlySet<string>;
+  },
+): Promise<MessagePush[]> {
+  const channelInfo = (await db
+    .prepare(
+      `SELECT c.name as channel_name, c.server_id, c.channel_type, s.name as server_name
+       FROM channels c LEFT JOIN servers s ON s.id = c.server_id
+       WHERE c.id = ?`,
+    )
+    .bind(opts.channelId)
+    .first()) as {
+    channel_name: string;
+    server_id: string | null;
+    channel_type: string;
+    server_name: string | null;
+  } | null;
+  if (!channelInfo?.server_id || channelInfo.channel_type === "dm") return [];
+  const serverId = channelInfo.server_id;
+
+  const listeners = (
+    await usersWantingAllMessages(db, opts.channelId, serverId)
+  ).filter((userId) => userId !== opts.authorId && !opts.skip.has(userId));
+  if (listeners.length === 0) return [];
+
+  const blockers = new Set(await usersWhoBlocked(db, opts.authorId));
+  const access = await resolveChannelAccessForUsers(
+    db,
+    opts.channelId,
+    listeners.filter((userId) => !blockers.has(userId)),
+  );
+  const recipients = [...access].flatMap(([userId, decision]) =>
+    decision.kind === "allowed" ? [userId] : [],
+  );
+
+  const now = new Date().toISOString();
+  const pushes: MessagePush[] = [];
+  for (const recipientId of recipients) {
+    const notificationId = `message:${opts.messageId}:message:${recipientId}`;
+    const marker = await db
+      .prepare(
+        `INSERT OR IGNORE INTO notification_delivery_markers
+           (dedupe_key, message_id, notification_id)
+         SELECT ?, ?, ?
+         WHERE EXISTS (
+           SELECT 1 FROM messages m
+            WHERE m.id = ? AND m.content_revision = ?
+         )`,
+      )
+      .bind(
+        `${opts.messageId}:message:${recipientId}`,
+        opts.messageId,
+        notificationId,
+        opts.messageId,
+        opts.contentRevision,
+      )
+      .run();
+    if (Number(marker.meta?.changes ?? 0) === 0) continue;
+    pushes.push({
+      recipientId,
+      notificationId,
+      type: "message",
+      channelId: opts.channelId,
+      serverId,
+      messageId: opts.messageId,
+      senderName: opts.authorDisplayName?.trim() || opts.authorUsername,
+      channelName: channelInfo.channel_name,
+      serverName: channelInfo.server_name,
+      content: opts.content.trim().slice(0, 200),
+      senderId: opts.authorId,
+      senderAvatarUrl: opts.authorAvatarUrl,
+      sentAt: now,
+    });
+  }
+  return pushes;
+}
+
 // ─── generateMessageNotifications ────────────────────────────────────────────
 
 export interface NotificationBroadcast {
@@ -1600,6 +1723,23 @@ export async function generateMessageNotifications(
   // reply or DM notification, so no inbox entry and no push either.
   const blockers = await usersWhoBlocked(db, opts.authorId);
   for (const blockerId of blockers) notifiedUserIds.add(blockerId);
+  // Each recipient's level and mute for this channel (or DM) decide whether
+  // the message notifies them at all (src/lib/notification-levels.ts).
+  const isDm = channelInfo?.channel_type === "dm";
+  const channelRef = { id: opts.channelId, serverId, isDm };
+  const notifiable = async (
+    userIds: readonly string[],
+    addressed: boolean,
+  ): Promise<Set<string>> => {
+    if (userIds.length === 0) return new Set();
+    const settings = await effectiveSettingsForUsers(db, channelRef, userIds);
+    return new Set(
+      userIds.filter((userId) => {
+        const effective = settings.get(userId);
+        return !effective || shouldNotify(effective, addressed);
+      }),
+    );
+  };
   const senderName = opts.authorDisplayName?.trim() || opts.authorUsername;
   const pushFor = (
     delivered: DeliveredNotification,
@@ -1649,10 +1789,15 @@ export async function generateMessageNotifications(
       mentionedUsers.push(...(results ?? []));
     }
 
+    const mentionable = await notifiable(
+      mentionedUsers.map((mu) => mu.id as string),
+      true,
+    );
     for (const mu of mentionedUsers ?? []) {
       const mentionedId = mu.id as string;
       if (mentionedId === opts.authorId || notifiedUserIds.has(mentionedId))
         continue;
+      if (!mentionable.has(mentionedId)) continue;
       notifiedUserIds.add(mentionedId);
 
       const notifId = opts.notificationId?.("mention", mentionedId) ?? genId();
@@ -1707,7 +1852,8 @@ export async function generateMessageNotifications(
     if (
       parentMsg &&
       parentMsg.author_id !== opts.authorId &&
-      !notifiedUserIds.has(parentMsg.author_id)
+      !notifiedUserIds.has(parentMsg.author_id) &&
+      (await notifiable([parentMsg.author_id], true)).has(parentMsg.author_id)
     ) {
       const notifId =
         opts.notificationId?.("reply", parentMsg.author_id) ?? genId();
@@ -1756,8 +1902,9 @@ export async function generateMessageNotifications(
   if (channelInfo?.channel_type === "dm") {
     // Get recipients excluding the author
     const recipients = await getDMRecipients(db, opts.channelId, opts.authorId);
+    const dmNotifiable = await notifiable(recipients, false);
     for (const recipientId of recipients) {
-      if (!notifiedUserIds.has(recipientId)) {
+      if (!notifiedUserIds.has(recipientId) && dmNotifiable.has(recipientId)) {
         notifiedUserIds.add(recipientId);
 
         const notifId = opts.notificationId?.("dm", recipientId) ?? genId();
