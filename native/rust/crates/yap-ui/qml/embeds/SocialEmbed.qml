@@ -1,7 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import com.yap.native
 import Yap.Ui
+import Yap.Platform
 
 // TikTok and Instagram (LinkEmbed.tsx TikTokEmbed :1176, InstagramEmbed
 // :3971): a compact 400 card. The header, the author (32 px avatar, name,
@@ -11,7 +11,7 @@ import Yap.Ui
 // proxy, pictures opening the viewer. Then likes, comments and views, the
 // caption (Instagram leads with the author), "View all N comments" and the
 // sound chip. The card asks the server for fresh media when it shows; with
-// nothing playable TikTok falls back to its own player (WebView2).
+// nothing playable TikTok falls back to its own player (WebEmbedPlayer).
 Rectangle {
     id: root
 
@@ -133,7 +133,7 @@ Rectangle {
             Loader {
                 anchors.fill: parent
                 active: root.current !== null && root.current.type === "video"
-                sourceComponent: EmbedVideo {
+                sourceComponent: InlineVideo {
                     source: root.current.src
                     poster: root.current.poster
                     aspect: root.stageAspect
@@ -142,6 +142,7 @@ Rectangle {
                     framed: false
                     clipTo: root.clipTo
                     name: root.embed.title
+                    link: root.embed.url
                     onExpandRequested: (source, position) => root.expandVideo(source, position)
                 }
             }
@@ -167,7 +168,9 @@ Rectangle {
                 }
             }
 
-            // CarouselControls: ply-3 chevrons and position dots.
+            // CarouselControls: ply-3 chevrons and position dots. Their taps
+            // take the point (ReleaseWithinBounds), so a touch does not also
+            // reach the slide under them.
             Rectangle {
                 visible: root.media.length > 1 && root.index > 0
                 x: 8
@@ -181,7 +184,7 @@ Rectangle {
                 border.color: Theme.line
                 Icon { anchors.centerIn: parent; name: "chevronLeft"; size: Theme.iconSm; color: Theme.ink1 }
                 HoverHandler { id: prevHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: root.index = Math.max(0, root.index - 1) }
+                TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: root.index = Math.max(0, root.index - 1) }
                 Accessible.role: Accessible.Button
                 Accessible.name: qsTr("Previous media")
             }
@@ -199,7 +202,7 @@ Rectangle {
                 border.color: Theme.line
                 Icon { anchors.centerIn: parent; name: "chevronRight"; size: Theme.iconSm; color: Theme.ink1 }
                 HoverHandler { id: nextHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: root.index = Math.min(root.media.length - 1, root.index + 1) }
+                TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: root.index = Math.min(root.media.length - 1, root.index + 1) }
                 Accessible.role: Accessible.Button
                 Accessible.name: qsTr("Next media")
             }
@@ -220,7 +223,7 @@ Rectangle {
                         opacity: index === root.index ? 1 : 0.45
                         scale: index === root.index ? 1 : 0.8
                         HoverHandler { cursorShape: Qt.PointingHandCursor }
-                        TapHandler { onTapped: root.index = parent.index }
+                        TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: root.index = parent.index }
                     }
                 }
             }
@@ -234,7 +237,7 @@ Rectangle {
             visible: !root.embed.renderable
             width: parent.width
             height: Math.min(root.embed.maxHeight, Math.round(width * 16 / 9))
-            WebPlayer {
+            WebEmbedPlayer {
                 anchors.fill: parent
                 visible: root.embed.iframe.length > 0 && (root.embed.state === "iframe" || root.embed.state === "ready")
                 url: root.embed.iframe

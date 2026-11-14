@@ -1,6 +1,6 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
+import Yap.Platform
 
 // One embed (LinkEmbed.tsx), from the row's `embeds` role, by `kind`
 // (store/view/embeds.rs):
@@ -9,16 +9,22 @@ import Yap.Ui
 //             title (14/600 accent ink), up to three lines of description,
 //             then the picture: beside it at 80 x 80 ("thumbnail", 400
 //             wide) or under it at most 300 high ("large", 520 wide).
-//   youtube   YouTubeEmbed: the player in place (WebView2) on click.
-//   spotify   SpotifyEmbed: Spotify's player in place on click.
-//   social    TikTok and Instagram (SocialEmbed): proxied media plays here.
+//   youtube   YouTubeEmbed: the player (WebEmbedPlayer) on click.
+//   spotify   SpotifyEmbed: Spotify's player on click.
+//   social    TikTok and Instagram (SocialEmbed): proxied media.
 //   x         XEmbed: the post, its media grid, quote and counts.
 //   image     bare media inside 640 x 400 (direct links): the viewer.
-//   video     a direct video file, played here (EmbedVideo).
+//   video     a direct video file (InlineVideo).
 //   fallback  a direct link whose media did not load: name and host.
 //   videocard a page's video: its thumbnail opens the page (VideoEmbed).
 //   rich      a rich player: in place when its host is allowed.
 //   status    gone, restricted, failed or loading (EmbedStatus.tsx).
+// Both apps draw these (Yap.Ui). What plays comes from each app's
+// Yap.Platform: WebEmbedPlayer (the web's iframes; the desktop's WebView2
+// player in place, the phone's opens the link outside the app), InlineVideo
+// (the desktop plays in place; the phone shows the poster and opens the
+// page) and InlineAudio (a post's sound preview). Every picture URL is
+// already the API's media proxy's (yap-core store/view/embeds.rs).
 Item {
     id: root
 
@@ -192,7 +198,7 @@ Item {
                             color: Theme.accentInk
                             font.family: Theme.type.panelTitle.family
                             font.pixelSize: 14
-                            font.underline: titleHover.containsMouse
+                            font.underline: Theme.hoverUi && titleHover.containsMouse
                             lineHeight: 20
                             lineHeightMode: Text.FixedHeight
                             Accessible.role: Accessible.Link
@@ -268,7 +274,7 @@ Item {
                     PlayDisc {
                         anchors.centerIn: parent
                         visible: root.embed.play && !richPlayer.playing
-                        hovered: pictureHover.containsMouse
+                        hovered: Theme.hoverUi && pictureHover.containsMouse
                     }
                     MouseArea {
                         id: pictureHover
@@ -289,7 +295,7 @@ Item {
                         sourceComponent: richPlayer.playing ? richComponent : null
                         Component {
                             id: richComponent
-                            WebPlayer {
+                            WebEmbedPlayer {
                                 url: root.embed.player
                                 link: root.embed.url
                                 poster: root.embed.image
@@ -357,11 +363,12 @@ Item {
             sourceComponent: broken ? fallback : player
             Component {
                 id: player
-                EmbedVideo {
+                InlineVideo {
                     source: root.embed.src
                     aspect: parent ? parent.ratio : 16 / 9
                     durationHint: root.embed.duration
                     name: root.embed.name
+                    link: root.embed.url
                     clipTo: root.clipTo
                     preview: true
                     onSizeKnown: (w, h) => ShellState.rememberSize(root.embed.src, w, h)

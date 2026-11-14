@@ -1,59 +1,34 @@
 import QtQuick
-import QtMultimedia
-import Yap.Chrome
-import com.yap.native
 import Yap.Ui
+import Yap.Platform
 
 // The post's sound (LinkEmbed.tsx SocialAudioChip): tint-1, the 40 px art
 // with a play disc over it when there is a preview, the title and artist.
-// The preview plays through the API's media proxy; nothing loads before
-// the click.
+// The preview plays through the API's media proxy, in the app's
+// InlineAudio (Yap.Platform; an app without a player says it cannot, and
+// the chip shows no disc); nothing loads before the click.
 Rectangle {
     id: root
 
     property var audio: null
     property Item clipTo: null
 
-    // The preview plays through Media Foundation (none on Windows N without
-    // the Media Feature Pack).
-    readonly property bool playable: audio !== null && audio.src.length > 0 && Compat.mediaPlayback
-    readonly property bool playing: loader.item !== null && loader.item.playbackState === MediaPlayer.PlayingState
+    readonly property bool playable: audio !== null && audio.src.length > 0 && player.available
+    readonly property bool playing: player.playing
 
     implicitHeight: 56
     radius: Theme.radiusSheet
     color: Theme.tint1
 
-    Loader {
-        id: loader
-        active: false
-        Connections {
-            target: root
-            function onVisibleChanged() {
-                if (!root.visible)
-                    loader.active = false
-            }
-        }
-        sourceComponent: MediaPlayer {
-            source: root.audio ? root.audio.src : ""
-            audioOutput: AudioOutput {
-                muted: ShellState.mediaMuted || ShellState.videoMuted
-                volume: ShellState.videoVolume
-            }
-            Component.onCompleted: play()
-        }
+    InlineAudio {
+        id: player
+        source: root.audio ? root.audio.src : ""
     }
+    onVisibleChanged: if (!visible) player.stop()
 
     function toggle() {
-        if (!playable)
-            return
-        if (!loader.active) {
-            loader.active = true
-            return
-        }
-        if (playing)
-            loader.item.pause()
-        else
-            loader.item.play()
+        if (playable)
+            player.toggle()
     }
 
     Rectangle {

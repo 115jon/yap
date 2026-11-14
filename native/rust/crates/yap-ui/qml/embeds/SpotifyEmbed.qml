@@ -1,6 +1,6 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
+import Yap.Platform
 
 // SpotifyEmbed (LinkEmbed.tsx :2021): Spotify's own player, bare at the
 // compact width, 80 high for a track and 152 for albums, playlists, artists
@@ -82,7 +82,7 @@ Item {
         HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
     }
 
-    WebPlayer {
+    WebEmbedPlayer {
         id: player
         anchors.fill: parent
         visible: active

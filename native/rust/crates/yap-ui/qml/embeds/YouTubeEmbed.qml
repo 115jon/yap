@@ -1,6 +1,6 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
+import Yap.Platform
 
 // YouTubeEmbed (LinkEmbed.tsx :475): the card at the media width (640;
 // Shorts sit in a compact 400 card and stop at 560 high), header, title,
@@ -69,7 +69,7 @@ Rectangle {
             lineHeight: 20
             lineHeightMode: Text.FixedHeight
         }
-        WebPlayer {
+        WebEmbedPlayer {
             readonly property real ratio: root.embed.w / root.embed.h
             width: Math.min(parent.width, root.embed.portrait ? 560 * ratio : parent.width)
             height: Math.round(width / ratio)

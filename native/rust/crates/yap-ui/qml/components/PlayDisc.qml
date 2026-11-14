@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // The play disc (MediaPlayButton.tsx): 48 px, ply-3 with a seam, the
