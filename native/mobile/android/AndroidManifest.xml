@@ -10,10 +10,11 @@
      Android 12+, window background before) hands over to Qt's, which stays
      until main.cpp hides it at the first frame; push notifications
      (the FCM service, the Reply and Mark as read receiver, the permission);
-     and voice calls (the mic, the audio route, the call's service);
+     and voice calls (the mic, the audio route, the call's service, the
+     phone's camera in a call);
      and links into the app (LinkActivity's filters); the composer's Camera
-     (CaptureProvider, where the camera app writes the photo; no camera
-     permission: the system camera takes it).
+     (CaptureProvider, where the camera app writes the photo: the system
+     camera takes it, once the call camera's permission is granted).
      No package attribute: the application id is CMake's YAP_ANDROID_APP_ID
      (Gradle's namespace); the label is YAP_ANDROID_APP_NAME ("Yap", CI's
      "Yap CI"). -->
@@ -38,6 +39,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- The phone's camera in a call (voice/CameraShim): asked at the first
+         Turn on camera; while it captures the call's service carries the
+         camera type too. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <!-- The image viewer's Save image into Pictures/Yap (NativeShim
          saveToGallery): MediaStore needs no permission for the app's own
          pictures from API 29; API 28 (the minimum) needs this one. -->
@@ -51,6 +57,8 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
     <!-- The shim asks which app is the home screen (was this start the
          launcher's? NativeShim.keepsTaskAtRoot). -->
     <queries>
@@ -170,11 +178,12 @@
         </service>
         <!-- The call in progress: the ongoing notification with Mute and
              Leave. Not restarted by the system: the call lives in the
-             process, and ends with it. -->
+             process, and ends with it. Microphone, and camera only while
+             the phone's camera captures (VoiceService.type). -->
         <service
             android:name="dev.yap.qtproto.voice.VoiceService"
             android:exported="false"
-            android:foregroundServiceType="microphone"
+            android:foregroundServiceType="microphone|camera"
             android:stopWithTask="false" />
         <!-- A notification's Reply and Mark as read. -->
         <receiver

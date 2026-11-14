@@ -18,14 +18,17 @@ import androidx.core.app.NotificationManagerCompat;
 import androidx.core.app.ServiceCompat;
 
 /**
- * The call's foreground service (type microphone): it keeps the process
- * and its mic while the app is in the background or the screen is off, and
- * shows the ongoing call notification with Mute and Leave. It holds no call
- * state: VoiceShim starts it when the core's call starts and stops it when
- * the last one ends, and the actions go through VoiceShim to the core.
+ * The call's foreground service (type microphone, and camera while the
+ * phone's camera captures): it keeps the process and its mic while the app
+ * is in the background or the screen is off, and shows the ongoing call
+ * notification with Mute and Leave. It holds no call state: VoiceShim
+ * starts it when the core's call starts and stops it when the last one
+ * ends, and the actions go through VoiceShim to the core.
  *
  * Started only while the app is in front (a join is a tap), which is what
- * lets a microphone service start and keep the mic afterwards.
+ * lets a microphone service start and keep the mic afterwards. The camera
+ * type is added the same way: the camera starts from a tap in front
+ * (CameraShim), and goes again when it stops.
  */
 public final class VoiceService extends Service {
     private static final String TAG = "yap-voice";
@@ -35,6 +38,7 @@ public final class VoiceService extends Service {
     static final String ACTION_REFRESH = "dev.yap.voice.REFRESH";
     static final String ACTION_MUTE = "dev.yap.voice.MUTE";
     static final String ACTION_LEAVE = "dev.yap.voice.LEAVE";
+    static final String ACTION_TYPE = "dev.yap.voice.TYPE";
 
     private static final String CHANNEL = "call";
     /** Clear of the message notifications' ids (conversation hashes). */
@@ -42,6 +46,11 @@ public final class VoiceService extends Service {
 
     /** The service is up and in the foreground (main thread). */
     private static boolean running;
+    /** The phone's camera captures: the service carries the camera type. */
+    private static volatile boolean camera;
+    /** The type the service runs with now (main thread). */
+    private static int runningType;
+    private static final Handler main = new Handler(Looper.getMainLooper());
     /** The created service, for stopping it without a start command. */
     private static VoiceService instance;
     /** The newest start command's id. */
@@ -65,6 +74,18 @@ public final class VoiceService extends Service {
      */
     static void stopNow() {
         if (instance != null) instance.finish(instance.lastStartId);
+    }
+
+    /**
+     * The camera started or stopped (any thread): a running service takes
+     * the camera type while it captures, and drops it after.
+     */
+    static void setCamera(Context context, boolean on) {
+        main.post(() -> {
+            if (camera == on) return;
+            camera = on;
+            if (running) deliver(context, ACTION_TYPE);
+        });
     }
 
     /** The notification's text or actions changed. */
@@ -120,6 +141,8 @@ public final class VoiceService extends Service {
             VoiceShim.leave();
         } else if (ACTION_REFRESH.equals(action)) {
             if (running) post();
+        } else if (ACTION_TYPE.equals(action)) {
+            if (running && type() != runningType) foreground();
         } else if (ACTION_STOP.equals(action)) {
             // A call that began since (a leave, then a join) keeps the
             // service: its own start is on its way.
@@ -157,10 +180,20 @@ public final class VoiceService extends Service {
                         .setDescription("Shown while you are in a voice channel")
                         .setShowBadge(false)
                         .build());
+        int type = type();
         try {
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, build(),
-                    Build.VERSION.SDK_INT >= 30 ? ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE : 0);
+            try {
+                ServiceCompat.startForeground(this, NOTIFICATION_ID, build(), type);
+            } catch (SecurityException e) {
+                if ((type & cameraType()) == 0) throw e;
+                // The camera type was refused (the app went behind first):
+                // the call keeps its microphone service.
+                Log.w(TAG, "no camera type: " + e);
+                type &= ~cameraType();
+                ServiceCompat.startForeground(this, NOTIFICATION_ID, build(), type);
+            }
             running = true;
+            runningType = type;
             return true;
         } catch (RuntimeException e) {
             // No microphone permission, or (Android 12+) the app is not in
@@ -169,6 +202,16 @@ public final class VoiceService extends Service {
             Log.w(TAG, "not a foreground service: " + e);
             return false;
         }
+    }
+
+    /** Microphone, and camera while it captures (API 30+; none before). */
+    private static int type() {
+        if (Build.VERSION.SDK_INT < 30) return 0;
+        return ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE | (camera ? cameraType() : 0);
+    }
+
+    private static int cameraType() {
+        return Build.VERSION.SDK_INT >= 30 ? ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA : 0;
     }
 
     /** Stops, unless a newer start is queued (it carries a later id). */

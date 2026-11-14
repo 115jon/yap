@@ -19,6 +19,7 @@ use yap_protocol::{GatewayCloseCode, GatewayOp};
 use yap_realtime::{Config, Connection, Event, Policy, Reconnect, TicketError, TicketFuture};
 
 use crate::engine::{MediaEngine, MediaSession};
+use crate::layers::CameraEncoding;
 use crate::machine::{
     CallMachine, CallTarget, CameraPublished, Effect, Input, MediaEvent, MediaSpec, MediaState,
     Notice, Published, PullFailure, Republish, RoomEvent, Socket, SocketSpec, Timer, UserCommand,
@@ -250,6 +251,8 @@ struct Io<'a, E: MediaEngine, T, S: ShareCapturer> {
     started: Instant,
     /// When the stats line last went to the log.
     stats_logged: Option<Instant>,
+    /// The host's camera encodings, for a session that opens later.
+    camera_encodings: Option<Vec<CameraEncoding>>,
 }
 
 enum Applied {
@@ -295,6 +298,7 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
             meter: EnergyMeter::default(),
             started: Instant::now(),
             stats_logged: None,
+            camera_encodings: None,
         }
     }
 
@@ -572,6 +576,12 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
                     session.set_camera_live(live);
                 }
             }
+            Effect::SetCameraEncodings(encodings) => {
+                if let Some(session) = &self.session {
+                    session.set_camera_encodings(&encodings);
+                }
+                self.camera_encodings = Some(encodings);
+            }
             Effect::StartShareCapture { token, request } => self.start_capture(token, request),
             Effect::ReleaseShareCapture(token) => {
                 if lock(&self.captures).remove(&token).is_some() {
@@ -785,6 +795,9 @@ impl<'a, E: MediaEngine, T: AdmissionApi, S: ShareCapturer> Io<'a, E, T, S> {
         };
         self.ice_servers = spec.ice_servers.clone();
         inbox.media = Some(states);
+        if let Some(encodings) = &self.camera_encodings {
+            session.set_camera_encodings(encodings);
+        }
         self.session = Some(session.clone());
         let sfu = Sfu::new(
             self.env.http.clone(),

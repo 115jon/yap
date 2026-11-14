@@ -5,10 +5,11 @@
 //! android/src/dev/yap/qtproto/voice): the call notification's Mute and
 //! Leave, and an audio focus loss (a phone call).
 //!
-//! Remote cameras and shares are shown (video.rs); no screen share or
-//! camera from the phone yet, and no RNNoise or per-person panning: those
-//! need the desktop's own audio path. The soundboard and UI sounds play on
-//! the app's speaker (sound.rs), as call audio while a call runs.
+//! Remote cameras and shares are shown (video.rs), and the phone sends its
+//! own camera (camera.rs); no screen share from the phone yet, and no
+//! RNNoise or per-person panning: those need the desktop's own audio path.
+//! The soundboard and UI sounds play on the app's speaker (sound.rs), as
+//! call audio while a call runs.
 
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -19,7 +20,7 @@ use tokio::sync::watch;
 use yap_core::{Api, Command, VoiceCommand, VoiceEvents, VoiceTarget, VoiceUpdate};
 use yap_ui::client;
 use yap_voice::call::{self, Host};
-use yap_voice::{NoCapture, VideoIntent};
+use yap_voice::{CameraEncoding, NoCapture, VideoIntent};
 
 extern "C" {
     /// cpp/voice.cpp: a call runs (or the last one ended), from any thread.
@@ -39,10 +40,17 @@ impl Host for Phone {
 
     fn prepare(&self) {
         crate::video::install_output();
+        // No preview of its own: the self-view shows the frames the call
+        // takes.
+        yap_voice::set_camera_preview(true);
     }
 
     fn video(&self) -> watch::Receiver<VideoIntent> {
         yap_voice::demand::subscribe()
+    }
+
+    fn camera_encodings(&self) -> Option<watch::Receiver<Vec<CameraEncoding>>> {
+        Some(crate::camera::subscribe())
     }
 }
 

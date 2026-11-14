@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as UiFixturesRouteImport } from './routes/ui-fixtures'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as ActivateRouteImport } from './routes/activate'
 import { Route as IndexRouteImport } from './routes/index'
@@ -150,6 +151,11 @@ const SignUpRoute = SignUpRouteImport.update({
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChatRoute = ChatRouteImport.update({
@@ -802,6 +808,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/activate': typeof ActivateRoute
   '/chat': typeof ChatRouteWithChildren
+  '/privacy': typeof PrivacyRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/ui-fixtures': typeof UiFixturesRoute
@@ -931,6 +938,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/activate': typeof ActivateRoute
   '/chat': typeof ChatRouteWithChildren
+  '/privacy': typeof PrivacyRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/ui-fixtures': typeof UiFixturesRoute
@@ -1061,6 +1069,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/activate': typeof ActivateRoute
   '/chat': typeof ChatRouteWithChildren
+  '/privacy': typeof PrivacyRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/ui-fixtures': typeof UiFixturesRoute
@@ -1192,6 +1201,7 @@ export interface FileRouteTypes {
     | '/'
     | '/activate'
     | '/chat'
+    | '/privacy'
     | '/sign-in'
     | '/sign-up'
     | '/ui-fixtures'
@@ -1321,6 +1331,7 @@ export interface FileRouteTypes {
     | '/'
     | '/activate'
     | '/chat'
+    | '/privacy'
     | '/sign-in'
     | '/sign-up'
     | '/ui-fixtures'
@@ -1450,6 +1461,7 @@ export interface FileRouteTypes {
     | '/'
     | '/activate'
     | '/chat'
+    | '/privacy'
     | '/sign-in'
     | '/sign-up'
     | '/ui-fixtures'
@@ -1580,6 +1592,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ActivateRoute: typeof ActivateRoute
   ChatRoute: typeof ChatRouteWithChildren
+  PrivacyRoute: typeof PrivacyRoute
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
   UiFixturesRoute: typeof UiFixturesRoute
@@ -1676,6 +1689,13 @@ declare module '@tanstack/react-router' {
       path: '/sign-in'
       fullPath: '/sign-in'
       preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/chat': {
@@ -2897,6 +2917,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActivateRoute: ActivateRoute,
   ChatRoute: ChatRouteWithChildren,
+  PrivacyRoute: PrivacyRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
   UiFixturesRoute: UiFixturesRoute,

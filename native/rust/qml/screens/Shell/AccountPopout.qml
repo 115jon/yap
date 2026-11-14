@@ -18,16 +18,6 @@ T.Popup {
     property bool statusView: false
 
     readonly property string status: Session.meStatus.length > 0 ? Session.meStatus : "online"
-    readonly property var options: [
-        { value: "online", label: qsTr("Online") },
-        { value: "idle", label: qsTr("Idle") },
-        { value: "dnd", label: qsTr("Do not disturb") },
-        { value: "offline", label: qsTr("Invisible") }
-    ]
-
-    function label(value) {
-        return value === "offline" ? qsTr("Invisible") : Theme.presenceWord(value)
-    }
 
     function openAbove(anchor) {
         anchorItem = anchor
@@ -120,7 +110,7 @@ T.Popup {
                             color: Theme.presenceLed(popup.status)
                         }
                     }
-                    text: popup.label(popup.status)
+                    text: Theme.ownPresenceWord(popup.status)
                     trailingGlyph: "chevronRight"
                     onTriggered: popup.statusView = true
                 }
@@ -155,7 +145,7 @@ T.Popup {
                     onTriggered: popup.statusView = false
                 }
                 Repeater {
-                    model: popup.options
+                    model: Theme.presenceOptions
                     delegate: AccountRowKey {
                         id: option
                         required property var modelData

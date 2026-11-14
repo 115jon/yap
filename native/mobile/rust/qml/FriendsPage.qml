@@ -36,55 +36,27 @@ Rectangle {
     property string openId: ""
     property var confirming: null
 
-    readonly property var model: {
-        try {
-            return JSON.parse(Friends.state)
-        } catch (e) {
-            return {}
-        }
-    }
-    // The tab's rows, replaced only when the rows shown differ (a new array
-    // would rebuild every row; as the desktop's FriendsView).
-    property var branches: []
-    property string branchesKey: ""
-    readonly property int shown: branches.reduce((n, b) => n + b.rows.length, 0)
-
-    function syncBranches() {
-        const next = tab === "pending"
-            ? [{ id: "incoming", label: qsTr("Incoming"), rows: model.incoming ?? [] },
-               { id: "sent", label: qsTr("Sent"), rows: model.sent ?? [] }].filter(b => b.rows.length > 0)
-            : [{ id: tab, label: listLabel(tab), rows: tab === "online" ? model.online ?? []
-                : tab === "all" ? model.all ?? [] : model.blocked ?? [] }]
-        const key = JSON.stringify(next)
-        if (key !== branchesKey) {
-            branchesKey = key
-            branches = next
-        }
+    // The list's state: the tab's rows, the counts, each person's action.
+    FriendsModel {
+        id: friends
+        tab: root.tab
         // A confirmed step that landed closes its strip.
-        if (confirming && actOf(confirming.userId).done > confirming.done) {
-            confirming = null
-            openId = ""
+        onViewChanged: {
+            if (root.confirming && friends.actOf(root.confirming.userId).done > root.confirming.done) {
+                root.confirming = null
+                root.openId = ""
+            }
         }
     }
-    onModelChanged: syncBranches()
     onTabChanged: {
         openId = ""
         confirming = null
-        syncBranches()
     }
 
-    function listLabel(t) {
-        return t === "online" ? qsTr("Online")
-            : t === "all" ? qsTr("All friends")
-            : t === "blocked" ? qsTr("Blocked") : qsTr("Pending")
-    }
-    function actOf(userId) {
-        return model.acts?.[userId] ?? { busy: "", error: "", failed: "", done: 0 }
-    }
     function ask(person, action) {
         // A new step starts clean (not with the last attempt's failure).
         Friends.clear(person.userId)
-        confirming = { userId: person.userId, action: action, done: actOf(person.userId).done }
+        confirming = { userId: person.userId, action: action, done: friends.actOf(person.userId).done }
     }
     function act(person, action) {
         Friends.act(action, person.userId, person.username, person.name)
@@ -105,7 +77,6 @@ Rectangle {
         // Requests wait for you: the page opens on them.
         if (Friends.pending > 0)
             tab = "pending"
-        syncBranches()
         Friends.load()
     }
 
@@ -184,7 +155,7 @@ Rectangle {
 
             Loader {
                 width: parent.width
-                active: root.model.loading === true && root.shown === 0
+                active: friends.loading && friends.shown === 0
                 visible: active
                 sourceComponent: Item {
                     height: 120
@@ -197,13 +168,13 @@ Rectangle {
 
             Loader {
                 width: parent.width
-                active: root.model.loading !== true && root.shown === 0
+                active: !friends.loading && friends.shown === 0
                 visible: active
                 sourceComponent: emptyState
             }
 
             Repeater {
-                model: root.shown > 0 ? root.branches : []
+                model: friends.shown > 0 ? friends.branches : []
                 delegate: Column {
                     id: branch
                     required property var modelData
@@ -252,7 +223,7 @@ Rectangle {
         id: addForm
         Rectangle {
             id: form
-            readonly property var status: root.model.add ?? { kind: "", message: "", sent: 0 }
+            readonly property var status: friends.add
             property int seenSent: 0
             width: parent ? parent.width : 0
             height: formColumn.implicitHeight + 1
@@ -395,7 +366,7 @@ Rectangle {
         id: item
         required property var person
         readonly property string kind: person.kind
-        readonly property var act: root.actOf(person.userId)
+        readonly property var act: friends.actOf(person.userId)
         readonly property bool busy: act.busy.length > 0
         readonly property bool open: root.openId === person.userId
         readonly property string asking: root.confirming && root.confirming.userId === person.userId
