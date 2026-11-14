@@ -14,27 +14,18 @@ import Yap.Ui
 PlateDialog {
     id: dialog
 
-    property string categoryId: ""
-    property bool voice: false
-    property int doneCount: 0
-
-    readonly property var model: JSON.parse(Admin.state)
-    readonly property var act: model.acts["create-channel"] ?? { busy: false, error: "", done: 0 }
-    readonly property string nameError: model.acts["create-channel.name"]?.error ?? ""
-    readonly property string categoryName: model.categories.find(category => category.id === categoryId)?.name ?? ""
+    // The form's state, shared with the phone (Yap.Ui ChannelCreator).
+    readonly property ChannelCreator creator: ChannelCreator {
+        onCreated: if (dialog.opened) dialog.close()
+    }
 
     function openIn(category) {
-        categoryId = category
-        voice = false
         nameField.text = ""
-        Admin.clear("create-channel")
-        Admin.clear("create-channel.name")
-        doneCount = act.done
+        creator.start(category)
         open()
     }
     function create() {
-        if (!act.busy)
-            Admin.createChannel(nameField.text, voice, categoryId)
+        creator.create(nameField.text)
     }
 
     // DialogContent as it stands (the 28/32 title, the close key), top
@@ -42,16 +33,8 @@ PlateDialog {
     c1: true
     placeTop: true
     title: qsTr("Create channel")
-    busy: act.busy
+    busy: creator.busy
     onOpened: nameField.forceActiveFocus()
-    onActChanged: {
-        if (act.done < doneCount)
-            doneCount = act.done
-        else if (opened && act.done > doneCount) {
-            doneCount = act.done
-            close()
-        }
-    }
 
     Column {
         width: parent.width
@@ -68,22 +51,22 @@ PlateDialog {
         }
         ChoiceCard {
             width: parent.width
-            checked: !dialog.voice
+            checked: !dialog.creator.voice
             glyph: "textChannel"
             label: qsTr("Text")
-            description: qsTr("Send messages, images, GIFs, and more.")
+            description: dialog.creator.textHint
             onClicked: {
-                dialog.voice = false
-                nameField.text = Admin.sanitizeChannelName(nameField.text, false, false)
+                dialog.creator.voice = false
+                nameField.text = dialog.creator.clean(nameField.text)
             }
         }
         ChoiceCard {
             width: parent.width
-            checked: dialog.voice
+            checked: dialog.creator.voice
             glyph: "voiceChannel"
             label: qsTr("Voice")
-            description: qsTr("Hang out with voice, video, and screen share.")
-            onClicked: dialog.voice = true
+            description: dialog.creator.voiceHint
+            onClicked: dialog.creator.voice = true
         }
     }
 
@@ -107,31 +90,31 @@ PlateDialog {
             width: parent.width
             // ps-8: 32 in, the glyph at start-2.5.
             leadingInset: 20
-            placeholderText: dialog.voice ? qsTr("General Voice") : qsTr("new-channel")
-            invalid: dialog.nameError.length > 0
+            placeholderText: dialog.creator.placeholder
+            invalid: dialog.creator.nameError.length > 0
             Accessible.name: qsTr("Channel name")
             onTextEdited: {
-                const clean = Admin.sanitizeChannelName(text, dialog.voice, false)
+                const clean = dialog.creator.clean(text)
                 if (clean !== text) {
                     const at = cursorPosition
                     text = clean
                     cursorPosition = Math.min(at, clean.length)
                 }
-                Admin.clear("create-channel.name")
+                dialog.creator.edited()
             }
             Keys.onReturnPressed: dialog.create()
             Icon {
                 x: 10
                 anchors.verticalCenter: parent.verticalCenter
-                name: dialog.voice ? "voiceChannel" : "textChannel"
+                name: dialog.creator.voice ? "voiceChannel" : "textChannel"
                 size: Theme.iconSm
                 color: Theme.ink3
             }
         }
         Text {
-            visible: dialog.nameError.length > 0
+            visible: dialog.creator.nameError.length > 0
             textFormat: Text.PlainText
-            text: dialog.nameError
+            text: dialog.creator.nameError
             color: Theme.dangerInk
             font: Theme.type.caption
             Accessible.role: Accessible.AlertMessage
@@ -139,16 +122,16 @@ PlateDialog {
         }
         Text {
             textFormat: Text.PlainText
-            text: dialog.categoryName.length > 0 ? qsTr("In %1").arg(dialog.categoryName) : qsTr("Not in a category")
+            text: dialog.creator.placeLine
             color: Theme.ink3
             font: Theme.type.description
         }
     }
     Text {
-        visible: dialog.act.error.length > 0
+        visible: dialog.creator.error.length > 0
         width: parent.width
         textFormat: Text.PlainText
-        text: dialog.act.error
+        text: dialog.creator.error
         wrapMode: Text.Wrap
         color: Theme.dangerInk
         font: Theme.type.caption
@@ -161,7 +144,7 @@ PlateDialog {
             variant: "ghost"
             size: "lg"
             text: qsTr("Cancel")
-            enabled: !dialog.act.busy
+            enabled: !dialog.creator.busy
             onClicked: dialog.close()
         },
         KitButton {
@@ -169,7 +152,7 @@ PlateDialog {
             size: "lg"
             ground: Theme.ply3
             text: qsTr("Create channel")
-            loading: dialog.act.busy
+            loading: dialog.creator.busy
             onClicked: dialog.create()
         }
     ]
