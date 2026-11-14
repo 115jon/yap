@@ -207,7 +207,7 @@ impl State {
             // Confirmed: the cache may take the chip now.
             Ok(_) => self.persist_messages(fx),
             Err(error) if error.is_unauthorized() => self.fail(fx, &error),
-            Err(_) => {
+            Err(error) => {
                 let ReactionChange {
                     message_id,
                     emoji,
@@ -216,6 +216,10 @@ impl State {
                 } = &change;
                 self.react_row(fx, message_id, emoji, user_id, !added);
                 self.react_thread_copy(message_id, emoji, user_id, !added);
+                // Refused over a block: the open DM's composer says why.
+                if let Some(channel_id) = self.messages.as_ref().map(|log| log.channel_id.clone()) {
+                    self.note_dm_refusal(fx, &channel_id, &error);
+                }
             }
         }
     }

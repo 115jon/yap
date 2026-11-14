@@ -264,6 +264,41 @@ impl State {
         }
     }
 
+    /// Blocks changed (a list load, `RELATIONSHIP_ADD`/`_REMOVE`): the open
+    /// channel's rows redraw (collapsed or not), and so does the open DM's
+    /// composer.
+    pub(super) fn sync_blocks(&mut self, fx: &mut Effects) {
+        let blocked = crate::store::blocks::blocked_ids(&self.friends.relationships);
+        if blocked == self.friends.blocked_drawn {
+            return;
+        }
+        self.friends.blocked_drawn = blocked;
+        if self.messages.is_some() {
+            fx.messages(crate::store::view::ViewDiff::Reset(self.message_rows()));
+        }
+        self.emit_active_dm(fx);
+    }
+
+    /// A send, reaction or new DM the server refused over a block: the DM's
+    /// composer says why ([`crate::store::blocks`]). True when it was one.
+    pub(super) fn note_dm_refusal(
+        &mut self,
+        fx: &mut Effects,
+        channel_id: &str,
+        error: &ApiError,
+    ) -> bool {
+        let Some(block) = crate::store::blocks::dm_refusal(error) else {
+            return false;
+        };
+        if self.active_channel.as_deref() == Some(channel_id) {
+            self.friends
+                .dm_refusals
+                .insert(channel_id.to_owned(), block);
+            self.emit_active_dm(fx);
+        }
+        true
+    }
+
     /// Sign-out: nothing of one account shows for the next.
     pub(super) fn clear_friends(&mut self) {
         self.friends = Default::default();

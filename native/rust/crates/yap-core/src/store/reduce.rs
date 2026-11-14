@@ -144,6 +144,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
     state.sync_panels(&mut fx);
     state.sync_search(&mut fx);
     state.sync_friends(&mut fx);
+    state.sync_blocks(&mut fx);
     state.sync_invites(&mut fx);
     state.sync_apps(&mut fx);
     state.sync_deletion(&mut fx);
@@ -282,6 +283,7 @@ impl State {
                 .and_then(|server| self.members.get(server))
                 .map_or(&[], Vec::as_slice),
             dm_recipient: self.active_dm().map(|dm| &dm.recipient),
+            relationships: &self.friends.relationships,
         }
     }
 
@@ -3437,6 +3439,19 @@ impl State {
             // An odd body: the gateway echo still reconciles the row.
             Ok(_) => {}
             Err(error) if error.is_unauthorized() => self.fail(fx, &error),
+            // A DM closed by a block: the message never will go, so its row
+            // leaves (no Retry) and the composer says why.
+            Err(error) if super::blocks::dm_refusal(&error).is_some() => {
+                if let Some(outgoing) = self.outbox.remove(nonce) {
+                    let channel_id = outgoing.message.channel_id;
+                    self.remove_row(fx, &pending_id(nonce));
+                    self.note_dm_refusal(fx, &channel_id, &error);
+                } else if toast_reply.is_some() {
+                    if let Some(block) = super::blocks::dm_refusal(&error) {
+                        fx.view(ViewUpdate::Notice(block.notice().to_owned()));
+                    }
+                }
+            }
             Err(_) if self.outbox.contains_key(nonce) => self.set_send_failed(fx, nonce, true),
             // A toast reply to a channel that is not open has no row to
             // mark failed: say so, with the text.
@@ -3894,7 +3909,10 @@ impl State {
             }
             Dispatch::TypingStart(typing) => {
                 let me = self.me().map(|me| me.id.as_str()).unwrap_or_default();
-                if typing.channel_id == active && typing.user_id != me {
+                // Someone we blocked types unseen.
+                let blocked =
+                    super::blocks::has_blocked(&self.friends.relationships, &typing.user_id);
+                if typing.channel_id == active && typing.user_id != me && !blocked {
                     self.typing_generation += 1;
                     let generation = self.typing_generation;
                     let user_id = typing.user_id;

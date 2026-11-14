@@ -197,7 +197,8 @@ Item {
             // has someone in it; hidden while we are in it or it rings.
             IconKey {
                 DmCallModel { id: dmCall }
-                visible: dmCall.callKey
+                // No call key in a DM closed by a block (the server refuses rings).
+                visible: dmCall.callKey && Nav.dmBlock.length === 0
                 iconName: "call"
                 tone: "muted"
                 tipSide: "bottom"

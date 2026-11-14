@@ -27,6 +27,10 @@ Item {
     property bool voice: false
     // No Send messages here (ComposerReadOnly): the lock line instead.
     property bool readOnly: false
+    // Why it is read-only, when not the permission (a DM closed by a block:
+    // Nav.dmBlockNotice); `unblock` adds the Unblock key (your own block).
+    property string lockedNotice: ""
+    property bool unblock: false
     // The message being replied to (empty: none): ComposerCore's.
     property alias replyToId: core.replyToId
     property alias replyToName: core.replyToName
@@ -190,15 +194,30 @@ Item {
         Text {
             id: lockedText
             x: 48
-            width: parent.width - x - 12
+            width: parent.width - x - 12 - (unblockKey.visible ? unblockKey.width + 8 : 0)
             topPadding: 13
             bottomPadding: 13
-            text: qsTr("You don't have permission to send messages in this channel.")
+            text: root.lockedNotice.length > 0 ? root.lockedNotice
+                : qsTr("You don't have permission to send messages in this channel.")
             wrapMode: Text.Wrap
             color: Theme.ink3
             font: Theme.type.message
             lineHeight: Theme.type.messageLine
             lineHeightMode: Text.FixedHeight
+        }
+        // A DM with someone you blocked (DmBlockedComposer.tsx): Unblock.
+        KitButton {
+            id: unblockKey
+            visible: root.unblock
+            anchors.right: parent.right
+            anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            size: "sm"
+            variant: "secondary"
+            ground: Theme.ply2
+            text: qsTr("Unblock")
+            Accessible.name: qsTr("Unblock %1").arg(Nav.dmUsername)
+            onClicked: Friends.act("unblock", Nav.dmUserId, Nav.dmUsername, Nav.dmUsername)
         }
     }
 

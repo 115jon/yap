@@ -350,10 +350,15 @@ impl State {
     /// quietly ("answered_elsewhere").
     pub(super) fn on_call_ring_stop(&mut self, fx: &mut Effects, stop: CallRingStop) {
         if stop.call_id.is_none() {
-            // Our op 36 was refused (busy, unavailable, invalid). The
-            // server sends it to this socket only, also while a ring is up
-            // here; a stop for a known call says nothing about our op 36.
+            // Our op 36 was refused (busy, unavailable, invalid, blocked).
+            // The server sends it to this socket only, also while a ring is
+            // up here; a stop for a known call says nothing about our op 36.
             self.calls.initiating = None;
+            if stop.reason == "blocked" {
+                fx.view(ViewUpdate::Notice(
+                    crate::store::blocks::CALL_BLOCKED.to_owned(),
+                ));
+            }
         }
         // A stop for another call (a ring we declined while busy) is not ours.
         let ours = self.calls.ring.as_ref().and_then(|r| r.call_id.as_deref());

@@ -1026,7 +1026,10 @@ Rectangle {
         dm: Nav.dmUsername.length > 0
         // A voice channel's chat: "Message lounge" (composerPrompt isVoice).
         voice: root.docked
-        readOnly: Chat.readOnly && Nav.dmUsername.length === 0
+        // A DM closed by a block (Nav.dmBlock) is read-only with the reason.
+        readOnly: (Chat.readOnly && Nav.dmUsername.length === 0) || Nav.dmBlock.length > 0
+        lockedNotice: Nav.dmBlockNotice
+        unblock: Nav.dmBlock === "you_blocked"
         enabled: Nav.activeChannelId.length > 0
         onSend: (text, replyToId) => Chat.sendMessage(text, replyToId)
         onEditLast: root.startEdit(Chat.lastEditableId())

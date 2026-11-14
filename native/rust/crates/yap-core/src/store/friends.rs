@@ -169,6 +169,10 @@ impl FriendsRequest {
 /// `addFriendError`): 404 unknown username, 400 yourself, 409 already
 /// friends, pending or blocked.
 pub fn add_friend_error(error: &ApiError) -> String {
+    // A block either way (403 blocked by them, 409 blocked by you).
+    if let Some(sentence) = super::blocks::block_sentence(error) {
+        return sentence.to_owned();
+    }
     match error {
         ApiError::Http { status: 404, .. } => {
             "No one has that username. Check the spelling and try again.".into()
@@ -218,6 +222,11 @@ pub struct FriendsState {
     pub add: AddStatus,
     /// By user id.
     pub acts: BTreeMap<String, PersonAct>,
+    /// DMs the server refused over a block, by channel id (the open DM's
+    /// only: leaving it forgets, so coming back tries again).
+    pub dm_refusals: BTreeMap<String, super::blocks::DmBlock>,
+    /// The blocked ids the message rows were last drawn with.
+    pub blocked_drawn: Vec<String>,
 }
 
 impl FriendsState {

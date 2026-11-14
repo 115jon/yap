@@ -310,6 +310,9 @@ rows! {
         /// A DM call record's line (CallRecordRow.tsx, [`call_line`]):
         /// JSON `{tone, text, duration}`, empty for any other message.
         call: String => Call "call",
+        /// The author is someone the signed-in user blocked: the row is
+        /// collapsed to "Blocked message" with Show ([`super::blocks`]).
+        blocked: bool => Blocked "blocked",
     }
     key(row) -> String { row.id.clone() }
 
@@ -789,6 +792,11 @@ pub struct DmView {
     /// Their picture (absolute) and decoration, for the DM's welcome.
     pub avatar: String,
     pub deco: String,
+    /// A block closes the composer: `you_blocked` (Unblock), `blocked_you`,
+    /// or empty ([`super::blocks::DmBlock`]).
+    pub block: String,
+    /// The composer's notice for `block`, empty when open.
+    pub block_notice: String,
 }
 
 /// The call, as the sidebar shows it. Empty ids and `false` when not in one;
@@ -2001,6 +2009,8 @@ pub(super) struct RowContext<'a> {
     pub members: &'a [Member],
     /// The open DM's other person (a call record's callee name).
     pub dm_recipient: Option<&'a User>,
+    /// The signed-in user's relationships (whose messages collapse).
+    pub relationships: &'a [yap_protocol::rest::Relationship],
 }
 
 /// formatCallDuration: 0:07, 4:12, 1:02:03.
@@ -2248,6 +2258,7 @@ pub(super) fn message_row(
                 .or_else(|| author.and_then(|a| a.display_name_style.as_ref())),
         ),
         call: call_line(message, ctx),
+        blocked: !mine && super::blocks::has_blocked(ctx.relationships, &message.author_id),
     }
 }
 

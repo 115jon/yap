@@ -12,6 +12,7 @@
 mod admin;
 pub mod apps;
 pub mod backgrounds;
+pub mod blocks;
 pub mod board;
 pub mod calls;
 pub mod deletion;

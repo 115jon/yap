@@ -1326,6 +1326,10 @@ pub fn describe_api_error(error: &ApiError, action: &str) -> String {
     if let Some(sentence) = error.refusal_sentence() {
         return sentence.to_owned();
     }
+    // A block: the server's sentence is written for people.
+    if let Some(sentence) = crate::store::blocks::block_sentence(error) {
+        return sentence.to_owned();
+    }
     // The too-big spec: the server's own number, never "too large" alone.
     if let ApiError::Http {
         status: 413,

@@ -161,6 +161,10 @@ pub mod qobject {
         #[qproperty(QString, dm_username, cxx_name = "dmUsername")]
         #[qproperty(QString, dm_avatar, cxx_name = "dmAvatar")]
         #[qproperty(QString, dm_deco, cxx_name = "dmDeco")]
+        /// A block closes the open DM's composer: `you_blocked` (with
+        /// Unblock), `blocked_you`, or empty; and the notice it shows.
+        #[qproperty(QString, dm_block, cxx_name = "dmBlock")]
+        #[qproperty(QString, dm_block_notice, cxx_name = "dmBlockNotice")]
         /// Unread DMs: the rail shows three, the Home key counts the rest.
         #[qproperty(i32, dm_unread, cxx_name = "dmUnread")]
         type Nav = super::NavRust;
@@ -828,6 +832,8 @@ pub struct NavRust {
     dm_username: QString,
     dm_avatar: QString,
     dm_deco: QString,
+    dm_block: QString,
+    dm_block_notice: QString,
     dm_unread: i32,
 }
 

@@ -504,6 +504,7 @@ fn first_page_should_project_messages_like_before() {
             deco: String::new(),
             name_style: String::new(),
             call: String::new(),
+            blocked: false,
         }
     );
     assert!(list[0].attachments.contains(r#""name":"notes.txt""#));
