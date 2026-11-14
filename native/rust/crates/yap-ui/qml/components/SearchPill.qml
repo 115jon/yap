@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // What a result carries (SearchResultItem.tsx ATTACHMENT_PILL): 24 high,

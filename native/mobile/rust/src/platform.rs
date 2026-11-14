@@ -11,6 +11,18 @@ use std::sync::Once;
 /// Android, and nothing to initialise over JNI. (A release build would use
 /// rustls-platform-verifier, which honours user-installed CAs.)
 pub fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .use_preconfigured_tls(tls_config())
+        .user_agent(concat!("YapMobile/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .expect("HTTP client")
+}
+
+/// The TLS configuration every client of the app uses: rustls with ring and
+/// the bundled web roots, HTTP/1.1.
+pub fn tls_config() -> rustls::ClientConfig {
     static PROVIDER: Once = Once::new();
     PROVIDER.call_once(|| {
         // The gateway's tokio-tungstenite builds its own config from the
@@ -24,13 +36,7 @@ pub fn http_client() -> reqwest::Client {
         .with_root_certificates(roots)
         .with_no_client_auth();
     tls.alpn_protocols = vec![b"http/1.1".to_vec()];
-    reqwest::Client::builder()
-        .use_preconfigured_tls(tls)
-        .user_agent(concat!("YapMobile/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .expect("HTTP client")
+    tls
 }
 
 // ---- Logging ---------------------------------------------------------------

@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // A filter chip (SearchPanel.tsx FilterChip): 24 high, up to 220, tint-2,

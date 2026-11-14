@@ -9,7 +9,8 @@ import Yap.Ui
 // (search options, recent searches), a static skeleton while loading, the
 // failure and empty states, or the results grouped by channel with the
 // count, the sort and paging. A result jumps to its message through
-// `Chat.jumpToMessage`. The store owns the rules; this draws `Search.state`.
+// `Chat.jumpToMessage`. The store owns the rules; SearchCore (Yap.Ui, the
+// phone's page uses it too) reads them, and this draws its rows.
 SidePanelFrame {
     id: root
 
@@ -21,78 +22,20 @@ SidePanelFrame {
     // The panel ply (search marks are solid over it): a ply-0 column.
     property color ground: Theme.ply0
 
-    property var view: ({})
-    // Rebuilt only when their part of the state changes, so typing does not
-    // recreate the result rows (and the scroll position holds).
-    property var suggestionRows: []
-    property var idleRows: []
-    property var resultRows: []
-    property string suggestionKey
-    property string idleKey
-    property string resultKey
-    property int generation: -1
-
-    readonly property string stateJson: Search.state
-    onStateJsonChanged: parse()
-
-    readonly property bool suggestionsShown: view.suggestionsOpen === true
-    readonly property bool canLoadMore: view.status === "success" && view.hasMore === true
-        && view.loadMoreFailed !== true
-
-    function flattenOptions(groups) {
-        const rows = []
-        for (const group of groups ?? []) {
-            rows.push({ heading: group.heading, first: rows.length === 0 })
-            for (const item of group.items)
-                rows.push({ option: item })
-        }
-        return rows
+    // The rules and rows, shared with the phone's page.
+    SearchCore {
+        id: core
+        onGenerationChanged: body.contentY = 0
     }
-
-    function parse() {
-        let next
-        try {
-            next = JSON.parse(root.stateJson)
-        } catch (error) {
-            next = {}
-        }
-        root.view = next
-        const groups = JSON.stringify(next.groups ?? [])
-        if (groups !== root.suggestionKey) {
-            root.suggestionKey = groups
-            root.suggestionRows = root.flattenOptions(next.groups)
-        }
-        const idle = JSON.stringify(next.idle ?? [])
-        if (idle !== root.idleKey) {
-            root.idleKey = idle
-            root.idleRows = root.flattenOptions(next.idle)
-        }
-        const results = JSON.stringify([next.scope, next.results ?? []])
-        if (results !== root.resultKey) {
-            root.resultKey = results
-            const rows = []
-            for (const group of next.results ?? []) {
-                if (next.scope === "server")
-                    rows.push({ header: group, first: rows.length === 0 })
-                for (const item of group.items)
-                    rows.push({ result: item })
-            }
-            root.resultRows = rows
-        }
-        if (next.generation !== undefined && next.generation !== root.generation) {
-            root.generation = next.generation
-            body.contentY = 0
-        }
-    }
+    readonly property var view: core.view
+    readonly property bool suggestionsShown: core.suggestionsShown
 
     function jump(result) {
-        Search.opened(result.id)
-        Chat.jumpToMessage(result.channelId, result.id)
+        core.jump(result)
     }
 
     function maybeLoadMore() {
-        if (root.canLoadMore && !root.suggestionsShown && body.contentY + body.height >= body.contentHeight - 320)
-            Search.loadMore()
+        core.maybeLoadMore(body)
     }
 
     // Arrow keys between results; up from the first goes back to the field.
@@ -114,8 +57,7 @@ SidePanelFrame {
     }
 
     Component.onCompleted: {
-        parse()
-        Search.open("", Date.now())
+        core.open("")
         field.focusInput()
     }
 
@@ -185,7 +127,7 @@ SidePanelFrame {
             topPadding: 4
             bottomPadding: 16
             Repeater {
-                model: root.suggestionRows
+                model: core.suggestionRows
                 delegate: Loader {
                     id: suggestionRow
                     required property var modelData
@@ -198,7 +140,7 @@ SidePanelFrame {
                             lit: suggestionRow.modelData.option.id === root.view.activeId
                             onHovered: Search.hover(option.id)
                             onPicked: {
-                                Search.pick(option.id, Date.now())
+                                core.pick(option.id)
                                 field.focusInput()
                             }
                             onLitChanged: {
@@ -277,11 +219,7 @@ SidePanelFrame {
                     Accessible.role: Accessible.Grouping
                     Accessible.name: qsTr("Sort results")
                     Repeater {
-                        model: [
-                            { key: "newest", label: qsTr("Newest") },
-                            { key: "oldest", label: qsTr("Oldest") },
-                            { key: "relevant", label: qsTr("Relevant") },
-                        ]
+                        model: core.sorts
                         delegate: SearchSortKey {
                             required property var modelData
                             text: modelData.label
@@ -296,11 +234,11 @@ SidePanelFrame {
             Column {
                 x: 8
                 width: parent.width - 16
-                visible: root.view.status === "idle" || root.view.status === undefined
+                visible: core.idle
                 topPadding: 4
                 bottomPadding: 24
                 Repeater {
-                    model: root.idleRows
+                    model: core.idleRows
                     delegate: Loader {
                         id: idleRow
                         required property var modelData
@@ -312,7 +250,7 @@ SidePanelFrame {
                                 option: idleRow.modelData.option
                                 activeFocusOnTab: true
                                 onPicked: {
-                                    Search.pick(option.id, Date.now())
+                                    core.pick(option.id)
                                     field.focusInput()
                                 }
                             }
@@ -367,7 +305,7 @@ SidePanelFrame {
 
             SearchEmpty {
                 width: parent.width
-                visible: root.view.status === "success" && root.resultRows.length === 0
+                visible: root.view.status === "success" && core.resultRows.length === 0
                 title: qsTr("No messages found")
                 message: root.view.emptyDescription ?? ""
                 actionText: root.view.filtered === true ? qsTr("Clear search") : ""
@@ -382,11 +320,11 @@ SidePanelFrame {
                 id: resultColumn
                 x: 8
                 width: parent.width - 16
-                visible: root.view.status === "success" && root.resultRows.length > 0
+                visible: root.view.status === "success" && core.resultRows.length > 0
                 bottomPadding: 24
                 Repeater {
                     id: resultRepeater
-                    model: root.resultRows
+                    model: core.resultRows
                     delegate: Loader {
                         id: resultRow
                         required property var modelData

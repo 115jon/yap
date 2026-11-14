@@ -7,7 +7,7 @@ name: "Desktop Native Validation"
 # - test: `cargo test` for the workspace, the app crate (yap_native) and
 #   yap-ui included: their build scripts need Qt, which the pinned toolchain
 #   provides. yap-audio stays out (it needs an audio device), as in the
-#   release workflow.
+#   release workflow, but for its app side (player, ui), which needs none.
 # - build: build.ps1's Release Yap.exe, unsigned; its size goes to the job
 #   summary and the exe to a short-lived artifact.
 #
@@ -126,6 +126,13 @@ jobs:
           Push-Location native/rust
           cargo test --workspace --locked --exclude yap-audio --target-dir ../build/test-target
           $code = $LASTEXITCODE
+          # yap-audio's app side (the clip player, the UI sounds), which the
+          # desktop and the phone share: its own tests need no device.
+          if (-not $code) {
+            $env:YAP_NULL_SPEAKER = "1"
+            cargo test -p yap-audio --locked --features store --lib --target-dir ../build/test-target -- player:: ui::
+            $code = $LASTEXITCODE
+          }
           Pop-Location
           exit $code
 

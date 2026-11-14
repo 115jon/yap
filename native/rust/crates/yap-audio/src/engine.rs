@@ -706,7 +706,7 @@ impl Worker {
             let client = {
                 let _entered = runtime.enter();
                 // The stream's host is the API or a CDN, never this machine.
-                reqwest::Client::builder()
+                crate::client_setup(reqwest::Client::builder())
                     .connect_timeout(Duration::from_secs(10))
                     .dns_resolver(crate::guard::PublicResolver)
                     .build()

@@ -1,7 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import com.yap.native
 import Yap.Ui
+import Yap.Platform
 
 // An X post's media (LinkEmbed.tsx XMediaGrid :2664, XMediaTile :2851).
 // One item keeps its own aspect inside 520 x 420 (240 x 180 `compact`, a
@@ -19,6 +19,9 @@ Item {
     property Item clipTo: null
     // A link chip over a single tile (the post's link card).
     property string chip: ""
+    // The post the media is from (InlineVideo opens it where it cannot
+    // play in place).
+    property string link: ""
 
     signal openImage(var images, int index)
     signal expandVideo(string source, int position)
@@ -98,13 +101,14 @@ Item {
         Loader {
             anchors.fill: parent
             active: tile.item.type === "video"
-            sourceComponent: EmbedVideo {
+            sourceComponent: InlineVideo {
                 source: tile.item.src
                 poster: tile.item.poster
                 aspect: tile.item.w > 0 && tile.item.h > 0 ? tile.item.w / tile.item.h : 16 / 9
                 durationHint: tile.item.duration
                 framed: tile.framed
                 clipTo: root.clipTo
+                link: root.link
                 onExpandRequested: (source, position) => root.expandVideo(source, position)
             }
         }
@@ -114,6 +118,7 @@ Item {
             sourceComponent: XGifTile {
                 item: tile.item
                 clipTo: root.clipTo
+                link: root.link
                 onOpenViewer: root.expandVideo(tile.item.src, 0)
             }
         }

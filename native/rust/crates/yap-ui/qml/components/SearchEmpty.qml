@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // The panel's failure and empty states (ui/empty-state.tsx, size sm,
