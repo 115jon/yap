@@ -257,6 +257,15 @@ export const PATCH = async ({ request, params }: any) => {
     return apiError("content or embeds required", 400);
   }
 
+  // No edits (content or embed removal) in a 1:1 DM closed by a block.
+  if ((accessResult as { serverId: string | null }).serverId === null) {
+    const block = await dmBlockState(db, userId, channelId);
+    if (block) {
+      const refusal = blockRefusal(block);
+      return apiError(refusal.message, refusal.status, refusal.code);
+    }
+  }
+
   try {
     // Removing embeds (no content change)
     if (Array.isArray(body.embeds) && !body.content?.trim()) {

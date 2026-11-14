@@ -13,6 +13,7 @@ import {
   pinMessage,
   unpinMessage,
 } from "@/services/message.service";
+import { blockRefusal, dmBlockState } from "@/services/block.service";
 import { executeBroadcast } from "@/services/service-helpers";
 import { Schema } from "effect";
 import { looseStruct, withDefault } from "@/lib/schema";
@@ -94,6 +95,15 @@ export const PUT = async ({ request, params }: any) => {
       "Insufficient permissions (MANAGE_MESSAGES required)",
     );
     if (permResult instanceof Response) return permResult;
+  } else {
+    // A DM: only its members pin, and not in a 1:1 DM closed by a block.
+    const accessResult = await requireChannelAccess(userId, channelId);
+    if (accessResult instanceof Response) return accessResult;
+    const block = await dmBlockState(db, userId, channelId);
+    if (block) {
+      const refusal = blockRefusal(block);
+      return apiError(refusal.message, refusal.status, refusal.code);
+    }
   }
 
   try {

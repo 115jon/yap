@@ -5500,7 +5500,7 @@ export class MeetingRoom extends DurableObject<Env> {
   }
 
   /**
-   * Refuses a send or reaction in a 1:1 DM closed by a block (either way),
+   * Refuses a send, edit or reaction in a 1:1 DM closed by a block (either way),
    * with the same copy as the REST routes. True when refused; a failed
    * lookup refuses too.
    */
@@ -5756,6 +5756,12 @@ export class MeetingRoom extends DurableObject<Env> {
         op: Op.Error,
         d: { code: 4004, message: "Message not found or not owner" },
       });
+      return;
+    }
+    if (
+      access.serverId === null &&
+      (await this.refuseBlockedDm(ws, session.user_id, messageRow.channel_id))
+    ) {
       return;
     }
 
