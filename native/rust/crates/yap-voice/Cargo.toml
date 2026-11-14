@@ -12,7 +12,7 @@ default = ["libwebrtc", "native-tls", "store"]
 # linking WebRTC (`cargo test -p yap-voice --no-default-features`).
 libwebrtc = ["dep:libwebrtc", "dep:webrtc-sys", "dep:cc", "dep:webrtc-sys-build", "dep:futures-util"]
 # The TLS backend, as yap-core picks it: native-tls (SChannel) on the
-# desktop, rustls on Android (desktop-native/mobile).
+# desktop, rustls on Android (native/mobile).
 native-tls = ["reqwest/native-tls", "yap-realtime/native-tls", "yap-core?/native-tls"]
 rustls = ["reqwest/rustls-no-provider", "yap-realtime/rustls", "yap-core?/rustls"]
 # The call plugged into yap-core's store (src/call.rs): what the desktop

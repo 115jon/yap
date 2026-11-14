@@ -63,7 +63,7 @@ impl Fixture {
         self.paths.roaming_app_data.join("Yap")
     }
 
-    /// The Tauri installer's layout (`desktop/installer`).
+    /// The Tauri installer's layout (`desktop/installer` on `archive/tauri-desktop`).
     fn install_tauri(&self) {
         let root = self.tauri_root();
         fs::create_dir_all(root.join("app-3.13.0")).expect("mkdir");

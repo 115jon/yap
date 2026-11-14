@@ -1,4 +1,4 @@
-//! The in-app updater's rules (desktop-native/docs/INSTALLER.md, "Updates"),
+//! The in-app updater's rules (native/docs/INSTALLER.md, "Updates"),
 //! without Velopack or Qt: where the feed is, which channel files it reads,
 //! whether this copy updates itself at all, when it checks, which releases a
 //! pinned version allows, and what the UI shows. The restart prompt waits

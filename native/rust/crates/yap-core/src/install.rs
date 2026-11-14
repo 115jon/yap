@@ -1,5 +1,5 @@
 //! The app's installed identity, and what the installer's hooks and the app
-//! at launch may touch (desktop-native/docs/INSTALLER.md).
+//! at launch may touch (native/docs/INSTALLER.md).
 //!
 //! Velopack installs the app under its own root
 //! (`%LOCALAPPDATA%\Yap.App\current\Yap.exe`) and runs the executable with

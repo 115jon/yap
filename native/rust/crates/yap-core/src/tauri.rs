@@ -4,7 +4,8 @@
 //! it kept on this PC (docs/INSTALLER.md, "Replacing the Tauri app").
 //!
 //! The Tauri app (`desktop/installer`, `InstallEnvironment.cs`,
-//! `InstallerLogic.cs`) installs per user to `%LOCALAPPDATA%\Yap`:
+//! `InstallerLogic.cs`, on the `archive/tauri-desktop` branch) installs per
+//! user to `%LOCALAPPDATA%\Yap`:
 //! `Yap.exe` (the root stub), `Update.exe` (a copy of `YapSetup.exe`, the
 //! uninstaller), `current.json` and `app-<version>\`. It writes
 //! `HKCU\...\Uninstall\Yap` (`QuietUninstallString` `"<root>\Update.exe"

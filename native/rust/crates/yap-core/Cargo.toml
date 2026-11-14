@@ -27,7 +27,7 @@ yap-protocol.workspace = true
 [features]
 # The TLS backend: native-tls (SChannel on Windows) for desktop, rustls
 # (no system OpenSSL) for Android and iOS. The caller of `runtime::spawn`
-# brings a client built for rustls (desktop-native/mobile).
+# brings a client built for rustls (native/mobile).
 default = ["native-tls", "desktop"]
 native-tls = ["reqwest/native-tls"]
 rustls = ["reqwest/rustls-no-provider"]

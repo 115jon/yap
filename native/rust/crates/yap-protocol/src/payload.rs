@@ -1,7 +1,7 @@
 //! Typed `d` payloads for the opcodes the native client sends or reads.
 //!
 //! Mirrors `packages/protocol/src/{client,server}-payloads.ts` and
-//! `desktop-native/VOICE_PROTOCOL.md`. Like the TypeScript schemas these are
+//! `native/VOICE_PROTOCOL.md`. Like the TypeScript schemas these are
 //! deliberately loose: unknown fields are ignored (never `deny_unknown_fields`)
 //! and a field is required only when the client reads it without a fallback.
 
