@@ -154,6 +154,17 @@ foreach(mode RANGE ${YAP_NAME_EFFECT_LAST})
     FILES shaders/namefx.frag
     OUTPUTS name-${effect}.frag.qsb)
 endforeach()
+# Their vertex stage (shaders/namefx.vert, Qt's own with the fragment's
+# GLSL versions; the phone's OpenGL ES needs the two to match).
+qt_add_shaders(YapNative yap_name_vertex
+  PREFIX /shaders
+  BASE shaders
+  GLSL "300es,330"
+  HLSL 50
+  MSL 12
+  PRECOMPILE
+  FILES shaders/namefx.vert
+  OUTPUTS namefx.vert.qsb)
 # Avatars and server icons come as PNG, JPEG, WebP or GIF over HTTPS. Call
 # video renders through Qt Multimedia's VideoOutput, whose QVideoSink needs
 # a media backend (Windows Media Foundation; nothing is decoded by it).
