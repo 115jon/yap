@@ -29,6 +29,10 @@ dependencies {
     // Push notifications (src/dev/yap/qtproto/push); the version the Expo
     // app's notifications build against.
     implementation 'com.google.firebase:firebase-messaging:25.0.1'
+    // Video and sound previews (src/dev/yap/qtproto/media): Media3's player
+    // and its PlayerView, full screen (the phone's Qt has no Multimedia).
+    implementation 'androidx.media3:media3-exoplayer:1.8.0'
+    implementation 'androidx.media3:media3-ui:1.8.0'
 }
 
 // Firebase without the google-services plugin: the string resources it

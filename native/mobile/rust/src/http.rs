@@ -144,7 +144,7 @@ impl Drop for Sink {
 
 /// Its own two threads, apart from the core's (whose runtime is private):
 /// a burst of avatars must not queue behind the store's work.
-fn runtime() -> &'static Runtime {
+pub(crate) fn runtime() -> &'static Runtime {
     static RUNTIME: OnceLock<Runtime> = OnceLock::new();
     RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
@@ -159,7 +159,7 @@ fn runtime() -> &'static Runtime {
 /// The core's client settings (`platform::http_client`: rustls, the
 /// bundled roots) without its 30-second cap on the whole request: a large
 /// GIF on a slow link may take longer, so only a stalled read times out.
-fn client() -> &'static reqwest::Client {
+pub(crate) fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         // Installs the process's crypto provider, as the core's client does.
