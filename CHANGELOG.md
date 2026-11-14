@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.1.5](https://github.com/115jon/yap/compare/v4.1.4...v4.1.5) (2026-11-14)
+
+
+### Bug Fixes
+
+* **api:** route third-party media through a signed media proxy ([01e1d39](https://github.com/115jon/yap/commit/01e1d3994ea8389954a950601b2fe862e56f29b3))
+
 ## [4.1.4](https://github.com/115jon/yap/compare/v4.1.3...v4.1.4) (2026-11-13)
 
 
