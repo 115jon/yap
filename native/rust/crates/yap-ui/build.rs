@@ -65,6 +65,7 @@ fn main() {
         QmlFile::from("qml/components/SearchSortKey.qml"),
         QmlFile::from("qml/components/SettingSwitch.qml"),
         QmlFile::from("qml/components/SizeMeter.qml"),
+        QmlFile::from("qml/components/SoundboardCore.qml"),
         QmlFile::from("qml/components/Spinner.qml"),
         QmlFile::from("qml/components/TabRule.qml"),
         QmlFile::from("qml/components/TooBigCard.qml"),
