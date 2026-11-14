@@ -16,10 +16,9 @@ export type SocketTicketAudience = "global" | "room" | "voice";
  *   nonce. Identify sends neither MediaReady nor credentials in Ready.
  * - `held`: the client holds credentials from an earlier participant of this
  *   join (a reconnect). Resume sends none; an Identify (a new participant)
- *   mints them as before, in MediaReady and Ready.
+ *   mints them, in MediaReady and Ready.
  *
- * Absent (the deprecated two-request flow on `/api/voice/socket-ticket`):
- * Identify and Resume mint as they always did.
+ * Absent (a global ticket): Identify mints as for `held`; Resume sends none.
  */
 export type SocketTicketMedia = "issued" | "held";
 

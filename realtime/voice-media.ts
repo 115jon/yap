@@ -7,9 +7,8 @@
  *   join, for the room ticket's participant;
  * - MeetingRoom op 40 RefreshVoiceCredentials, before the token's hour runs
  *   out;
- * - MeetingRoom Identify and Resume, only for room tickets that did not come
- *   with credentials (SocketTicketMedia), which includes every ticket from
- *   the deprecated `/api/voice/socket-ticket` room audience.
+ * - MeetingRoom Identify, only for tickets that did not come with
+ *   credentials (SocketTicketMedia `held`, or none).
  *
  * See realtime/ADMISSION.md.
  */

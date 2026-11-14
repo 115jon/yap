@@ -17,10 +17,6 @@ import {
   defaultStreamHandler,
 } from "@tanstack/react-start/server";
 import { logger } from "./src/lib/logger";
-import {
-  getCorsHeaders,
-  handleCorsPreflightIfNeeded,
-} from "./src/lib/api-helpers";
 import { buildHealthzPayload } from "./src/lib/healthz";
 import { handleAssetLinksRequest } from "./src/server/assetlinks";
 import { legacyHostRedirect } from "./src/server/legacy-host";
@@ -107,31 +103,6 @@ type VerifiedWebSocketRequest = {
 
 function unauthorizedWebSocket(reason: string) {
   return new Response(reason, { status: 401 });
-}
-
-function withDesktopCors(request: Request, response: Response): Response {
-  try {
-    const headers = getCorsHeaders(request);
-    if (!Object.keys(headers).length) return response;
-
-    const nextHeaders = new Headers(response.headers);
-    for (const [key, value] of Object.entries(headers)) {
-      nextHeaders.set(key, value);
-    }
-
-    const hasNoBody =
-      response.status === 204 ||
-      response.status === 304 ||
-      response.status < 200;
-    return new Response(hasNoBody ? null : response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: nextHeaders,
-    });
-  } catch (e) {
-    console.error("Error applying desktop CORS headers:", e);
-    return response;
-  }
 }
 
 function buildDocumentContentSecurityPolicy(authOrigin: string): string {
@@ -225,8 +196,6 @@ function isAllowedRealtimeOrigin(request: Request, env: Env): boolean {
 
   const allowedOrigins = new Set([
     new URL(request.url).origin,
-    "http://tauri.localhost",
-    "https://tauri.localhost",
     ...(env.REALTIME_ALLOWED_ORIGINS ?? "")
       .split(",")
       .map((value) => value.trim())
@@ -325,14 +294,8 @@ export default {
     const legacyRedirect = legacyHostRedirect(request);
     if (legacyRedirect) return legacyRedirect;
 
-    // ── CORS preflight for desktop Tauri webview ──────────────────────────
-    // http://tauri.localhost is a cross-origin context. OPTIONS preflights
-    // must be answered before any auth or routing logic runs.
-    const preflight = handleCorsPreflightIfNeeded(request);
-    if (preflight) return preflight;
-
     if (url.pathname === "/api/healthz" && request.method === "GET") {
-      return withDesktopCors(request, Response.json(buildHealthzPayload()));
+      return Response.json(buildHealthzPayload());
     }
 
     const assetLinks = handleAssetLinksRequest(request);
@@ -385,34 +348,31 @@ export default {
           path: url.pathname,
           retry_after_ms: result.resetMs,
         });
-        return withDesktopCors(
-          request,
-          new Response(
-            JSON.stringify({
-              error: "Too many requests",
-              retry_after_ms: result.resetMs,
-            }),
-            {
-              status: 429,
-              headers: {
-                "Content-Type": "application/json",
-                "Retry-After": String(Math.ceil(result.resetMs / 1000)),
-                "X-RateLimit-Remaining": "0",
-              },
+        return new Response(
+          JSON.stringify({
+            error: "Too many requests",
+            retry_after_ms: result.resetMs,
+          }),
+          {
+            status: 429,
+            headers: {
+              "Content-Type": "application/json",
+              "Retry-After": String(Math.ceil(result.resetMs / 1000)),
+              "X-RateLimit-Remaining": "0",
             },
-          ),
+          },
         );
       }
     }
 
     if (/^\/api\/channels\/[^/]+\/partytracks(?:\/|$)/u.test(url.pathname)) {
       const response = await handlePartyTracksProxyRequest(request, env);
-      if (response) return withDesktopCors(request, response);
+      if (response) return response;
     }
 
     const ytdlpResponse = await handleYtDlpRequest(request, _ctx);
     if (ytdlpResponse) {
-      return withDesktopCors(request, ytdlpResponse);
+      return ytdlpResponse;
     }
 
     // ── Global Main Gateway WebSocket → MeetingRoom DO ────────────────
@@ -483,7 +443,7 @@ export default {
       );
     }
     if (url.pathname.startsWith("/api/")) {
-      return withDesktopCors(request, response);
+      return response;
     }
     return withDocumentSecurityHeaders(request, response, env);
   },

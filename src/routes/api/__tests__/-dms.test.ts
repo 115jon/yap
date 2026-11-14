@@ -86,16 +86,11 @@ describe("GET /api/dms", () => {
     const { GET } = dmRoutes(testServices({ auth: memoryAuth(SESSIONS) }));
 
     const res = await GET({
-      request: new Request("https://meet.test/api/dms", {
-        headers: { origin: "http://tauri.localhost" },
-      }),
+      request: new Request("https://meet.test/api/dms"),
     });
 
     expect(res.status).toBe(401);
     await expect(res.json()).resolves.toEqual({ error: "Unauthorized" });
-    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(
-      "http://tauri.localhost",
-    );
   });
 
   it("answers 401 when Kova refuses the credentials", async () => {
@@ -239,17 +234,11 @@ describe("POST /api/dms", () => {
       const { POST } = routes();
 
       const res = await POST({
-        request: post(
-          { target_user_id: target },
-          { origin: "http://tauri.localhost" },
-        ),
+        request: post({ target_user_id: target }),
       });
 
       expect(res.status).toBe(status);
       await expect(res.json()).resolves.toEqual({ error });
-      expect(res.headers.get("Access-Control-Allow-Origin")).toBe(
-        "http://tauri.localhost",
-      );
       expect(errorLog).not.toHaveBeenCalled();
     },
   );

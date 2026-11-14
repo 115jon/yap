@@ -436,10 +436,9 @@ function readBearerToken(request: Request): string | null {
 /**
  * Authenticated PartyTracks proxy for the root Worker.
  *
- * PartyTracks' built-in initiator lock uses a SameSite cookie, which cannot be
- * returned by the deployed Worker to the Tauri origin. Ralph therefore uses a
- * signed, participant-bound session capability in place of the raw Cloudflare
- * session id. Remote capabilities may be referenced for pulls, while only the
+ * PartyTracks' built-in initiator lock uses a SameSite cookie, which native
+ * clients do not keep. Yap therefore uses a signed, participant-bound session
+ * capability in place of the raw Cloudflare session id. Remote capabilities may be referenced for pulls, while only the
  * owner may place a capability in the mutable session URL.
  *
  * Creating a session and pushing local tracks only need the voice token: that

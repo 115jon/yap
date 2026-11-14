@@ -3,10 +3,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
   apiSuccess,
   buildVoiceChannelRoomSlug,
-  getCorsHeaders,
   getDB,
   getEnv,
-  handleCorsPreflightIfNeeded,
   requireAuth,
 } from "@/lib/api-helpers";
 import { validateBody } from "@/lib/validate-body";
@@ -19,17 +17,7 @@ export const voiceDisconnectBodySchema = looseStruct({
   voice_session_id: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
-const OPTIONS = async ({ request }: any) => {
-  return (
-    handleCorsPreflightIfNeeded(request) ??
-    new Response(null, { status: 204, headers: getCorsHeaders(request) })
-  );
-};
-
 export const POST = async ({ request, params }: any) => {
-  const preflight = handleCorsPreflightIfNeeded(request);
-  if (preflight) return preflight;
-
   const authResult = await requireAuth(request);
   if (authResult instanceof Response) return authResult;
 
@@ -128,7 +116,6 @@ export const POST = async ({ request, params }: any) => {
 export const Route = createFileRoute("/api/channels/$id/voice-disconnect")({
   server: {
     handlers: {
-      OPTIONS,
       POST,
     },
   },

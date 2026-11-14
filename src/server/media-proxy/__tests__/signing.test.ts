@@ -171,11 +171,8 @@ describe("media pass", () => {
     expect(mediaPassCookie("", 0)).toContain("Max-Age=0");
   });
 
-  it("is SameSite=Lax, and None only for the desktop webview", () => {
+  it("is SameSite=Lax", () => {
     expect(mediaPassCookie("v", 60)).toContain("SameSite=Lax");
     expect(mediaPassCookie("v", 60)).not.toContain("SameSite=None");
-    expect(mediaPassCookie("v", 60, { crossSite: true })).toContain(
-      "SameSite=None",
-    );
   });
 });

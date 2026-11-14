@@ -201,7 +201,7 @@ interface VoiceAttachment {
     subject: string;
     /**
      * Tickets from /api/voice/admission: the only participant this socket
-     * may identify as. Deprecated two-request tickets leave it unset.
+     * may identify as. Unset when the admission named no participant.
      */
     boundParticipantId?: string;
   };
