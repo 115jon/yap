@@ -825,6 +825,22 @@ open one, highlighted as on the desktop). The search stays open for the
 next visit after a result, so the key brings the same query back; Back
 closes it.
 
+### Pins and threads
+
+The chat header has a pin key (every conversation) and a threads key (a
+server channel). The pin key opens `PinsPage`: the conversation's pinned
+messages, newest first, on the desktop pins panel's `PinsModel` (in
+`Yap.Ui`, which loads the core's `PinnedMessageModel` and follows the open
+channel). A tap on a pin closes the page and shows the message in the
+chat (`Chat.jumpToMessage`, highlighted as after a search). The lit pin key
+on a row unpins it after a confirmation. The threads key opens
+`ThreadsPage`: the channel's threads by latest reply (`Panels.listThreads`,
+loaded again each time the page shows). A tap opens the thread page, and
+Back returns to the list. The message sheet offers Pin message or Unpin
+message (`MessageActionModel`) to someone with Manage messages, Manage
+channels or Manage server, or to either person in a DM. A DM closed by a
+block offers neither: the server refuses pins there.
+
 ### Invites and links
 
 Handing out an invite, and opening one, as the Expo app does
