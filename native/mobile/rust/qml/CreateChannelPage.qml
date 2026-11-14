@@ -69,10 +69,10 @@ Rectangle {
             }
         }
     }
-    Component.onCompleted: {
-        creator.start(categoryId)
-        nameField.forceActiveFocus()
-    }
+    // No focus on the name at once: focus given while the page is still
+    // being pushed raises the keyboard, but its typing never reaches the
+    // field.
+    Component.onCompleted: creator.start(categoryId)
 
     function create() {
         Qt.inputMethod.commit()
