@@ -340,6 +340,14 @@ QString DesktopShell::profile() const
   return QString::fromStdWString(profile::name());
 }
 
+QUrl DesktopShell::licensesUrl() const
+{
+  const QString dir = QCoreApplication::applicationDirPath() + QStringLiteral("/licenses");
+  if (!QFile::exists(dir + QStringLiteral("/THIRD_PARTY_NOTICES.md")))
+    return {};
+  return QUrl::fromLocalFile(dir);
+}
+
 void DesktopShell::setProcessIdentity()
 {
   SetCurrentProcessExplicitAppUserModelID(aumid().c_str());

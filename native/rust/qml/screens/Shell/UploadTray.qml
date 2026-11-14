@@ -5,10 +5,11 @@ import Yap.Ui
 
 // The composer's attachments (AttachmentList.tsx): 96 px tiles 8 px apart,
 // wrapping, at most 256 high. A finished tile shows its picture (or the
-// type glyph and name), the size chip, the sensitive toggle and, on hover,
-// Remove. One still going is dimmed with its progress and a cancel key
-// (a chunked one, 16 MB and up, reads its bytes in the size chip: "54/150
-// MB", formatUploadProgress); a failed one says so and offers Retry.
+// type glyph and name), the size chip, the sensitive toggle (pictures and
+// videos) and, on hover, Remove. One still going is dimmed with its
+// progress and a cancel key (a chunked one, 16 MB and up, reads its bytes
+// in the size chip: "54/150 MB", formatUploadProgress); a failed one says
+// so and offers Retry.
 //
 // A file over the limit is never uploaded: it stays as a too-big card
 // (toobig-spec.md: pose A, its name, "31.2 MB · 6.2 MB over the 25 MB
@@ -243,9 +244,10 @@ Item {
                         }
                     }
 
-                    // Sensitive toggle, bottom left (finished tiles).
+                    // Sensitive toggle, bottom left (finished pictures and
+                    // videos: a text file or an archive has nothing to blur).
                     Rectangle {
-                        visible: tile.done
+                        visible: tile.done && (tile.kind === "image" || tile.kind === "video")
                         anchors.left: parent.left
                         anchors.bottom: parent.bottom
                         anchors.margins: 4

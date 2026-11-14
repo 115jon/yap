@@ -912,6 +912,13 @@ pub const PANELS: &[PanelDef] = &[
                         "Get new versions before everyone else. Betas can have rough edges.",
                         &["update", "beta", "channel", "preview", "early"],
                     ),
+                    // The licences folder the installer ships (DesktopShell::licensesUrl).
+                    row(
+                        "open-source-licences",
+                        "Open source licences",
+                        "The licences of the libraries, fonts and icons Yap is built with.",
+                        &["licence", "license", "open source", "third party", "notices", "legal", "about"],
+                    ),
                 ],
             ),
         ],

@@ -11,6 +11,35 @@ Third-party binaries are shipped as their vendors released them and keep
 their vendors' signatures. They are not described as Yap-signed because the
 installer carries them.
 
+## Where the licence texts ship
+
+Both apps carry this file and the full licence texts, put together at build
+time by [`tools/gather-licenses.ps1`](tools/gather-licenses.ps1):
+
+- this file, and Yap's own licence as `LICENSE-Yap.txt`;
+- the texts kept in [`licenses/`](licenses): Qt's LGPL-3.0 and GPL-3.0
+  (`Qt-LGPL-3.0-only.txt`, `Qt-GPL-3.0-only.txt`), the licence and
+  copyright of each third-party component in the Qt modules the apps link
+  (`Qt-third-party.txt`, from Qt's `qt_attribution.json` files), the
+  `LICENSE.md` of the platform's libwebrtc prebuilt (shipped as
+  `libwebrtc-LICENSE.md`; the Windows and Android archives list different
+  components), the
+  emoji-mart licence (`emoji-mart-data-LICENSE.txt`) and the standard
+  Apache-2.0 and MPL-2.0 texts. [`tools/refresh-licenses.ps1`](tools/refresh-licenses.ps1)
+  regenerates them from the Qt source release, the libwebrtc archive and
+  the npm package when one of those changes;
+- the fonts' and icons' licences from `assets/fonts/` and `assets/icons/`;
+- `rust-crates.txt`: every Rust crate built into the app for its target,
+  with the licence its manifest declares and the licence and notice files
+  the crate ships, read from cargo's sources by `cargo metadata`.
+
+On Windows they are in the install folder: this file beside `Yap.exe` and
+everything in `licenses\` (`tools/package.ps1`); Settings > Desktop app >
+Open source licences opens that folder. The OBS hook's and ONNX Runtime's
+own licence files stay beside their binaries (below). On Android they are
+APK assets under `assets/licenses/` (`mobile/CMakeLists.txt`), shown in
+Settings > About > Open source licences.
+
 ## Windows client
 
 ### Qt 6.11.3 (LGPL-3.0)
@@ -122,8 +151,8 @@ licence not on its allow list. For the Windows target the list is: MIT,
 Apache-2.0, BSD-3-Clause, ISC, Zlib, 0BSD, BSL-1.0, Unlicense, Unicode-3.0,
 BlueOak-1.0.0, CDLA-Permissive-2.0 (`webpki-roots`, Mozilla's root list)
 and MPL-2.0 (`symphonia` 0.5.5, file-level copyleft). Run
-`cargo deny list -l license` in `rust/` for the per-crate list. There is no
-generated per-crate notice file yet.
+`cargo deny list -l license` in `rust/` for the per-crate list. The
+packages carry each crate's licence files in `rust-crates.txt` (above).
 
 ## Android app
 
@@ -138,4 +167,5 @@ The Qt Android app (`dev.yap.app`) runs the same Rust core and QML:
 - The fonts, icons and emoji data above.
 - From Maven, under the licences in their POMs: `androidx.core:core` 1.17.0
   and `com.google.firebase:firebase-messaging` 25.0.1
-  (`mobile/android/build.gradle`).
+  (`mobile/android/build.gradle`), both Apache-2.0 (`Apache-2.0.txt`). The
+  libraries Gradle resolves under them are not listed here yet.

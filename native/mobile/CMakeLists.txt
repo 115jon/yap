@@ -105,6 +105,21 @@ if(ANDROID)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       ${YAP_WEBRTC_EXPORT}/libwebrtc.jar ${CMAKE_CURRENT_BINARY_DIR}/android-build/libs/libwebrtc.jar
     VERBATIM)
+
+  # The third-party notices and licence texts, as APK assets
+  # (assets/licenses; Gradle packs android-build/assets): Settings > About >
+  # Open source licences reads them (Native.licenseFiles). Gathered on every
+  # build, for this ABI's crates (tools/gather-licenses.ps1, PowerShell 7,
+  # which build.sh already needs for patches/vendor.ps1).
+  find_program(YAP_PWSH pwsh REQUIRED)
+  add_custom_target(yap_licenses
+    COMMAND ${YAP_PWSH} -NoProfile -File ${DESKTOP}/tools/gather-licenses.ps1
+      -Out ${CMAKE_CURRENT_BINARY_DIR}/android-build/assets/licenses
+      -Manifest ${CMAKE_CURRENT_SOURCE_DIR}/rust/Cargo.toml
+      -CargoTarget ${Rust_CARGO_TARGET_CACHED}
+      -Cargo ${Rust_CARGO_CACHED}
+    VERBATIM)
+  add_dependencies(yapqt yap_licenses)
 endif()
 
 # The application id and version: the packaging block at the end.
