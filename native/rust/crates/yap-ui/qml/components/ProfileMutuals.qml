@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // ProfileSections' "Mutual servers" and "Mutual friends" (ProfileCard.tsx):
@@ -23,7 +22,11 @@ Column {
 
     width: parent ? parent.width : 0
     spacing: 16
-    visible: (serverInfo !== null && serverInfo.count > 0) || (friendInfo !== null && friendInfo.count > 0)
+    // Something to show (for a parent's visibility: `visible` also follows
+    // the parent's).
+    readonly property bool any: (serverInfo !== null && serverInfo.count > 0) || (friendInfo !== null && friendInfo.count > 0)
+
+    visible: any
 
     Section {
         title: qsTr("Mutual servers")
