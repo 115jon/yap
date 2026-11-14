@@ -8,6 +8,9 @@
 //! Remote cameras and shares are shown (video.rs), and the phone sends its
 //! own camera (camera.rs); no screen share from the phone yet, and no
 //! RNNoise or per-person panning: those need the desktop's own audio path.
+//! Per-person volume and local mute are heard (libwebrtc's own playout
+//! gain per remote track) and kept per signed-in user in the desktop's
+//! voice settings file ([`peer_audio`], [`set_peer_audio`]).
 //! The soundboard and UI sounds play on the app's speaker (sound.rs), as
 //! call audio while a call runs.
 
@@ -17,10 +20,11 @@ use std::time::Duration;
 
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::watch;
+use yap_cache::voice::{self as saved_voice, PeerSettings, VoiceSettings};
 use yap_core::{Api, Command, VoiceCommand, VoiceEvents, VoiceTarget, VoiceUpdate};
 use yap_ui::client;
-use yap_voice::call::{self, Host};
-use yap_voice::{CameraEncoding, NoCapture, VideoIntent};
+use yap_voice::call::{self, CallAudio, Host};
+use yap_voice::{peer_gain, CameraEncoding, NoCapture, Playback, VideoIntent};
 
 extern "C" {
     /// cpp/voice.cpp: a call runs (or the last one ended), from any thread.
@@ -116,9 +120,70 @@ pub fn spawn(
     });
 }
 
-/// Signed in: a call the last process died in is reported as left.
+/// Signed in: a call the last process died in is reported as left, and
+/// this user's per-person volumes are heard from now on.
 pub fn signed_in(api: &Api, user_id: &str) {
     call::send_stale_beacon(api, user_id);
+    let settings = yap_cache::settings::app_dir()
+        .map(|dir| saved_voice::load_voice(&dir, user_id))
+        .unwrap_or_default();
+    let mut peers = PEERS.lock().unwrap_or_else(PoisonError::into_inner);
+    hear(&settings);
+    *peers = Some((user_id.to_owned(), settings));
+}
+
+/// The signed-in user and their voice settings (only the per-person
+/// volumes are the phone's to change; the rest is kept as the file has it).
+static PEERS: Mutex<Option<(String, VoiceSettings)>> = Mutex::new(None);
+
+/// What calls hear of each person: their volumes and mutes. The phone sets
+/// nothing else of the call's audio, so the rest stays at its defaults.
+fn hear(settings: &VoiceSettings) {
+    call::set_call_audio(CallAudio {
+        playback: Playback {
+            peers: settings
+                .peer_settings
+                .iter()
+                .map(|(id, p)| (id.clone(), peer_gain(p.volume, p.muted)))
+                .collect(),
+            ..Playback::default()
+        },
+        ..CallAudio::default()
+    });
+}
+
+/// Someone's volume (0..=400) and our local mute for them; the defaults
+/// before sign-in.
+pub fn peer_audio(user_id: &str) -> (u16, bool) {
+    let peers = PEERS.lock().unwrap_or_else(PoisonError::into_inner);
+    let peer = peers
+        .as_ref()
+        .map(|(_, settings)| settings.peer(user_id))
+        .unwrap_or_default();
+    (peer.volume, peer.muted)
+}
+
+/// Sets someone's volume and mute, heard at once; `save` writes the file.
+pub fn set_peer_audio(user_id: &str, volume: u16, muted: bool, save: bool) {
+    let mut peers = PEERS.lock().unwrap_or_else(PoisonError::into_inner);
+    let Some((me, settings)) = peers.as_mut() else {
+        return;
+    };
+    let peer = PeerSettings {
+        volume,
+        muted,
+        ..settings.peer(user_id)
+    };
+    settings.set_peer(user_id, peer);
+    hear(settings);
+    if !save {
+        return;
+    }
+    if let Some(dir) = yap_cache::settings::app_dir() {
+        if let Err(error) = saved_voice::save_voice(&dir, me, settings) {
+            eprintln!("[voice] per-person volume not saved: {error}");
+        }
+    }
 }
 
 /// The shim's `nativeInit`, on the thread Java called from: libwebrtc takes
