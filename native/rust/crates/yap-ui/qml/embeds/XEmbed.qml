@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // An X post (LinkEmbed.tsx XEmbed :2223): a 520 card. The header, the
@@ -132,6 +131,7 @@ Rectangle {
             maxWidth: parent.width
             clipTo: root.clipTo
             chip: root.embed.chip
+            link: root.embed.url
             onOpenImage: (images, index) => root.openImage(images, index)
             onExpandVideo: (source, position) => root.expandVideo(source, position)
         }
@@ -214,6 +214,7 @@ Rectangle {
                     media: quote.q.media
                     extra: quote.q.extra
                     compact: root.embed.media.length > 0
+                    link: quote.q.url.length > 0 ? quote.q.url : root.embed.url
                     maxWidth: parent.width
                     clipTo: root.clipTo
                     onOpenImage: (images, index) => root.openImage(images, index)

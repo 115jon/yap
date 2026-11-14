@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // SensitiveMediaFrame.tsx: over blurred media, the scrim and a ply-3

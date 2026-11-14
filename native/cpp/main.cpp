@@ -756,7 +756,9 @@ static void registerPlatformTypes()
     const char* path;
     const char* name;
   } types[] = {
-    { "delegates/EmbedCard.qml", "EmbedCard" },
+    { "components/WebPlayer.qml", "WebEmbedPlayer" },
+    { "components/EmbedVideo.qml", "InlineVideo" },
+    { "components/InlineAudio.qml", "InlineAudio" },
     { "delegates/MessageMedia.qml", "MessageMedia" },
     { "delegates/VoiceStatusLine.qml", "VoiceStatusLine" },
     { "components/VoiceStreamHoverCard.qml", "VoiceStreamHoverCard" },
@@ -944,9 +946,10 @@ int main(int argc, char* argv[])
   qmlRegisterSingletonInstance("Yap.Media", 1, 0, "WheelScroll", wheelScroll);
 
   // The desktop's side of the shared QML's seams (Yap.Ui imports
-  // Yap.Platform): rich embeds and media through WebView2, Media
-  // Foundation and libvpx, the voice status line with its clip previews,
-  // and the stream preview card. The mobile app registers its own.
+  // Yap.Platform): the embed cards' web players through WebView2, their
+  // video and sound and the messages' media through Media Foundation and
+  // libvpx, the voice status line with its clip previews, and the stream
+  // preview card. The mobile app registers its own.
   registerPlatformTypes();
 
   QQmlApplicationEngine engine;

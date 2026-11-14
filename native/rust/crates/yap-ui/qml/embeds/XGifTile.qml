@@ -1,7 +1,7 @@
 import QtQuick
 import Yap.Media
-import com.yap.native
 import Yap.Ui
+import Yap.Platform
 
 // An X GIF (LinkEmbed.tsx XGifTile :3275): the animated WebP from
 // gif.fxtwitter.com through the media proxy (decoded natively), or, when
@@ -15,6 +15,8 @@ Item {
     required property var item
     property Item clipTo: null
     property bool paused: false
+    // The post (InlineVideo opens it where it cannot play in place).
+    property string link: ""
 
     signal openViewer()
 
@@ -33,12 +35,13 @@ Item {
     Loader {
         anchors.fill: parent
         active: root.webpFailed
-        sourceComponent: EmbedVideo {
+        sourceComponent: InlineVideo {
             source: root.item.src
             poster: root.item.poster
             animated: true
             framed: false
             clipTo: root.clipTo
+            link: root.link
             onExpandRequested: root.openViewer()
         }
     }
@@ -76,7 +79,7 @@ Item {
                 color: Theme.ink1
             }
             HoverHandler { cursorShape: Qt.PointingHandCursor }
-            TapHandler { onTapped: root.paused = !root.paused }
+            TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: root.paused = !root.paused }
             Accessible.role: Accessible.Button
             Accessible.name: root.motion ? qsTr("Pause GIF") : qsTr("Play GIF")
         }
@@ -91,12 +94,15 @@ Item {
                 font: Theme.type.silk
             }
             HoverHandler { cursorShape: Qt.PointingHandCursor }
-            TapHandler { onTapped: root.openViewer() }
+            TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: root.openViewer() }
             Accessible.role: Accessible.Button
             Accessible.name: qsTr("Open GIF viewer")
         }
         Float {
             id: altKey
+            // Under a finger nothing hovers: a tap shows the alt text, and
+            // another hides it.
+            property bool shown: false
             visible: root.item.alt.length > 0
             width: altText.implicitWidth + 16
             Text {
@@ -107,10 +113,15 @@ Item {
                 color: Theme.ink1
                 font: Theme.type.silk
             }
+            TapHandler {
+                gesturePolicy: TapHandler.ReleaseWithinBounds
+                enabled: !Theme.hoverUi
+                onTapped: altKey.shown = !altKey.shown
+            }
             LazyPopup {
-                when: altKey.hovered
+                when: altKey.hovered || altKey.shown
                 sourceComponent: Tooltip {
-                    visible: altKey.hovered
+                    visible: altKey.hovered || altKey.shown
                     text: root.item.alt
                 }
             }

@@ -8,9 +8,10 @@ fn main() {
         std::env::set_var("QT_BUILD_UTILS_DISCARD_QML_CONTENTS", "1");
     }
     // The QML both apps show: tokens, shell state, and the rows and
-    // components they are made of. What differs per app (rich embeds,
-    // media, voice status, the stream card, a row's nameplate) is imported
-    // from Yap.Platform, which each app registers (its main.cpp).
+    // components they are made of, and the link embeds. What differs per
+    // app (the embeds' web player, video and sound, media, voice status,
+    // the stream card, a row's nameplate) is imported from Yap.Platform,
+    // which each app registers (its main.cpp).
     let files = [
         QmlFile::from("qml/Theme.qml").singleton(true),
         QmlFile::from("qml/ShellState.qml").singleton(true),
@@ -72,6 +73,21 @@ fn main() {
         QmlFile::from("qml/delegates/ServerIcon.qml"),
         QmlFile::from("qml/delegates/TreeRow.qml"),
         QmlFile::from("qml/components/ClipboardText.qml"),
+        QmlFile::from("qml/components/GifFavoriteStar.qml"),
+        QmlFile::from("qml/components/LedLabel.qml"),
+        QmlFile::from("qml/components/MediaTile.qml"),
+        QmlFile::from("qml/components/PlayDisc.qml"),
+        QmlFile::from("qml/components/SensitiveMediaFrame.qml"),
+        QmlFile::from("qml/embeds/EmbedCard.qml"),
+        QmlFile::from("qml/embeds/EmbedHeader.qml"),
+        QmlFile::from("qml/embeds/EmbedStatusCard.qml"),
+        QmlFile::from("qml/embeds/SocialAudioChip.qml"),
+        QmlFile::from("qml/embeds/SocialEmbed.qml"),
+        QmlFile::from("qml/embeds/SpotifyEmbed.qml"),
+        QmlFile::from("qml/embeds/XEmbed.qml"),
+        QmlFile::from("qml/embeds/XGifTile.qml"),
+        QmlFile::from("qml/embeds/XMediaGrid.qml"),
+        QmlFile::from("qml/embeds/YouTubeEmbed.qml"),
     ];
     // The bridge files of one QML module live in one folder (src/, flat):
     // cxx-qt-build's rule (QTBUG-93443).
