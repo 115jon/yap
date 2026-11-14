@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
 # Builds the Qt Quick prototype for one Android ABI (an unsigned APK), or
-# for the iOS simulator (an unsigned .app, a compile and link check):
+# for the iOS simulator (an unsigned .app, a compile and link check), or the
+# Android App Bundle for Google Play (an unsigned AAB with both ABIs):
 #
-#   native/mobile/build.sh [x86_64|arm64-v8a|ios-simulator] [Release|Debug] [-D...]
+#   native/mobile/build.sh [x86_64|arm64-v8a|ios-simulator|aab] [Release|Debug] [-D...]
+#
+# aab builds arm64-v8a and x86_64 in their own trees (as above, with the
+# same arguments, so one version code), then bundle.sh merges them into
+# $YAPM/build/qt-aab-<config>/yap-qt-unsigned.aab. Sign it with sign.sh;
+# bundletool turns it into APKs for a device (README, "App Bundle").
 #
 # Arguments after the second go to CMake's configure step, e.g.
 # -DYAP_ANDROID_APP_ID=..., -DYAP_ANDROID_VERSION_CODE=...,
 # -DYAP_ANDROID_VERSION_NAME=... (README, "Build and run the Qt app").
 #
 # Needs (paths from the environment; defaults for fetch-qt.ps1's layout):
-#   QT_TARGET_ROOT   the target Qt 6.11 prefix (default: $YAPM/qt/<dir>, with
-#                    <dir> android_x86_64, android_arm64_v8a or ios; fetch it
-#                    with fetch-qt.ps1 -Dest $YAPM/qt). QT_ANDROID_ROOT is
-#                    still read for Android.
+#   QT_TARGET_ROOT   the target Qt 6.11 prefix (default: $YAP_QT_DIR/<dir>,
+#                    with <dir> android_x86_64, android_arm64_v8a or ios, and
+#                    YAP_QT_DIR $YAPM/qt; fetch it with fetch-qt.ps1 -Dest
+#                    $YAPM/qt). QT_ANDROID_ROOT is still read for Android;
+#                    aab reads YAP_QT_DIR only.
 #   QT_HOST_PATH     a desktop Qt 6.11.3 with its tools (moc, qmlcachegen,
 #                    androiddeployqt)
 #   Android: ANDROID_SDK_ROOT (or ANDROID_HOME) and ANDROID_NDK_ROOT (default:
@@ -33,17 +40,29 @@ abi="${1:-x86_64}"
 config="${2:-Release}"
 shift $(( $# < 2 ? $# : 2 ))
 yapm="${YAPM:-F:/ct/yapm}"
+qts="${YAP_QT_DIR:-$yapm/qt}"
+if [[ "$abi" == aab ]]; then
+  # Each ABI's own target Qt, from YAP_QT_DIR: one QT_TARGET_ROOT cannot
+  # name both.
+  out="$yapm/build/qt-aab-$config"
+  for one in arm64-v8a x86_64; do
+    env -u QT_TARGET_ROOT -u QT_ANDROID_ROOT bash "$here/build.sh" "$one" "$config" "$@"
+    bash "$here/bundle.sh" stage "$yapm/build/qt-$one-$config" "$out/stage-$one"
+  done
+  bash "$here/bundle.sh" merge "$out/yap-qt-unsigned.aab" "$out/stage-arm64-v8a" "$out/stage-x86_64"
+  exit 0
+fi
 case "$abi" in
   x86_64) qt_dir=android_x86_64 ;;
   arm64-v8a) qt_dir=android_arm64_v8a ;;
   ios-simulator) qt_dir=ios ;;
-  *) echo "unknown target $abi (x86_64, arm64-v8a, ios-simulator)" >&2; exit 2 ;;
+  *) echo "unknown target $abi (x86_64, arm64-v8a, ios-simulator, aab)" >&2; exit 2 ;;
 esac
-qt="${QT_TARGET_ROOT:-${QT_ANDROID_ROOT:-$yapm/qt/$qt_dir}}"
+qt="${QT_TARGET_ROOT:-${QT_ANDROID_ROOT:-$qts/$qt_dir}}"
 # The layout before fetch-qt.ps1: $YAPM/qt/x86_64, $YAPM/qt/arm64_v8a.
 if [[ -z "${QT_TARGET_ROOT:-}${QT_ANDROID_ROOT:-}" && ! -d "$qt" && "$qt_dir" == android_* \
-      && -d "$yapm/qt/${qt_dir#android_}" ]]; then
-  qt="$yapm/qt/${qt_dir#android_}"
+      && -d "$qts/${qt_dir#android_}" ]]; then
+  qt="$qts/${qt_dir#android_}"
 fi
 host="${QT_HOST_PATH:?set QT_HOST_PATH to a desktop Qt 6.11}"
 

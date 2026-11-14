@@ -167,10 +167,11 @@ qt_import_plugins(yapqt
   EXCLUDE_BY_TYPE qmltooling iconengines networkinformation)
 
 # --- Packaging: application id and version -------------------------------
-# CI passes the version per run (native-mobile.yml: code = run * 10
-# + an ABI digit, name <VERSION>-ci.<run>+<commit>; qt-android-release.yml:
-# code = (2000000 + minutes since 2026-01-01 UTC) * 10 + the digit, name
-# <VERSION>); local builds get <VERSION> (1).
+# CI passes the version per run, one code for every ABI's APK and the App
+# Bundle (an AAB holds all ABIs under one code): native-mobile.yml's code
+# = 100000 + run, name <VERSION>-ci.<run>+<commit>; qt-android-release.yml's
+# code = 30000000 + minutes since 2026-01-01 UTC, name <VERSION> (README,
+# "Releases"). Local builds get <VERSION> (1).
 # The id is the Gradle namespace and application id (androiddeployqt writes
 # it to gradle.properties), and the iOS bundle identifier. dev.yap.app is
 # the app's own, for release builds and local ones (registered in Firebase
@@ -219,6 +220,21 @@ qt_import_plugins(yapqt
 # Windows, where MSVC's release /OPT:ICF folds alike.
 if(ANDROID)
   target_link_options(yapqt PRIVATE "$<$<NOT:$<CONFIG:Debug>>:LINKER:--icf=all>")
+endif()
+
+# --- 16 KB pages -------------------------------------------------------------
+# Google Play requires every native library of an app targeting Android 15+
+# to load on 16 KB-page devices: ELF LOAD segments aligned to 16 KB, and
+# (uncompressed in the APK) the library's offset too. NDK r27 still links
+# with 4 KB pages by default (r28 switched). Qt 6.11's Platform target
+# passes the same flag to whatever links Qt; the app's library states it
+# itself, so it does not hang on Qt's interface. A 16 KB-aligned library
+# loads on 4 KB-page devices alike. Qt's libraries, plugins and the NDK's
+# libc++_shared come aligned; libwebrtc is linked into this library.
+# check-16k.sh checks the packages, sign.sh aligns the APK's entries
+# (zipalign -P 16).
+if(ANDROID)
+  target_link_options(yapqt PRIVATE "LINKER:-z,max-page-size=16384")
 endif()
 
 # --- iOS: a compile and link check for the simulator ---------------------
