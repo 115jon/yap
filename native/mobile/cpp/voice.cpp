@@ -28,6 +28,7 @@ extern "C" {
 bool yap_mobile_voice_init(void* jvm, void* context);
 void yap_mobile_voice_mute(bool muted);
 void yap_mobile_voice_deafen(bool deafened);
+void yap_mobile_speaker_muted(bool muted);
 void yap_mobile_voice_leave();
 void yap_mobile_voice_quit();
 }
@@ -55,6 +56,11 @@ void jniMute(JNIEnv*, jclass, jboolean muted)
 void jniDeafen(JNIEnv*, jclass, jboolean deafened)
 {
   yap_mobile_voice_deafen(deafened == JNI_TRUE);
+}
+
+void jniSpeakerMuted(JNIEnv*, jclass, jboolean muted)
+{
+  yap_mobile_speaker_muted(muted == JNI_TRUE);
 }
 
 void jniLeave(JNIEnv*, jclass)
@@ -95,6 +101,7 @@ void Native::installVoice()
     { "nativeInit", "(Landroid/content/Context;)Z", reinterpret_cast<void*>(jniInit) },
     { "nativeMute", "(Z)V", reinterpret_cast<void*>(jniMute) },
     { "nativeDeafen", "(Z)V", reinterpret_cast<void*>(jniDeafen) },
+    { "nativeSpeakerMuted", "(Z)V", reinterpret_cast<void*>(jniSpeakerMuted) },
     { "nativeLeave", "()V", reinterpret_cast<void*>(jniLeave) },
     { "nativeQuit", "()V", reinterpret_cast<void*>(jniQuit) },
     { "nativeRoutes", "(Ljava/lang/String;)V", reinterpret_cast<void*>(jniRoutes) },

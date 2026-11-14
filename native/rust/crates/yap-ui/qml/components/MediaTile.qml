@@ -1,6 +1,5 @@
 import QtQuick
 import Yap.Media
-import com.yap.native
 import Yap.Ui
 
 // One picture of a message (ImageGrid.tsx tile): a 1 px seam, a tint-1
@@ -141,7 +140,7 @@ Rectangle {
 
     Rectangle {
         anchors.fill: parent
-        visible: hover.containsMouse && !root.hidden
+        visible: Theme.hoverUi && hover.containsMouse && !root.hidden
         color: Theme.tint1
     }
 

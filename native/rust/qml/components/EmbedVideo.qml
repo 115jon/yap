@@ -43,6 +43,10 @@ Item {
     property bool framed: true
     property Item clipTo: null
     property string name: ""
+    // The page the video is from (an embed's link). Plays here, so unused;
+    // the InlineVideo seam (Yap.Platform) shares this interface, and an app
+    // that cannot play in place opens it.
+    property string link: ""
     // The position to start from (the viewer resumes where the row was).
     property int startAt: 0
     property bool autoStart: false

@@ -1,6 +1,7 @@
 //! The mobile app's side of the shared view layer: rustls HTTP, the shared
 //! gateway task, voice calls and their video on Android (`voice.rs`,
-//! `video.rs`), the session token
+//! `video.rs`), the soundboard and UI sounds on Android (`sound.rs`), the
+//! session token
 //! sealed with an Android Keystore key, and the data folder and device name
 //! handed to the core.
 
@@ -41,6 +42,16 @@ impl Realtime for MobileRealtime {
         events: VoiceEvents,
     ) {
         crate::voice::spawn(api, http, target, commands, events);
+    }
+
+    /// The room's soundboard clips (`sound.rs`).
+    #[cfg(target_os = "android")]
+    fn spawn_audio(
+        &self,
+        http: reqwest::Client,
+        events: yap_core::AudioEvents,
+    ) -> yap_core::AudioHandle {
+        crate::sound::spawn(http, events)
     }
 
     // The iOS build is a compile and link check without libwebrtc.
@@ -185,8 +196,8 @@ impl TokenStore for FileVault {
     }
 }
 
-/// The phone's platform. The desktop-only view updates (toasts, sounds,
-/// the tray badge, ...) are dropped: the phone has no such surfaces yet.
+/// The phone's platform. The desktop-only view updates (toasts, the tray
+/// badge, ...) are dropped: the phone has no such surfaces yet.
 struct Mobile {
     data: PathBuf,
 }
@@ -277,6 +288,19 @@ impl Platform for Mobile {
         if let ViewUpdate::MediaAuth(token) = update {
             crate::http::set_token(token);
             return true;
+        }
+        // UI sounds on the app's speaker (sound.rs).
+        #[cfg(target_os = "android")]
+        match update {
+            ViewUpdate::Sound(sound) => {
+                crate::sound::play(sound);
+                return true;
+            }
+            ViewUpdate::StopSound(sound) => {
+                crate::sound::stop(sound);
+                return true;
+            }
+            _ => {}
         }
         // Known and not shown here yet; anything else is logged as unhandled.
         matches!(

@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // A post that cannot show (EmbedStatus.tsx): the header, then a 40 px

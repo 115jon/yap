@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Templates as T
-import com.yap.native
 import Yap.Ui
 
 // The star over a GIF or clip in a message (GifFavoriteButton.tsx): a 32 px

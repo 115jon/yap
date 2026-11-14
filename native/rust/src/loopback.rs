@@ -11,7 +11,7 @@
 //! So the player gets `http://127.0.0.1:<port>/m/<token>/<file name>`
 //! instead, and Media Foundation does its own Range requests against it.
 //! Each request is relayed to the API with the session added here (only
-//! for the API's own private media, [`crate::media::bearer_for`]; never
+//! for the API's own private media, [`yap_ui::media::bearer_for`]; never
 //! following a redirect), and the answer (status, type, length, range)
 //! streams back. The token is 128 random bits per URL, so another local
 //! process cannot guess a path; the session itself never leaves this
@@ -177,7 +177,7 @@ fn shorten(name: String) -> String {
 /// lives until a player that took the URL calls [`hold`] and, later,
 /// [`release`].
 pub fn local_url(url: &str) -> Option<String> {
-    crate::media::bearer_for(url)?;
+    yap_ui::media::bearer_for(url)?;
     let relay = relay()?;
     let token = relay
         .targets
@@ -329,7 +329,7 @@ async fn handle(mut socket: TcpStream, port: u16, head_timeout: Duration) -> std
         return reply(&mut socket, "404 Not Found").await;
     };
     // The session is read per request: it may have changed (or ended).
-    let Some(bearer) = crate::media::bearer_for(&target) else {
+    let Some(bearer) = yap_ui::media::bearer_for(&target) else {
         return reply(&mut socket, "401 Unauthorized").await;
     };
     let mut auth = reqwest::header::HeaderValue::from_str(&bearer)

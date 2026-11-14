@@ -47,10 +47,9 @@ pub trait Platform: Send + Sync + 'static {
     }
 
     /// What an upload needs to know about each local file; unreadable
-    /// paths are skipped.
+    /// paths are skipped ([`crate::media::upload_files`]).
     fn upload_files(&self, paths: &[String]) -> Vec<UploadFile> {
-        let _ = paths;
-        Vec::new()
+        crate::media::upload_files(paths)
     }
 
     /// The screen share picker's sources, as JSON (on a worker thread).

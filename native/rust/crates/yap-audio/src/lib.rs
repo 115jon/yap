@@ -34,7 +34,15 @@
 //! decode (symphonia; Opus through libopus) → stereo → resample to 48 kHz
 //! (rubato FFT) → per-voice gain ramps → the stream's loudness chain → sum →
 //! soft clip → the speaker's bus (summed with the call and the UI sounds,
-//! a final soft clip under full scale) → 16-bit PCM → WASAPI.
+//! a final soft clip under full scale) → 16-bit PCM → WASAPI (AAudio on
+//! Android).
+//!
+//! # The app's side
+//!
+//! With the `store` feature, [`player`] is the player behind yap-core's
+//! `Realtime::spawn_audio` (the store's audio commands, clip fetches with
+//! the session) and [`ui`] plays the UI sounds; the desktop and the phone
+//! both run them.
 //!
 //! # Approximations
 //!
@@ -71,14 +79,40 @@ mod engine;
 mod guard;
 mod mixer;
 mod opus;
+#[cfg(feature = "store")]
+pub mod player;
 mod resample;
 mod stream;
 mod tone;
+#[cfg(feature = "store")]
+pub mod ui;
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 pub use engine::Engine;
 pub use guard::public_http_client;
+
+/// What the app adds to every HTTP client this crate builds (the public
+/// one for strangers' clips, the stream's).
+pub type ClientSetup = fn(reqwest::ClientBuilder) -> reqwest::ClientBuilder;
+
+static CLIENT_SETUP: OnceLock<ClientSetup> = OnceLock::new();
+
+/// Once, before the first play: `setup` goes over every HTTP client this
+/// crate builds. The phone gives its rustls configuration here (Android has
+/// no system store the TLS backend could read on its own). Later calls are
+/// ignored.
+pub fn set_client_setup(setup: ClientSetup) {
+    let _ = CLIENT_SETUP.set(setup);
+}
+
+/// `builder` with the app's [`set_client_setup`], if any.
+pub(crate) fn client_setup(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    match CLIENT_SETUP.get() {
+        Some(setup) => setup(builder),
+        None => builder,
+    }
+}
 
 /// The mix rate, in frames per second.
 pub const SAMPLE_RATE: u32 = 48_000;

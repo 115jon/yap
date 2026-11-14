@@ -15,8 +15,7 @@ use yap_voice::call::Host;
 use yap_voice::VideoIntent;
 
 pub use yap_voice::call::{
-    now_ms, send_disconnect_beacon, send_stale_beacon, set_call_audio, set_transmit, CallAudio,
-    Target,
+    send_disconnect_beacon, send_stale_beacon, set_call_audio, set_transmit, CallAudio, Target,
 };
 
 struct Desktop;
