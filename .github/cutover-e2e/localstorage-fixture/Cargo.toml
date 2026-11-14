@@ -12,5 +12,5 @@ publish = false
 rusty-leveldb = { version = "=4.0.2", default-features = false }
 serde_json = "1"
 
-# Its own workspace, apart from desktop/src-tauri.
+# Its own workspace, so cargo looks for no parent one.
 [workspace]

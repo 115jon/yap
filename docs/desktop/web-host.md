@@ -4,6 +4,10 @@ How the shared web UI (`src/`) reaches the shell it runs in. The browser and the
 code; what differs is one object, the host. UI code calls `getHost()` and never imports `@tauri-apps/*` for the
 things the host covers.
 
+The Tauri desktop (`desktop/`) and the Tauri mobile prototype (`mobile/`) were removed from `main`; they are on the
+[`archive/tauri-desktop`](https://github.com/115jon/yap/tree/archive/tauri-desktop) branch. The only config left on
+`main` is the web one (`__IS_DESKTOP__` false), so builds from `main` always get the web adapter.
+
 ## Modules
 
 | module                                                                   | owns                                                                   |
@@ -55,6 +59,8 @@ Each Vite config defines two build flags (declared in `src/env.d.ts`):
 | `vite.config.ts` (web)   | `false`          | `false`         |
 | `desktop/vite.config.ts` | `true`           | `false`         |
 | `mobile/vite.config.ts`  | `false`          | `true`          |
+
+The last two configs are on the archive branch.
 
 `getHost()` reads `__IS_DESKTOP__` inline:
 
@@ -132,6 +138,6 @@ never closed: closing a `TrayIcon` resource removes the tray icon from the app (
 
 ## Mobile
 
-Mobile (`mobile/`, `apps/mobile/`) is out of scope. The Tauri mobile build gets the web adapter (`__IS_DESKTOP__` is
-false) and keeps its own code paths (`isMobile()`, `safe-area.ts`, `useBackButton`). Do not add mobile behavior to
+Mobile is out of scope. The Tauri mobile build (`mobile/`, archived) got the web adapter (`__IS_DESKTOP__` is
+false) and kept its own code paths (`isMobile()`, `safe-area.ts`, `useBackButton`). Do not add mobile behavior to
 the desktop adapter or branch on `isMobile()` inside the host.

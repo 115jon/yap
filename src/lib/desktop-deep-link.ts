@@ -1,5 +1,6 @@
 // ── Desktop deep links ───────────────────────────────────────────────────────
-// The desktop shell (desktop/src-tauri/src/main_window.rs) routes every
+// The Tauri shell (desktop/src-tauri/src/main_window.rs, archived on the
+// archive/tauri-desktop branch) routes every
 // `yap://` link (second launch, deep-link plugin, cold start) into one
 // event, `rm://deep-link` with `{ url }`, after dropping repeats. Links that
 // arrive before the page listens are queued in Rust and handed over by

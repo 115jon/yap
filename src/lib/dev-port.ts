@@ -4,7 +4,8 @@
  * The web dev server (root vite.config.ts) listens on 5173 unless
  * `RALPH_DEV_PORT` says otherwise. The desktop dev server
  * (desktop/vite.config.ts) always listens on 1420, because that port is the
- * `devUrl` in desktop/src-tauri/tauri.conf.json. Its `/api` and `/ws` proxy
+ * `devUrl` in desktop/src-tauri/tauri.conf.json (the Tauri app, now on the
+ * archive/tauri-desktop branch). Its `/api` and `/ws` proxy
  * targets the web dev server, so it reads `RALPH_DEV_PORT` too.
  *
  * Both servers use `strictPort`. The "Yap (dev)" Kova app only accepts

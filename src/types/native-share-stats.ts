@@ -2,7 +2,8 @@
 // Native screen-share stats snapshot (frontend mirror of the Rust type)
 //
 // This interface mirrors `NativeShareStatsSnapshot` serialized by the desktop
-// backend (`desktop/src-tauri/src/native_share.rs`) and returned by the
+// backend (`desktop/src-tauri/src/native_share.rs`, on the archive/tauri-desktop
+// branch) and returned by the
 // `get_native_screen_share_stats` Tauri command. Field names and types match
 // the serde-serialized JSON exactly so the renderer can read it without an
 // extra mapping layer.

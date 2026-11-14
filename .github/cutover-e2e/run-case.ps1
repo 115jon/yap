@@ -5,7 +5,8 @@
 .DESCRIPTION
   Runs on a throwaway hosted Windows runner only: it installs the real
   Tauri app, updates it, runs the 3.14 bridge (desktop/src-tauri/src/
-  native_handoff) headless and lets the native app replace it. Never run it
+  native_handoff on the archive/tauri-desktop branch) headless and lets the
+  native app replace it. Never run it
   on a machine you care about.
 
   Every case starts the same way:

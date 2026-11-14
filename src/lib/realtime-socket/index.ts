@@ -1,5 +1,4 @@
-// The realtime socket lifecycle lives in @ralph/realtime (shared with
-// apps/mobile). The web app logs through its coloured console logger, and
+// The realtime socket lifecycle lives in @ralph/realtime. The web app logs through its coloured console logger, and
 // keeps the DOM wake source in ./page-wake.
 import { setRealtimeLogger } from "@ralph/realtime";
 

@@ -148,13 +148,13 @@ const CLIENT_SENDS = {
     room: [0, 3, 7, 11, 15, 17, 40],
     voice: [100, 3, 1, 5, 11, 12, 13, 102, 106, 109],
   },
-  // apps/mobile (mobile-v0.1.0 → main).
+  // The Expo app, apps/mobile (mobile-v0.1.0 until its removal).
   mobile: {
     global: [0, 3, 15, 26, 27, 28, 33, 34, 35, 36, 39],
     room: [0, 3, 7, 11, 15, 40],
     voice: [100, 3, 5, 11, 12, 13, 106, 109],
   },
-  // desktop-native/VOICE_PROTOCOL.md (spike/qt-desktop).
+  // native/VOICE_PROTOCOL.md (spike/qt-desktop).
   native: {
     global: [0, 3, 33, 34],
     room: [0, 3, 7, 11, 15, 17, 40],
