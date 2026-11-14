@@ -198,6 +198,17 @@ predictive gesture's progress drives whichever is on top: a stacked page
 shrinks or drops, the pager's chat follows the finger 40% of the way toward
 the page behind and the spring finishes or returns it.
 
+Pages over the pager open by name through the router (`Router.qml`, a
+singleton): `Router.open("SearchPage")` from any page or row pushes
+`SearchPage.qml`, and `Main.openPage` stacks it with the page's options
+(`sheet` to rise from the bottom, `key` for one page per name and key on
+top, `whileBusy` to push while the stack still animates). Main connects
+the signals a page has by their names (`closeRequested`,
+`profileRequested`, `profileEditRequested`, `messageRequested`,
+`serverOpened`, `conversationRequested`), so a new page is its file and
+its line in `rust/build.rs`, with no change to `Main.qml`; Back and the
+predictive gesture step out of it like any other page.
+
 What rides on the desktop's objects unchanged: `Nav.selectHomeLast`,
 `selectServer`, `selectChannel` and `openDm`; `DmListModel` and
 `MemberListModel`; `Nav.dmUnread` for Home's count; the unread and mention
@@ -793,6 +804,26 @@ turning them on showed on return. Not verified: signing out another device
 <img src="docs/qt-friends-pending.png" width="180" alt="Qt: Friends, an incoming request">
 <img src="docs/qt-friends-actions.png" width="180" alt="Qt: Friends, a friend's actions">
 </p>
+
+### Message search
+
+The search key in the drawer's title bar (a server with a channel open) and
+in the chat header opens `SearchPage`, a page of the stack: the server's
+messages, or the open DM's. It is the desktop's search panel at phone
+size on the same parts: the store owns the rules (`Search.state`, the
+filters, suggestions, recents, sort and paging), `SearchCore` in `Yap.Ui`
+parses it into rows for both apps, and the rows (`SearchOption`,
+`SearchResult`, `SearchChip` and the rest) moved from the desktop's panel
+into `Yap.Ui`; on touch an option is 44 high and a sort key answers 48
+high. The field sits in a floating bar with the back key; `from:`,
+`mentions:`, `in:`, `has:`, `before:`, `after:`, `during:` and `pinned:`
+turn into chips as on the desktop, Backspace at the start takes the last
+one, and the keyboard's Search key searches (or picks the lit
+suggestion). A result closes the page and opens its channel on the
+message (`Chat.jumpToMessage`; the chat slides in once that channel is the
+open one, highlighted as on the desktop). The search stays open for the
+next visit after a result, so the key brings the same query back; Back
+closes it.
 
 ### Invites and links
 

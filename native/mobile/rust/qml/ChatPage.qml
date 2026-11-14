@@ -5,8 +5,8 @@ import Yap.Ui
 
 // The open conversation, the pager's middle page: a floating header that
 // compacts as you read back (the drawer key, the server over the channel
-// or the DM's other half, the call label, a DM's call key, the members
-// key), a DM's call strip, the link strip and the unread banner under it,
+// or the DM's other half, the call label, a DM's call key, the search
+// key, the members key), a DM's call strip, the link strip and the unread banner under it,
 // the desktop's MessageDelegate rows on its MessageListModel running up
 // behind them, the jump to the present, the typing line and the composer.
 // The keyboard pushes the composer up as it animates in (Native.imeHeight
@@ -323,6 +323,16 @@ Item {
                     tip: dmCall.callKeyLabel
                     Accessible.name: tip
                     onClicked: root.dmCallRequested("start")
+                }
+                // Search: the server's messages, or the DM's (SearchPage).
+                IconKey {
+                    id: searchKey
+                    anchors.verticalCenter: parent.verticalCenter
+                    iconName: "search"
+                    tone: "ghost"
+                    tip: root.dm ? qsTr("Search messages with %1").arg(Nav.activeChannelName)
+                        : qsTr("Search %1").arg(Nav.activeServerName)
+                    onClicked: Router.open("SearchPage")
                 }
                 IconKey {
                     id: peopleKey

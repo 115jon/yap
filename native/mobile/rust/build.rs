@@ -23,6 +23,7 @@ const QML: &[&str] = &[
     "qml/AvatarFramePage.qml",
     "qml/FriendsPage.qml",
     "qml/ThreadPage.qml",
+    "qml/SearchPage.qml",
     "qml/PageHeader.qml",
     "qml/MobileField.qml",
     "qml/InlineConfirm.qml",
@@ -64,7 +65,8 @@ fn main() {
     let files = QML
         .iter()
         .map(|path| QmlFile::from(*path))
-        // This phone's own settings (QSettings).
-        .chain(std::iter::once(QmlFile::from("qml/Prefs.qml").singleton(true)));
+        // This phone's own settings (QSettings), and the page router.
+        .chain(std::iter::once(QmlFile::from("qml/Prefs.qml").singleton(true)))
+        .chain(std::iter::once(QmlFile::from("qml/Router.qml").singleton(true)));
     CxxQtBuilder::new_qml_module(QmlModule::new("com.yap.mobile").qml_files(files)).build();
 }

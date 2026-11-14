@@ -10,7 +10,8 @@ import Yap.Ui
 // with pages and sheets stacked over it (a profile, Settings, Friends, the
 // call), a DM call's incoming sheet over everything, and the platform's
 // back gesture stepping through them. The pages are per platform; the rows
-// inside them are the desktop's.
+// inside them are the desktop's. Pages open by name through the router
+// (Router.qml, openPage below), so a new page is a file, not a change here.
 Window {
     id: window
 
@@ -152,9 +153,8 @@ Window {
         if (!ready || stack.currentItem?.isLanding === true)
             return
         closeTop(true)
-        Qt.inputMethod.hide()
-        stack.sheet = false
-        stack.push(landingPage, {}, StackView.PushTransition)
+        // Right after the pop above, so not held back by its animation.
+        openPage("InviteLandingPage", {}, { whileBusy: true, transition: StackView.PushTransition })
     }
 
     // A conversation opened by the app (a notification, a profile's
@@ -167,43 +167,90 @@ Window {
         Qt.callLater(() => Chat.setFocused(window.reading))
     }
 
-    // A profile, over whatever is showing.
-    function openProfile(userId) {
-        // One sheet per person: a second tap must not stack another.
-        if (userId.length === 0 || stack.busy || stack.currentItem?.userId === userId)
-            return
+    // The page router (Router.qml): a page by its file's name over the
+    // pager, so a new page needs no change here. One page per name and
+    // `key` on top: the same one opened again (a second tap) does nothing.
+    function openPage(name, props, options) {
+        const opts = options ?? {}
+        const route = name + "/" + (opts.key ?? "")
+        if (stack.busy && opts.whileBusy !== true)
+            return null
+        if (stack.depth > 1 && stack.currentItem.objectName === route)
+            return null
         Qt.inputMethod.hide()
-        stack.sheet = true
-        stack.push(profilePage, { userId: userId })
+        stack.sheet = opts.sheet === true
+        const url = Qt.resolvedUrl(name + ".qml")
+        const item = opts.transition !== undefined ? stack.push(url, props ?? {}, opts.transition)
+            : stack.push(url, props ?? {})
+        if (!item) {
+            console.warn("[router] no page", name)
+            return null
+        }
+        item.objectName = route
+        wire(item)
+        return item
+    }
+    Connections {
+        target: Router
+        function onOpenRequested(name, props, options) {
+            window.openPage(name, props, options)
+        }
+    }
+    // What a page asks of the shell, by the signal's name: the ones it has
+    // are connected as it is pushed.
+    function wire(item) {
+        const on = (signalName, handler) => {
+            if (item[signalName] && typeof item[signalName].connect === "function")
+                item[signalName].connect(handler)
+        }
+        // Only while it is the page on top (a call can end under a profile
+        // opened over it).
+        on("closeRequested", () => {
+            if (stack.currentItem === item)
+                window.closeTop(false)
+        })
+        on("profileRequested", userId => window.openProfile(userId))
+        on("profileEditRequested", () => window.openProfileEditor())
+        // Back to the pager; the chat slides in once the DM (made now if
+        // they never talked) is the open one.
+        on("messageRequested", userId => {
+            window.closeTop(true)
+            window.openUnseen(() => Nav.openDm(userId))
+            pager.showDmWhenOpen(userId)
+        })
+        // Back to the drawer, on the server's tree (an invite joined).
+        on("serverOpened", () => {
+            window.closeTop(true)
+            pager.show("drawer")
+        })
+        // Back to the pager, the chat sliding in once that channel is the
+        // open one (a search result: the core opens it and jumps).
+        on("conversationRequested", channelId => {
+            window.closeTop(true)
+            pager.showChannelWhenOpen(channelId)
+        })
+    }
+
+    // A profile, over whatever is showing; one sheet per person.
+    function openProfile(userId) {
+        if (userId.length > 0)
+            openPage("ProfilePage", { userId: userId }, { sheet: true, key: userId })
     }
     function openSettings() {
-        Qt.inputMethod.hide()
-        stack.sheet = false
-        stack.push(settingsPage)
+        openPage("SettingsPage", {}, { whileBusy: true })
     }
     // Edit profile, over Settings, your own profile or from the account
     // panel.
     function openProfileEditor() {
-        if (stack.busy || stack.currentItem?.isProfileEditor === true)
-            return
-        Qt.inputMethod.hide()
-        stack.sheet = false
-        stack.push(profileEditPage)
+        openPage("ProfileEditPage")
     }
     // A message's thread, over the chat.
     function openThread(messageId) {
-        if (messageId.length === 0 || stack.busy || stack.currentItem?.rootId === messageId)
-            return
-        Qt.inputMethod.hide()
-        stack.sheet = false
-        stack.push(threadPage, { rootId: messageId })
+        if (messageId.length > 0)
+            openPage("ThreadPage", { rootId: messageId }, { key: messageId })
     }
     function openFriends() {
-        if (stack.busy)
-            return
-        Qt.inputMethod.hide()
-        stack.sheet = false
-        stack.push(friendsPage)
+        openPage("FriendsPage")
     }
     // A voice channel's row: the call page if we are in it, else a join,
     // once the microphone is allowed (the system asks the first time).
@@ -221,11 +268,7 @@ Window {
         Native.requestMicrophone()
     }
     function openCall() {
-        if (stack.busy || stack.currentItem?.isCall === true)
-            return
-        Qt.inputMethod.hide()
-        stack.sheet = false
-        stack.push(callPage)
+        openPage("CallPage")
     }
     // The call page once the stack is still: an answer closes what is on
     // top first (a profile, a thread, Settings), and that pop animates.
@@ -644,80 +687,6 @@ Window {
                     NumberAnimation { property: "x"; to: stack.sheet ? 0 : stack.width * 0.25; duration: Theme.dur4Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
                     NumberAnimation { property: "y"; to: stack.sheet ? stack.height : 0; duration: Theme.dur4Exit; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut }
                     NumberAnimation { property: "opacity"; to: stack.sheet ? 1 : 0; duration: Theme.dur4Exit; easing.type: Easing.OutCubic }
-                }
-            }
-        }
-
-        Component {
-            id: profilePage
-            ProfilePage {
-                onCloseRequested: window.closeTop(false)
-                onEditRequested: window.openProfileEditor()
-                onMessageRequested: userId => {
-                    // Back to the pager; the chat slides in once the DM
-                    // (made now if they never talked) is the open one.
-                    window.closeTop(true)
-                    window.openUnseen(() => Nav.openDm(userId))
-                    pager.showDmWhenOpen(userId)
-                }
-            }
-        }
-        Component {
-            id: callPage
-            CallPage {
-                id: callItem
-                onCloseRequested: {
-                    // Only while it is the page on top (its call can end
-                    // under a profile opened over it).
-                    if (stack.currentItem === callItem)
-                        window.closeTop(false)
-                }
-            }
-        }
-        Component {
-            id: settingsPage
-            SettingsPage {
-                onCloseRequested: window.closeTop(false)
-                onProfileEditRequested: window.openProfileEditor()
-            }
-        }
-        Component {
-            id: profileEditPage
-            ProfileEditPage {
-                onCloseRequested: window.closeTop(false)
-            }
-        }
-        Component {
-            id: threadPage
-            ThreadPage {
-                onCloseRequested: window.closeTop(false)
-                onProfileRequested: userId => window.openProfile(userId)
-            }
-        }
-        Component {
-            id: landingPage
-            InviteLandingPage {
-                id: landingItem
-                onCloseRequested: {
-                    if (stack.currentItem === landingItem)
-                        window.closeTop(false)
-                }
-                // Back to the drawer, on the server's tree.
-                onServerOpened: {
-                    window.closeTop(true)
-                    pager.show("drawer")
-                }
-            }
-        }
-        Component {
-            id: friendsPage
-            FriendsPage {
-                onCloseRequested: window.closeTop(false)
-                onProfileRequested: userId => window.openProfile(userId)
-                onMessageRequested: userId => {
-                    window.closeTop(true)
-                    window.openUnseen(() => Nav.openDm(userId))
-                    pager.showDmWhenOpen(userId)
                 }
             }
         }

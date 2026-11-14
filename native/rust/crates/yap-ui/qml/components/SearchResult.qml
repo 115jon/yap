@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // One hit, drawn like a message row (SearchResultItem.tsx): a 24 px
