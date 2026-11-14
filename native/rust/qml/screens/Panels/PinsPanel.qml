@@ -14,38 +14,30 @@ SidePanelFrame {
 
     title: qsTr("Pinned messages")
 
-    Component.onCompleted: Panels.openPins()
-
-    // The pins follow the open channel.
-    Connections {
-        target: Nav
-        function onActiveChannelIdChanged() {
-            if (Nav.activeChannelId.length > 0)
-                Panels.openPins()
-        }
+    // The pins, loaded now and following the open channel (Yap.Ui).
+    PinsModel {
+        id: pinsModel
+        onJumped: ShellState.pinsOpen = false
     }
 
     ListView {
         id: list
         anchors.fill: parent
-        visible: !Panels.pinsLoading && Panels.pinsCount > 0
+        visible: pinsModel.ready
         clip: true
-        model: PinnedMessageModel
+        model: pinsModel.rows
         boundsBehavior: Flickable.StopAtBounds
 
         delegate: PinRow {
             width: list.width
             today: Chat.today
-            canUnpin: Panels.canPin
-            onJumpRequested: id => {
-                ShellState.pinsOpen = false
-                Chat.jumpToMessage(Nav.activeChannelId, id)
-            }
+            pins: pinsModel
+            onJumpRequested: id => pinsModel.jump(id)
             onUnpinRequested: (id, author, text, confirm) => {
                 if (confirm)
                     pinDialog.ask(id, author, text, false)
                 else
-                    Panels.setPinned(id, false)
+                    pinsModel.unpin(id)
             }
             onImageOpened: (images, index) => viewer.show(images, index)
             onDownloadRequested: item => Chat.download(item.url, Files.downloadPath(item.name), false)
@@ -57,7 +49,7 @@ SidePanelFrame {
 
     // PinsLoading: the row anatomy (avatar 32, a name line, two lines).
     Column {
-        visible: Panels.pinsLoading
+        visible: pinsModel.loading
         width: parent.width
         Accessible.role: Accessible.StaticText
         Accessible.name: qsTr("Loading")
@@ -104,13 +96,13 @@ SidePanelFrame {
     // DitherGlyph at 2 px cells, 12 below it the title at Bricolage 15/700
     // and, 4 under, the line at 13 in ink-2.
     Column {
-        visible: !Panels.pinsLoading && Panels.pinsCount === 0
+        visible: pinsModel.empty
         x: 16
         y: 40
         width: parent.width - 32
         spacing: 4
         Accessible.role: Accessible.StaticText
-        Accessible.name: qsTr("No pinned messages")
+        Accessible.name: pinsModel.emptyTitle
         Item {
             width: parent.width
             height: 40 + 8
@@ -126,7 +118,7 @@ SidePanelFrame {
         Text {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
-            text: qsTr("No pinned messages")
+            text: pinsModel.emptyTitle
             color: Theme.ink1
             font: Theme.type.author
             lineHeight: Theme.type.authorLine
@@ -135,7 +127,7 @@ SidePanelFrame {
         Text {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
-            text: qsTr("Pin a message from its menu and it shows up here for everyone in the channel.")
+            text: pinsModel.emptyBody
             wrapMode: Text.Wrap
             color: Theme.ink2
             font: Theme.type.description
@@ -146,6 +138,6 @@ SidePanelFrame {
 
     PinDialog {
         id: pinDialog
-        onConfirmed: (id, pin) => Panels.setPinned(id, pin)
+        onConfirmed: (id, pin) => pinsModel.setPinned(id, pin)
     }
 }

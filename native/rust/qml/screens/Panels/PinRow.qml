@@ -23,7 +23,9 @@ Item {
     required property int day
     required property string attachments
     required property int today
-    property bool canUnpin: false
+    // The pins (Yap.Ui): who may unpin, and the rows' labels.
+    required property PinsModel pins
+    readonly property bool canUnpin: pins.canUnpin
 
     signal jumpRequested(string id)
     // `confirm` false: Shift was held.
@@ -32,17 +34,13 @@ Item {
     signal downloadRequested(var item)
     signal videoOpened(var item)
 
-    readonly property var mediaItems: attachments.length > 0 ? JSON.parse(attachments) : []
+    readonly property var mediaItems: pins.mediaOf(attachments)
     readonly property bool hasText: body.trim().length > 0
     readonly property bool shiftHeld: (hover.point.modifiers & Qt.ShiftModifier) !== 0
     readonly property bool revealed: hover.hovered || jumpKey.activeFocus || unpinKey.activeFocus
     // "Jump to message from Alice: the text…" (pinnedRowLabel).
     function label(verb) {
-        const text = body.replace(/\s+/g, " ").trim()
-        const snippet = text.length > 60 ? text.slice(0, 60).trimEnd() + "..."
-            : text.length > 0 ? text : mediaItems.length > 0 ? qsTr("attachment") : ""
-        return snippet.length > 0 ? qsTr("%1 from %2: %3").arg(verb).arg(author).arg(snippet)
-            : qsTr("%1 from %2").arg(verb).arg(author)
+        return pins.label(verb, author, body, mediaItems.length > 0)
     }
 
     implicitHeight: column.y + column.height + 12 + 1
