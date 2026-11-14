@@ -13,6 +13,9 @@ mod push;
 // Voice calls and the call notification's actions (cpp/voice.cpp).
 #[cfg(target_os = "android")]
 mod voice;
+// Soundboard clips and UI sounds on the app's speaker (AAudio).
+#[cfg(target_os = "android")]
+mod sound;
 // Remote call video into the phone's video hub (cpp/videohub.cpp).
 #[cfg(target_os = "android")]
 mod video;

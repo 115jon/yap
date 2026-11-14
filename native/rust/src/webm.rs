@@ -4,7 +4,7 @@
 //! player threads.
 //!
 //! A file is fetched with the session only when it is the API's own private
-//! media ([`crate::media::bearer_for`]); such requests never follow a
+//! media ([`yap_ui::media::bearer_for`]); such requests never follow a
 //! redirect, so the bearer cannot reach another host. Everything else goes
 //! out bare. The media runtime and clients here serve the loopback relay
 //! too ([`crate::loopback`]).
@@ -219,7 +219,7 @@ fn fetch(url: &str, cancel: &Cancel) -> Result<Arc<[u8]>, String> {
     if !is_web_url(url) {
         return Err("not a web URL".into());
     }
-    let bearer = crate::media::bearer_for(url);
+    let bearer = yap_ui::media::bearer_for(url);
     let public = bearer.is_none();
     if public {
         let cached = byte_cache()

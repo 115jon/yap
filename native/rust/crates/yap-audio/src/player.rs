@@ -1,6 +1,7 @@
-//! The local player for the voice apps: the store's [`AudioCommand`]s run on
-//! a [`yap_audio::Engine`] (soundboard clips and tones, the Listen Together
-//! stream), and its reports go back as [`AudioEvent`]s.
+//! The local player for the voice apps, the desktop's and the phone's
+//! `Realtime::spawn_audio`: the store's [`AudioCommand`]s run on an
+//! [`Engine`] (soundboard clips and tones, the Listen Together stream), and
+//! its reports go back as [`AudioEvent`]s.
 //!
 //! As on the web, a clip's own volume is multiplied by the soundboard
 //! volume setting (`setSoundboardMasterVolume`); changing the setting
@@ -14,10 +15,15 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Instant;
 
 use tokio::sync::mpsc;
-use yap_audio::{Clip, ClipOptions, Engine, Event, Loudness, LoudnessPreset, StreamRequest};
 use yap_core::store::apps::{AudioCommand, AudioEvent, ClipSource};
 use yap_core::{config, AudioEvents, AudioHandle, Token};
 use yap_protocol::voice_app as wire;
+
+use crate::{Clip, ClipOptions, Engine, Event, Loudness, LoudnessPreset, StreamRequest};
+
+/// Where the soundboard volume setting (0..=100) is read until
+/// [`set_soundboard_volume`] says it: the app's saved settings.
+pub type VolumeSource = Box<dyn Fn() -> u8 + Send + Sync>;
 
 /// Clips whose bytes stay cached (the picker replays the same few).
 const CACHE_CLIPS: usize = 24;
@@ -55,6 +61,8 @@ struct Glue {
     fetching: HashMap<String, u64>,
     next: u64,
     cache: ClipCache,
+    /// The saved setting, for as long as [`Glue::master`] is unset.
+    saved: Option<VolumeSource>,
 }
 
 impl Glue {
@@ -133,7 +141,8 @@ fn glue() -> MutexGuard<'static, Glue> {
 
 fn master(glue: &Glue) -> f64 {
     glue.master.unwrap_or_else(|| {
-        f64::from(crate::desktop::current().sound_settings.soundboard_volume) / 100.0
+        let saved = glue.saved.as_ref().map_or(100, |saved| saved());
+        f64::from(saved.min(100)) / 100.0
     })
 }
 
@@ -157,12 +166,18 @@ pub fn set_soundboard_volume(volume: u8) {
     }
 }
 
+/// Now, in milliseconds since the Unix epoch.
 fn now_ms() -> i64 {
-    crate::client::voice::now_ms()
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
-/// Starts the player; the runtime calls this once.
-pub fn spawn(http: reqwest::Client, events: AudioEvents) -> AudioHandle {
+/// Starts the player; the runtime calls this once, on its tokio runtime.
+/// `volume` reads the saved soundboard volume setting until the app calls
+/// [`set_soundboard_volume`].
+pub fn spawn(http: reqwest::Client, events: AudioEvents, volume: VolumeSource) -> AudioHandle {
+    glue().saved = Some(volume);
     let sink = events.clone();
     let engine = Engine::new(Arc::new(move |event: Event| {
         let event = match event {
@@ -524,7 +539,7 @@ fn public_client() -> Option<&'static reqwest::Client> {
     static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
     CLIENT
         .get_or_init(|| {
-            yap_audio::public_http_client()
+            crate::public_http_client()
                 .map_err(|e| eprintln!("[soundboard] no public HTTP client: {e}"))
                 .ok()
         })

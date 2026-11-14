@@ -1,30 +1,10 @@
-//! Media plumbing outside QML: the session the image loader sends with
-//! the API's private media (`cpp/main.cpp` asks [`yap_media_auth`]), and
-//! what the composer knows about a local file before it uploads it.
+//! Media plumbing outside QML: the C entry points `cpp/main.cpp` asks for
+//! the session the image loader sends with the API's private media
+//! ([`yap_media_auth`]) and for the loopback URLs players use. The session
+//! store and the upload file facts are shared with the phone
+//! (`yap_ui::media`).
 
 use std::ffi::c_char;
-use std::sync::{PoisonError, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use yap_core::{Token, UploadFile};
-
-static MEDIA_TOKEN: RwLock<Option<Token>> = RwLock::new(None);
-
-/// The session for media requests; `None` after sign-out.
-pub fn set_token(token: Option<Token>) {
-    *MEDIA_TOKEN.write().unwrap_or_else(PoisonError::into_inner) = token;
-}
-
-/// `Bearer <session>` for `url` when it is the API's own private media
-/// (attachments, custom emoji); `None` for anything else, which never gets
-/// the session.
-pub fn bearer_for(url: &str) -> Option<String> {
-    if !yap_core::api::media_needs_auth(&yap_core::config::get().api_base, url) {
-        return None;
-    }
-    let guard = MEDIA_TOKEN.read().unwrap_or_else(PoisonError::into_inner);
-    guard.as_ref().map(|t| format!("Bearer {}", t.as_str()))
-}
 
 /// The loopback URL a player uses for `url` (UTF-8, `len` bytes): its
 /// length, written to `out` if it fits in `cap`; 0 when `url` is not the
@@ -101,11 +81,7 @@ pub unsafe extern "C" fn yap_media_auth(
     let Ok(url) = std::str::from_utf8(bytes) else {
         return 0;
     };
-    if !yap_core::api::media_needs_auth(&yap_core::config::get().api_base, url) {
-        return 0;
-    }
-    let guard = MEDIA_TOKEN.read().unwrap_or_else(PoisonError::into_inner);
-    let Some(token) = guard.as_ref() else {
+    let Some(token) = yap_ui::media::token_for(url) else {
         return 0;
     };
     let token = token.as_str().as_bytes();
@@ -116,67 +92,4 @@ pub unsafe extern "C" fn yap_media_auth(
         unsafe { std::ptr::copy_nonoverlapping(token.as_ptr(), out.cast::<u8>(), token.len()) };
     }
     token.len()
-}
-
-/// The MIME type the browser would send for a file name (the common ones;
-/// the server stores whatever it gets, `application/octet-stream` else).
-pub fn content_type(name: &str) -> &'static str {
-    let ext = name
-        .rsplit_once('.')
-        .map(|(_, ext)| ext.to_ascii_lowercase())
-        .unwrap_or_default();
-    match ext.as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" | "jfif" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "bmp" => "image/bmp",
-        "avif" => "image/avif",
-        "svg" => "image/svg+xml",
-        "ico" => "image/x-icon",
-        "mp4" | "m4v" => "video/mp4",
-        "webm" => "video/webm",
-        "ogv" => "video/ogg",
-        "mov" => "video/quicktime",
-        "mkv" => "video/x-matroska",
-        "mp3" => "audio/mpeg",
-        "wav" => "audio/wav",
-        "ogg" | "oga" => "audio/ogg",
-        "flac" => "audio/flac",
-        "m4a" => "audio/mp4",
-        "pdf" => "application/pdf",
-        "zip" => "application/zip",
-        "7z" => "application/x-7z-compressed",
-        "json" => "application/json",
-        "txt" | "log" | "md" => "text/plain",
-        "csv" => "text/csv",
-        "html" | "htm" => "text/html",
-        _ => "application/octet-stream",
-    }
-}
-
-/// Reads what an upload needs to know about each local file; folders and
-/// files that cannot be read are skipped.
-pub fn upload_files(paths: &[String]) -> Vec<UploadFile> {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    paths
-        .iter()
-        .enumerate()
-        .filter_map(|(i, path)| {
-            let meta = std::fs::metadata(path).ok().filter(|m| m.is_file())?;
-            let name = std::path::Path::new(path)
-                .file_name()?
-                .to_string_lossy()
-                .into_owned();
-            Some(UploadFile {
-                local_id: format!("upload-{stamp:x}-{i}"),
-                path: path.clone(),
-                content_type: content_type(&name).to_owned(),
-                name,
-                size: meta.len(),
-            })
-        })
-        .collect()
 }

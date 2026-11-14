@@ -1,5 +1,5 @@
-//! Yap's one speaker. Everything the app plays goes through one shared-mode
-//! WASAPI render stream:
+//! Yap's one speaker. Everything the app plays goes through one render
+//! stream (shared-mode WASAPI on Windows, AAudio on Android):
 //!
 //! - the call's mix of remote tracks (`yap-voice`),
 //! - the soundboard, its tones and the Listen Together stream (`yap-audio`),
@@ -24,6 +24,11 @@
 //! second) is reopened at once. The mix keeps its clock in the meantime,
 //! so the call's far end never stalls.
 //!
+//! On Android the call's own audio plays through libwebrtc's device module,
+//! not this speaker; the speaker carries the soundboard and the UI sounds,
+//! as call audio while a call runs ([`Speaker::set_call`]), so it follows
+//! the call's route and volume.
+//!
 //! # Lifetime
 //!
 //! The render thread starts when an input has something to play
@@ -39,6 +44,8 @@
 //! - `YAP_SPEAKER_AHEAD_MS=<10..=60>`: how far ahead of the device the mix
 //!   runs (default 20).
 
+#[cfg(target_os = "android")]
+mod aaudio;
 pub mod bus;
 pub mod endpoint;
 mod engine;

@@ -80,7 +80,7 @@ yap-hotkeys.workspace = true
 yap-protocol.workspace = true
 yap-realtime.workspace = true
 yap-voice.workspace = true
-yap-audio = { workspace = true, features = ["libopus"] }
+yap-audio = { workspace = true, features = ["libopus", "store"] }
 yap-speaker.workspace = true
 yap-anim.workspace = true
 yap-webm = { workspace = true, features = ["libvpx"] }
