@@ -1,6 +1,6 @@
 # Yap Privacy Policy
 
-Effective date: November 13, 2026
+Effective date: November 14, 2026
 
 Yap is operated by 115jon. Questions about this policy, privacy requests,
 or data deletion requests can be sent to <115jon@proton.me>.
@@ -14,13 +14,51 @@ the service. When a user joins a voice or video session, the service processes
 the room/channel identifiers, connection credentials, and the media the user
 chooses to send.
 
+When an account is first created, Yap takes its username, display name and
+avatar from the Kova sign-in account (`auth.115jon.com`), which may carry the
+name and picture of the account used to sign in to Kova (such as Google). The
+username comes from that sign-in account's username or, without one, the part
+of its email address before the `@`. Yap does not store the email address.
+The user can change all three in Settings.
+
 Yap keeps per-account usage counters: time spent in voice and screen sharing,
 the number of messages sent, and when the account was last active. They are
 used to award profile badges and are deleted with the account.
 
-The desktop application may store account-session information and application
-settings on the user's device. Browser and CEF runtime data, such as cached web
-resources and local storage, may also be stored locally.
+Each signed-in device appears in the user's session list with its platform
+and device name (on Android, the phone's model name). The user can sign a
+device out from any other.
+
+The desktop and Android applications store the session on the device (on
+Windows in the Windows credential store; on Android in a file sealed with a
+key from the Android Keystore, kept out of cloud backup and device transfer),
+along with settings and a cache of recent conversations that is wiped on
+sign-out. The web application keeps its session and settings in the
+browser's storage. The desktop application's web players (see Link previews)
+keep their own WebView2 data in the application's data folder.
+
+## Microphone, camera and screen sharing
+
+Yap uses the microphone only while the user is in a voice channel or a call
+(or testing it in settings), the camera only while the user has turned it on,
+and screen capture only while the user is sharing a screen or window.
+Browsers and Android ask for each permission the first time it is needed; on
+Windows, the system's privacy settings control the microphone and camera.
+The Android app shows an ongoing notification, with Mute and Leave, for as
+long as a call keeps the microphone open.
+
+Voice, video and screen shares travel to Yap's selective forwarding unit
+(Cloudflare Realtime) and from there to the other people in the call. They
+are not recorded (see Retention and deletion). Noise suppression and camera
+background effects run on the user's device.
+
+A shared window shows that window; a shared screen shows everything on it,
+notifications included. In the desktop application, sharing a whole screen with audio
+sends everything the computer plays, other people's voices in the call
+included; sharing a window sends only that application's sound.
+
+The Android app's composer can take a photo with the phone's camera app; the
+photo leaves the phone only if the user sends it.
 
 ## Game activity
 
@@ -45,7 +83,8 @@ foreground window, and compares them against Yap's game catalog, which ships
 with the application and is refreshed from Yap's server. The list of running
 programs stays on the device; only a matched game's name, catalog icon and
 start time are sent. Detection can be turned off, and single games hidden, in
-the desktop application's Registered games settings on that device.
+the desktop application's Registered games settings on that device. The
+Android app does not detect games.
 
 ## Activity timeline
 
@@ -131,7 +170,8 @@ Yap uses these services:
 - `auth.115jon.com` for the project-maintained Kova authentication service.
 - Cloudflare services for application delivery and infrastructure.
 - GitHub Releases for published desktop releases and desktop update metadata.
-- WebRTC/SFU services used by Yap for voice, video, and screen sharing.
+- Cloudflare Realtime, Yap's selective forwarding unit, for voice, video and
+  screen sharing.
 - `steamcommunity.com` when a user links a Steam account (see Connections).
 - `deadlock-api.com`, from Yap's server only, for Deadlock stats (see
   Deadlock stats).
@@ -141,8 +181,16 @@ Yap uses these services:
   send time, and the start of the message (up to 180 characters).
 - KLIPY and Tenor for GIF, sticker and clip search. Yap's server sends them
   the search terms; KLIPY also gets a pseudonymous identifier derived from
-  the account (never the account ID or name). The pictures and videos
-  themselves currently load in the apps from the providers' servers.
+  the account (never the account ID or name). The pictures and videos load
+  through Yap's media proxy (see Media proxy), not from the providers. KLIPY
+  also makes custom emoji: Yap's server sends it the text prompt the user
+  types and stores the picture it returns.
+- `myinstants.com`, from Yap's server only, for soundboard sound search.
+- `radio-browser.info` for radio station search in Listen Together. The web
+  and desktop applications ask it directly, so it sees the user's IP address
+  and the search; no account information is sent.
+- jsDelivr (`cdn.jsdelivr.net`), from which the web application's emoji
+  picker loads its emoji pictures.
 
 ### Link previews
 
@@ -154,7 +202,9 @@ preview. Some sites are read through other services:
   and their `fixupx.com` and `fixvx.com` hosts;
 - TikTok videos through TikTok's oEmbed, page and player API and through
   `tikwm.com`;
-- Instagram posts through Instagram's oEmbed and media endpoints.
+- Instagram posts through Instagram's oEmbed and media endpoints;
+- YouTube videos through YouTube's oEmbed and player API, and Spotify links
+  through Spotify's oEmbed.
 
 Some of these requests, and YouTube requests for Listen Together, go through
 a relay Yap's operator runs on a server in the United States
@@ -164,27 +214,95 @@ can start the preview before the message is sent, except for links that look
 like sign-in, password-reset or magic links or carry a token in the address.
 A link written as `<https://...>` gets no preview.
 
-Some previews load the provider's own content in the apps, so the provider
-sees the viewer's IP address and its own cookies: YouTube's player (when the
-viewer presses play) and video thumbnails, Spotify's player (when the preview
-scrolls into view), and TikTok's player when no video file is available.
+Some previews can play in the provider's own player: YouTube's, Spotify's,
+TikTok's when no video file is available, and other sites' video players.
+These load only when the viewer presses play, and from then on the provider
+sees the viewer's IP address and its own cookies.
 
-The web and desktop applications can also connect to locations selected by the
-user or supplied in user content, such as a shared link, embed, attachment, or
-room invitation.
+Yap also answers oEmbed requests for its own public message-share links, so
+other sites can preview a shared message.
+
+### Media proxy
+
+Pictures, videos and audio from other sites in link previews, GIFs, avatars
+from sign-in providers and Steam, and Listen Together artwork reach the apps
+through Yap's media proxy (`/api/proxy-media`), so those sites see Yap's
+server, not the viewer. The proxy sends no cookies or viewer headers,
+refuses private network addresses, accepts only picture, video and audio
+files up to a size limit, and serves only addresses Yap's server signed or
+requests from a signed-in user. Files may stay in Cloudflare's cache for up
+to seven days. Videos streamed as playlists of many segments (HLS) still
+load from the provider.
+
+The apps also open locations the user chooses or that appear in user
+content, such as a link the user opens or a room invitation.
+
+## Notifications and calls
+
+Push notifications reach the Android app through Firebase Cloud Messaging;
+what a message notification carries is listed under Where information is
+sent. The app asks for the notification permission on Android 13 and later.
+Signing the phone out, from the phone or from another device, or deleting
+the account removes the phone's notification token.
+
+When someone rings a user in a direct message, the ring goes to the user's
+signed-in apps and, through Firebase Cloud Messaging, to their phones. The
+ring carries the call and channel IDs, the caller's account ID, name and
+avatar address, and how long it rings, so the phone can show the call at
+once. The Android app shows an incoming call over the lock screen with the
+caller's name and avatar (on Android 14 and later only if the user allows
+Yap's full-screen notifications). A ring that is not answered becomes a
+missed call.
+
+Message notifications are marked private: on a phone set to hide sensitive
+notification content, the lock screen shows only "New message" or "New
+direct message".
+
+## Crash reports
+
+The desktop application writes a crash dump (the threads, their stacks and
+the loaded modules, without the memory they point to) to its own data folder
+on the computer and keeps the newest ten. Nothing is uploaded. The next
+launch offers to open the folder, and the user decides whether to send a
+dump to anyone.
+
+The Android app does not upload crash reports and contains no crash
+reporting or analytics SDK. Where it saves a report about a crash, the
+report stays on the phone, and the user can read it, share it through
+Android's share sheet with a recipient they choose, or delete it.
 
 ## Automatic desktop connections
 
-The current desktop client may check GitHub Releases for application updates,
-restore a previously saved session with Yap/Kova services, and connect to
-the chat gateway after a signed-in chat view opens. These behaviors are being
-made explicitly configurable during installation and in desktop settings before
-the next SignPath Foundation candidate release. Automatic update downloads and
-installation must require a user action.
+After it starts, the desktop application restores the saved session with
+Yap and Kova and connects to the chat gateway. It checks GitHub Releases for
+updates about 20 seconds after it starts and every six hours after that, and
+downloads a newer version in the background. The update is installed when
+the user presses Restart now or, while "Install on quit" is on (the default,
+in Settings, Desktop app), when the application quits. Development builds and
+portable copies do not update themselves.
 
 The desktop application does not include a dedicated third-party analytics SDK.
 This statement does not limit infrastructure logging needed to secure, operate,
 or diagnose the service.
+
+## Uploaded files
+
+Before an uploaded file is stored, Yap's server removes location, camera and
+other metadata from it: EXIF (with its GPS, camera and time tags), XMP,
+IPTC and comments in JPEG, PNG, WebP and GIF pictures, and location and
+similar metadata in MP4 and MOV videos. It does this for attachments,
+soundboard sounds, avatars, banners, nameplates, server icons, profile board
+pictures, camera backgrounds and voice status media. Yap cannot clean some
+formats (HEIC/HEIF, AVIF, TIFF, JPEG XL) or videos with a location or
+subtitle track. As an avatar, banner or other public picture such a file is
+refused; as an attachment it is stored as uploaded, and the app is told its
+metadata could not be checked. Other files, such as documents and audio, are
+stored as uploaded.
+
+The Android app also turns a picture chosen for an avatar or banner upright,
+converts HEIC and AVIF to JPEG and drops its location before uploading it.
+
+An attachment keeps its file name, which others in the conversation see.
 
 ## How Yap uses information
 
@@ -192,6 +310,19 @@ Yap uses information to authenticate users, provide chat and real-time
 communication, deliver notifications, store user-selected content, prevent
 abuse, secure the service, and investigate service failures. Yap does not
 sell personal information.
+
+## Blocking
+
+A user can block another user; the blocked user is not told. Across a
+block, in either direction, neither user can start a direct message with the
+other or, in their direct message, send messages, reactions or typing, ring,
+or join its call, and a block ends a ring or a direct-message call already
+under way. A blocked user's friend requests are refused, and their mentions,
+replies and direct messages do not notify the user who blocked them. In
+servers, the blocker's apps collapse the blocked user's messages. The
+blocked user cannot see the blocker's Activity timeline or connections.
+Blocks last until the user unblocks (and survive account deletion, see
+Deleting your account).
 
 ## Retention and deletion
 
@@ -229,7 +360,9 @@ years from the relevant binary distribution date.
 ## Deleting your account
 
 A user can delete their Yap account in Settings, under Account, in the web,
-desktop and mobile apps. Yap asks them to type their username to confirm. A
+desktop and Android apps. Without an app installed, the web app at
+`yap.115jon.com` works from any browser, or the user can email
+<115jon@proton.me>. Yap asks them to type their username to confirm. A
 user who owns a server must delete it first.
 
 When a user asks for deletion, Yap at once:
