@@ -11,7 +11,8 @@ name: "Desktop Native Mobile Prototype"
 #   with that key, so these builds are their own app, dev.yap.app.ci ("Yap
 #   CI"), without push notifications: an APK signed with it can never
 #   update an installed dev.yap.app. Qt comes from download.qt.io, pinned by
-#   native/mobile/qt-sdk.lock.json. The session vault's tests run first.
+#   native/mobile/qt-sdk.lock.json. The session vault's and the crash
+#   report's tests run first.
 # - qt-android-smoke: the x86_64 APK cold-started on an emulator.
 # - qt-ios: the same CMake project for the iOS simulator, a compile and link
 #   check (no signing, no run). It runs when native/mobile changes, by hand, and
@@ -174,6 +175,19 @@ jobs:
       - name: Session vault tests
         if: ${{ matrix.abi == 'x86_64' }}
         run: cargo test --locked --manifest-path native/mobile/vault/Cargo.toml
+
+      # The crash report's redaction and tombstone reader (plain Java, no
+      # Android or JUnit): native/mobile/android/test.
+      - name: Crash report tests
+        if: ${{ matrix.abi == 'x86_64' }}
+        working-directory: native/mobile/android
+        run: |
+          out="$RUNNER_TEMP/crash-tests"
+          javac -Xlint:all -Werror -d "$out" \
+            src/dev/yap/qtproto/crash/Redactor.java \
+            src/dev/yap/qtproto/crash/Tombstone.java \
+            test/dev/yap/qtproto/crash/CrashReportTest.java
+          java -cp "$out" dev.yap.qtproto.crash.CrashReportTest
 
       # No Firebase configuration (YAP_GOOGLE_SERVICES_JSON unset): the
       # Firebase project knows dev.yap.app only, and a CI build is not a

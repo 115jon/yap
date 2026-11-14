@@ -215,5 +215,13 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/qtprovider_paths"/>
         </provider>
+        <!-- Crash reports (crash/CrashReports): the exception handler and
+             the Rust hook's folder, set before any activity, service or
+             receiver runs in the process. Shares nothing. -->
+        <provider
+            android:name="dev.yap.qtproto.crash.CrashInit"
+            android:authorities="${applicationId}.crashinit"
+            android:exported="false"
+            android:initOrder="1000" />
     </application>
 </manifest>
