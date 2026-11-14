@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // One order of a profile frame (ProfileFrameLayer.tsx, lib/profile-frame.ts)
