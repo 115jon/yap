@@ -10,15 +10,10 @@ import Yap.Ui
 T.Drawer {
     id: sheet
 
-    readonly property var options: [
-        { id: "light", label: qsTr("Light"), stops: ["#ffffff", "#f4f4f5", "#c0127a"] },
-        { id: "dark", label: qsTr("Midnight"), stops: ["#141417", "#0b0b0d", "#ff8ad8"] },
-        { id: "system", label: qsTr("System"), stops: ["#0b0b0d", "#80808a", "#f4f4f5"] },
-        { id: "miku-light", label: qsTr("Miku Light"), stops: ["#ffffff", "#e8f4fd", "#f872a5"] },
-        { id: "miku-dark", label: qsTr("Miku Dark"), stops: ["#13111f", "#0f0d19", "#f872a5"] },
-        { id: "spiderman-light", label: qsTr("Spider-Man Light"), stops: ["#ffffff", "#eef0f6", "#E50914"] },
-        { id: "spiderman-dark", label: qsTr("Spider-Man Dark"), stops: ["#06050a", "#0b0a10", "#E50914"] },
-    ]
+    // The catalog's themes (Theme.themeCatalog) in the sheet's order: light
+    // first in each pair, and Match system, named System here, after Midnight.
+    readonly property var options: ["light", "dark", "system", "miku-light", "miku-dark", "spiderman-light", "spiderman-dark"]
+        .map(id => Object.assign({}, Theme.themeEntry(id), id === "system" ? { label: qsTr("System") } : {}))
 
     edge: Qt.RightEdge
     width: 360

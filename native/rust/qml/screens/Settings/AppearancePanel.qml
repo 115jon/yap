@@ -11,16 +11,6 @@ import Yap.Ui
 Column {
     id: root
 
-    // Hand-matched to each theme's tokens, for the thumbnails (SWATCHES).
-    readonly property var swatches: ({
-        "dark": { bg: "#0b0b0d", rail: "#000000", sidebar: "#141417", elevated: "#232328", accent: "#ff8ad8", text: "#f2f2f3", textDim: Qt.rgba(0.949, 0.949, 0.953, 0.35), border: Qt.rgba(0.949, 0.949, 0.953, 0.08) },
-        "light": { bg: "#fafafa", rail: "#f4f4f5", sidebar: "#f0f0f2", elevated: "#ffffff", accent: "#c0127a", text: "#0b0b0d", textDim: Qt.rgba(0.043, 0.043, 0.051, 0.3), border: Qt.rgba(0.043, 0.043, 0.051, 0.09) },
-        "miku-dark": { bg: "#0c0b14", rail: "#07060d", sidebar: "#0f0e1a", elevated: "#1b192e", accent: "#39c5bb", text: "#ffffff", textDim: Qt.rgba(0.698, 0.722, 0.816, 0.45), border: "#23213a" },
-        "miku-light": { bg: "#f3faf9", rail: "#d3ede8", sidebar: "#e1f3f0", elevated: "#ffffff", accent: "#00a399", text: "#1b2240", textDim: Qt.rgba(0.239, 0.278, 0.4, 0.35), border: "#c0e7e1" },
-        "spiderman-dark": { bg: "#020208", rail: "#000000", sidebar: "#03030b", elevated: "#0d0d22", accent: "#e50914", text: "#ffffff", textDim: Qt.rgba(0.804, 0.824, 0.878, 0.4), border: Qt.rgba(0.102, 0.451, 0.91, 0.35) },
-        "spiderman-light": { bg: "#f8f9fc", rail: "#e8ebf3", sidebar: "#f1f3f9", elevated: "#ffffff", accent: "#e50914", text: "#0f172a", textDim: Qt.rgba(0.278, 0.333, 0.412, 0.35), border: Qt.rgba(0.059, 0.09, 0.165, 0.08) }
-    })
-
     spacing: 40
 
     SettingsCard {
@@ -45,7 +35,7 @@ Column {
                 Accessible.role: Accessible.Grouping
                 Accessible.name: SettingsNav.label("theme")
                 Repeater {
-                    model: SettingsNav.themes
+                    model: Theme.themeCatalog
                     delegate: T.AbstractButton {
                         id: tile
                         required property var modelData
@@ -74,7 +64,7 @@ Column {
                                 sourceComponent: tile.modelData.id === "system" ? splitMock : singleMock
                                 Component {
                                     id: singleMock
-                                    ThemeMock { t: root.swatches[tile.modelData.id] }
+                                    ThemeMock { t: Theme.themeMock(tile.modelData.id) }
                                 }
                                 Component {
                                     id: splitMock
@@ -83,14 +73,14 @@ Column {
                                             width: parent.width / 2
                                             height: parent.height
                                             clip: true
-                                            ThemeMock { width: parent.width * 2; height: parent.height; t: root.swatches["dark"] }
+                                            ThemeMock { width: parent.width * 2; height: parent.height; t: Theme.themeMock("dark") }
                                         }
                                         Item {
                                             x: parent.width / 2
                                             width: parent.width / 2
                                             height: parent.height
                                             clip: true
-                                            ThemeMock { x: -parent.width; width: parent.width * 2; height: parent.height; t: root.swatches["light"] }
+                                            ThemeMock { x: -parent.width; width: parent.width * 2; height: parent.height; t: Theme.themeMock("light") }
                                         }
                                     }
                                 }

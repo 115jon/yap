@@ -35,32 +35,6 @@ Rectangle {
     readonly property real bottomInset: SafeArea.margins.bottom
 
     readonly property string status: Session.meStatus.length > 0 ? Session.meStatus : "online"
-    readonly property var statuses: [
-        { value: "online", label: qsTr("Online"), hint: "" },
-        { value: "idle", label: qsTr("Idle"), hint: "" },
-        { value: "dnd", label: qsTr("Do not disturb"), hint: qsTr("Mutes notifications") },
-        { value: "offline", label: qsTr("Invisible"), hint: qsTr("You show as offline") }
-    ]
-    // The core's themes (yap_core::settings::APP_THEMES), in pairs per
-    // palette after Match system; labels as the desktop's SettingsNav.
-    readonly property var themes: [
-        { id: "dark", label: qsTr("Midnight") },
-        { id: "light", label: qsTr("Light") },
-        { id: "miku-dark", label: qsTr("Miku Dark") },
-        { id: "miku-light", label: qsTr("Miku Light") },
-        { id: "spiderman-dark", label: qsTr("Spider-Man Dark") },
-        { id: "spiderman-light", label: qsTr("Spider-Man Light") }
-    ]
-    // Hand-matched to each theme's tokens for the thumbnails (the desktop
-    // AppearancePanel's SWATCHES).
-    readonly property var swatches: ({
-        "dark": { bg: "#0b0b0d", rail: "#000000", sidebar: "#141417", accent: "#ff8ad8", text: "#f2f2f3", dim: "#3a3a40" },
-        "light": { bg: "#fafafa", rail: "#f4f4f5", sidebar: "#f0f0f2", accent: "#c0127a", text: "#0b0b0d", dim: "#c9c9cf" },
-        "miku-dark": { bg: "#0c0b14", rail: "#07060d", sidebar: "#0f0e1a", accent: "#39c5bb", text: "#ffffff", dim: "#34324a" },
-        "miku-light": { bg: "#f3faf9", rail: "#d3ede8", sidebar: "#e1f3f0", accent: "#00a399", text: "#1b2240", dim: "#b5d6d1" },
-        "spiderman-dark": { bg: "#020208", rail: "#000000", sidebar: "#03030b", accent: "#e50914", text: "#ffffff", dim: "#1d2a52" },
-        "spiderman-light": { bg: "#f8f9fc", rail: "#e8ebf3", sidebar: "#f1f3f9", accent: "#e50914", text: "#0f172a", dim: "#c7cddd" }
-    })
     // Text size factors over the system's scale.
     readonly property var textSizes: [
         { factor: 0.85, label: qsTr("Small") },
@@ -189,7 +163,7 @@ Rectangle {
                 number: 1
                 title: qsTr("Status")
                 Repeater {
-                    model: root.statuses
+                    model: Theme.presenceOptions
                     delegate: ChoiceRow {
                         required property var modelData
                         text: modelData.label
@@ -262,7 +236,7 @@ Rectangle {
                     columnSpacing: 12
                     rowSpacing: 12
                     Repeater {
-                        model: root.themes
+                        model: Theme.themePalettes
                         delegate: ThemeTile {
                             required property var modelData
                             width: (parent.width - 12) / 2
@@ -856,14 +830,14 @@ Rectangle {
                     width: parent.width
                     height: parent.height
                     active: tile.themeId !== "system"
-                    sourceComponent: Mock { t: root.swatches[tile.themeId] }
+                    sourceComponent: Mock { t: Theme.themeMock(tile.themeId) }
                 }
                 Item {
                     visible: tile.themeId === "system"
                     width: parent.width / 2
                     height: parent.height
                     clip: true
-                    Mock { width: parent.width * 2; height: parent.height; t: root.swatches["dark"] }
+                    Mock { width: parent.width * 2; height: parent.height; t: Theme.themeMock("dark") }
                 }
                 Item {
                     visible: tile.themeId === "system"
@@ -871,7 +845,7 @@ Rectangle {
                     width: parent.width / 2
                     height: parent.height
                     clip: true
-                    Mock { x: -parent.width; width: parent.width * 2; height: parent.height; t: root.swatches["light"] }
+                    Mock { x: -parent.width; width: parent.width * 2; height: parent.height; t: Theme.themeMock("light") }
                 }
             }
             Rectangle {
