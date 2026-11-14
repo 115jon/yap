@@ -275,6 +275,21 @@ jobs:
           done
           exit 1
 
+      - name: Host qsb's libraries
+        # The host Qt's qsb bakes the name-effect shaders (mobile
+        # CMakeLists.txt). It links QtGui, which loads EGL, OpenGL, X11,
+        # xkbcommon and fontconfig even with no display. Retried like the
+        # step above.
+        run: |
+          for attempt in 1 2 3 4; do
+            sudo apt-get update -qq -o Acquire::Retries=3 || true
+            if sudo apt-get install -y -qq -o Acquire::Retries=3                 libegl1 libgl1 libopengl0 libxkbcommon0 libfontconfig1 libfreetype6 libx11-6; then
+              exit 0
+            fi
+            sleep $((attempt * 15))
+          done
+          exit 1
+
       - name: Android NDK, platform and build tools
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
