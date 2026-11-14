@@ -142,19 +142,44 @@ describe("sendFriendRequest", () => {
   it("auto-accepts when target already sent a request (type 2)", async () => {
     db.mockQuery("FROM users WHERE username", userRow());
     db.mockQuery("FROM relationships WHERE user_id", { type: 2 });
+    db.mockQuery("UPDATE relationships SET type = 0", { meta: { changes: 1 } });
 
     const result = await sendFriendRequest(db as any, USER_ID, "bob");
     expect(result.type).toBe(0); // Friends now
-    db.assertCalledWith("UPDATE relationships SET type = 0", [
+    // Only the pending rows change: ours (2) and theirs (3).
+    db.assertCalledWith("AND type = 2", [
       anyTimestamp(),
       USER_ID,
       TARGET_ID,
-    ]);
-    db.assertCalledWith("UPDATE relationships SET type = 0", [
-      anyTimestamp(),
       TARGET_ID,
       USER_ID,
     ]);
+    db.assertCalledWith("AND type = 3", [
+      anyTimestamp(),
+      TARGET_ID,
+      USER_ID,
+      USER_ID,
+      TARGET_ID,
+    ]);
+  });
+
+  it("refuses the auto-accept when a block raced it", async () => {
+    db.mockQuery("FROM users WHERE username", userRow());
+    db.mockQuery("FROM relationships WHERE user_id", { type: 2 });
+    db.mockQuery("UPDATE relationships SET type = 0", { meta: { changes: 0 } });
+    // They block us between the block check and the accept.
+    const batch = db.batch.bind(db);
+    db.batch = async (stmts) => {
+      db.mockQuery("WHERE type = 1", { results: [{ user_id: TARGET_ID }] });
+      return batch(stmts);
+    };
+
+    await expect(
+      sendFriendRequest(db as any, USER_ID, "bob"),
+    ).rejects.toMatchObject({ status: 403, code: "BLOCKED_BY_USER" });
+    expect(db.calls.some((call) => call.sql.includes("AND type = 2"))).toBe(
+      true,
+    );
   });
 });
 
@@ -172,20 +197,54 @@ describe("acceptFriendRequest", () => {
       USER_ID,
       TARGET_ID,
     ]);
+    db.mockQuery("UPDATE relationships SET type = 0", { meta: { changes: 1 } });
 
     const result = await acceptFriendRequest(db as any, USER_ID, TARGET_ID);
     expect(result.type).toBe(0);
-    // Both directions become friends, each row keyed (user, target).
-    db.assertCalledWith("UPDATE relationships SET type = 0", [
+    // Both directions become friends, each row keyed (user, target), and
+    // only from the pending types (ours 2, theirs 3).
+    db.assertCalledWith("AND type = 2", [
       anyTimestamp(),
       USER_ID,
       TARGET_ID,
-    ]);
-    db.assertCalledWith("UPDATE relationships SET type = 0", [
-      anyTimestamp(),
       TARGET_ID,
       USER_ID,
     ]);
+    db.assertCalledWith("AND type = 3", [
+      anyTimestamp(),
+      TARGET_ID,
+      USER_ID,
+      USER_ID,
+      TARGET_ID,
+    ]);
+  });
+
+  it("lets a block made after the read win", async () => {
+    db.mockQuery("FROM relationships WHERE user_id", { "1": 1 }, [
+      USER_ID,
+      TARGET_ID,
+    ]);
+    db.mockQuery("UPDATE relationships SET type = 0", { meta: { changes: 0 } });
+    db.mockQuery("WHERE type = 1", { results: [{ user_id: USER_ID }] });
+
+    await expect(
+      acceptFriendRequest(db as any, USER_ID, TARGET_ID),
+    ).rejects.toMatchObject({ status: 409, code: "USER_BLOCKED" });
+    expect(
+      db.calls.some((call) => call.sql.includes("FROM users WHERE id")),
+    ).toBe(false);
+  });
+
+  it("says the request is gone when it was cancelled after the read", async () => {
+    db.mockQuery("FROM relationships WHERE user_id", { "1": 1 }, [
+      USER_ID,
+      TARGET_ID,
+    ]);
+    db.mockQuery("UPDATE relationships SET type = 0", { meta: { changes: 0 } });
+
+    await expect(
+      acceptFriendRequest(db as any, USER_ID, TARGET_ID),
+    ).rejects.toHaveProperty("status", 404);
   });
 
   it("throws 404 when no pending request", async () => {

@@ -6,7 +6,12 @@ import { CacheKey } from "@/lib/cache";
 import { ServiceError } from "@/lib/service-error";
 import type { D1Database } from "@cloudflare/workers-types";
 import type { BroadcastDescriptor } from "./server.service";
-import { blockBetween, blockRefusal, BLOCK_ERROR } from "./block.service";
+import {
+  blockBetween,
+  blockRefusal,
+  BLOCK_ERROR,
+  type BlockState,
+} from "./block.service";
 import { recordServerJoin } from "./profile-activity.service";
 
 // ─── listRelationships ───────────────────────────────────────────────────────
@@ -78,18 +83,7 @@ export async function sendFriendRequest(
   // leave a pending row behind for the blocker). The block may name an
   // account purged and signed up again with the same id (migration 046).
   const block = await blockBetween(db, userId, target.id as string);
-  if (block === "you_blocked") {
-    throw ServiceError.conflict(
-      "You blocked this user. Unblock to send a friend request.",
-      BLOCK_ERROR.youBlocked,
-    );
-  }
-  if (block === "blocked_you") {
-    throw ServiceError.forbidden(
-      "You can't send this user a friend request.",
-      BLOCK_ERROR.blockedYou,
-    );
-  }
+  if (block) throw friendBlockRefusal(block);
 
   // Check existing relationship
   const existing = (await db
@@ -107,18 +101,13 @@ export async function sendFriendRequest(
     if (existing.type === 2) {
       // They sent us a request — auto-accept
       const now = new Date().toISOString();
-      await db.batch([
-        db
-          .prepare(
-            `UPDATE relationships SET type = 0, updated_at = ? WHERE user_id = ? AND target_user_id = ?`,
-          )
-          .bind(now, userId, target.id as string),
-        db
-          .prepare(
-            `UPDATE relationships SET type = 0, updated_at = ? WHERE user_id = ? AND target_user_id = ?`,
-          )
-          .bind(now, target.id as string, userId),
-      ]);
+      const accepted = await acceptPendingRequest(
+        db,
+        userId,
+        target.id as string,
+        now,
+      );
+      if (!accepted) await throwRequestGone(db, userId, target.id as string);
       return {
         user: {
           id: target.id,
@@ -190,6 +179,66 @@ export async function sendFriendRequest(
 
 // ─── acceptFriendRequest ────────────────────────────────────────────────────
 
+/** A friend request refused over a block, worded for the side asking. */
+function friendBlockRefusal(block: BlockState): ServiceError {
+  return block === "you_blocked"
+    ? ServiceError.conflict(
+        "You blocked this user. Unblock to send a friend request.",
+        BLOCK_ERROR.youBlocked,
+      )
+    : ServiceError.forbidden(
+        "You can't send this user a friend request.",
+        BLOCK_ERROR.blockedYou,
+      );
+}
+
+/**
+ * Turns `requesterId`'s pending request to `userId` into a friendship both
+ * ways: `userId`'s incoming row (type 2) and the requester's outgoing one
+ * (type 3). Both change or neither does, so a block made after the caller
+ * read the request (the blocker's row is type 1, the other row is gone)
+ * stays a block. True when it became a friendship.
+ */
+async function acceptPendingRequest(
+  db: D1Database,
+  userId: string,
+  requesterId: string,
+  now: string,
+): Promise<boolean> {
+  const [incoming] = await db.batch([
+    db
+      .prepare(
+        `UPDATE relationships SET type = 0, updated_at = ?
+          WHERE user_id = ? AND target_user_id = ? AND type = 2
+            AND EXISTS (SELECT 1 FROM relationships
+                         WHERE user_id = ? AND target_user_id = ? AND type = 3)`,
+      )
+      .bind(now, userId, requesterId, requesterId, userId),
+    // Runs after the first in the same transaction: our row is a
+    // friendship only if the first statement changed it.
+    db
+      .prepare(
+        `UPDATE relationships SET type = 0, updated_at = ?
+          WHERE user_id = ? AND target_user_id = ? AND type = 3
+            AND EXISTS (SELECT 1 FROM relationships
+                         WHERE user_id = ? AND target_user_id = ? AND type = 0)`,
+      )
+      .bind(now, requesterId, userId, userId, requesterId),
+  ]);
+  return Number(incoming?.meta?.changes ?? 0) > 0;
+}
+
+/** The pending request went away before it was accepted: say why. */
+async function throwRequestGone(
+  db: D1Database,
+  userId: string,
+  requesterId: string,
+): Promise<never> {
+  const block = await blockBetween(db, userId, requesterId);
+  if (block) throw friendBlockRefusal(block);
+  throw ServiceError.notFound("No pending request");
+}
+
 export async function acceptFriendRequest(
   db: D1Database,
   userId: string,
@@ -207,18 +256,9 @@ export async function acceptFriendRequest(
   }
 
   const now = new Date().toISOString();
-  await db.batch([
-    db
-      .prepare(
-        `UPDATE relationships SET type = 0, updated_at = ? WHERE user_id = ? AND target_user_id = ?`,
-      )
-      .bind(now, userId, targetUserId),
-    db
-      .prepare(
-        `UPDATE relationships SET type = 0, updated_at = ? WHERE user_id = ? AND target_user_id = ?`,
-      )
-      .bind(now, targetUserId, userId),
-  ]);
+  if (!(await acceptPendingRequest(db, userId, targetUserId, now))) {
+    await throwRequestGone(db, userId, targetUserId);
+  }
 
   const userA = await db
     .prepare(
