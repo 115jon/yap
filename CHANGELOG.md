@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.3.1](https://github.com/115jon/yap/compare/v4.3.0...v4.3.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **web:** 🐛 let public pages scroll on phones ([6733a29](https://github.com/115jon/yap/commit/6733a29729fdd1d01ddf8b9e630eb7d896c5099b))
+* **web:** 🐛 open the app that asked after a device sign-in ([2139fbb](https://github.com/115jon/yap/commit/2139fbbec759fa59ca421e8be2ce77caff24a240))
+* **web:** let public pages scroll on phones and open the android app after sign-in ([9586c41](https://github.com/115jon/yap/commit/9586c419e22f96a519234f49b5dfb43d4edf5d40))
+
 ## [4.3.0](https://github.com/115jon/yap/compare/v4.2.0...v4.3.0) (2026-11-14)
 
 
