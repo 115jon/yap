@@ -526,13 +526,15 @@ native/mobile/            Qt Quick app (dev.yap.app)
 ├── cpp/                 main.cpp, native.* (the platform shim), push.cpp, keystore.cpp
 ├── android/             manifest, NativeShim.java, TokenVault.java, push/ (FCM), icon and splash,
 │                        build.gradle (R8, Firebase)
-├── build.sh             Qt + cxx-qt-cmake → APK (Android) or .app (iOS simulator)
+├── build.sh             Qt + cxx-qt-cmake → APK (Android), AAB (both ABIs) or .app (iOS simulator)
+├── bundle.sh            the per-ABI Gradle projects → one App Bundle (AAB)
+├── check-16k.sh         16 KB page checks: ELF LOAD alignment, zipalign -c -P 16
 ├── fetch-qt.ps1         Qt 6.11.3 from download.qt.io, pinned by qt-sdk.lock.json
 ├── VERSION              the app version (x.y.z), read by CMake and CI
-├── sign.sh              zipalign + apksigner (v2/v3), .sha256
+├── sign.sh              zipalign -P 16 + apksigner (v2/v3), or jarsigner (AAB); .sha256
 ├── smoke.sh             install, cold start, wait for the first frame
 ├── ci/                  the public CI debug keystore (not for release)
-└── docs/                screenshots
+└── docs/                screenshots; PLAY.md (the Google Play steps left to the owner)
 ```
 
 ### The chat page: composer, attachments, image viewer
@@ -1132,6 +1134,34 @@ adb install -r yap-qt.apk
 adb logcat -s yap-core default                             # core log, QML warnings, [frames]
 ```
 
+#### App Bundle
+
+Google Play takes an Android App Bundle (AAB), not APKs, and makes each
+device's APKs from it. `build.sh aab Release [-D...]` builds both ABIs
+(each in its own tree, with the same arguments, so one version code; the
+target Qts come from `$YAP_QT_DIR/<set dir>`, default `$YAPM/qt`), then
+`bundle.sh` merges their Gradle projects (the libraries per ABI, Qt's
+per-ABI library lists in `res/values/libs.xml`, the licence notices) and
+runs Gradle's `bundleRelease`: `$YAPM/build/qt-aab-Release/yap-qt-unsigned.aab`.
+CI does the same across jobs (`bundle.sh stage` in each ABI's job, `merge`
+after). `sign.sh` signs an `.aab` with jarsigner (Play reads a JAR
+signature from an upload). To install it on a device as Play would:
+
+```sh
+bash native/mobile/sign.sh $YAPM/build/qt-aab-Release/yap-qt-unsigned.aab yap-qt.aab
+java -jar bundletool.jar build-apks --bundle yap-qt.aab --output yap-qt.apks --connected-device   --ks ~/.android/debug.keystore --ks-pass pass:android --ks-key-alias androiddebugkey
+java -jar bundletool.jar install-apks --apks yap-qt.apks
+```
+
+16 KB pages (Play's requirement for apps targeting Android 15+): the app's
+library links with `-z max-page-size=16384` (`CMakeLists.txt`; NDK r27
+still defaults to 4 KB), `sign.sh` aligns each APK's uncompressed
+libraries at 16 KB offsets (`zipalign -P 16`), and `check-16k.sh` checks
+both (`llvm-readelf -l`, `zipalign -c -P 16`). Qt 6.11.3's libraries and
+plugins, and the NDK's `libc++_shared.so`, come 16 KB-aligned; libwebrtc
+is linked into the app's library. Google Play's own steps (enrolment, the
+upload key, the listing) are in `docs/PLAY.md`.
+
 `build.sh` points the downloaded target Qt's `qmake` wrapper (`qmake.bat`
 on Windows, a shell wrapper elsewhere) and `target_qt.conf` at
 `QT_HOST_PATH`, as aqtinstall does. Gradle's cache and the build tree go
@@ -1173,8 +1203,11 @@ x86_64 and arm64-v8a APKs on Ubuntu with the pinned Qt (archives cached by
 the lock's hash) and NDK r27c, signs them with the public CI debug key
 (`ci/debug.keystore`, so one run's APK installs over another's; never a
 release key), and uploads each APK with its `.sha256` (14 days; version
-code `run * 10 + 2` for arm64, `+ 4` for x86_64, version name
-`<VERSION>-ci.<run>+<commit built>`). Anyone can sign with that key, so
+code `100000 + run` for both ABIs, version name
+`<VERSION>-ci.<run>+<commit built>`). `qt-android-bundle` merges the two
+ABIs into an AAB, signs it with the same CI key, checks it with bundletool
+(manifest, both ABIs, the split APKs Play would make) and for 16 KB pages,
+and uploads it (14 days). Anyone can sign with that key, so
 CI's APKs are a separate app: application id `dev.yap.app.ci`, label "Yap
 CI", and no push notifications (no Firebase configuration; the Firebase
 project knows `dev.yap.app` only). A CI APK installs beside a tester's
@@ -1222,7 +1255,8 @@ How a release happens:
    `.github/workflows/qt-android-release.yml` with the tag. That builds the
    tagged commit, signs, smoke-tests, attaches
    `yap-qt-<x.y.z>-arm64-v8a.apk` (phones), `yap-qt-<x.y.z>-x86_64.apk`
-   (emulators) and a `.sha256` for each, and publishes the release as
+   (emulators), `yap-qt-<x.y.z>.aab` (the App Bundle for Google Play,
+   both ABIs) and a `.sha256` for each, and publishes the release as
    "Yap for Android (Qt) <x.y.z>": a pre-release, never GitHub's latest
    (that stays with the desktop's releases). Until it is published, the
    release is a draft only maintainers see.
@@ -1234,9 +1268,10 @@ How a release happens:
 
 The run builds both ABIs without the signing secrets (third-party build
 scripts run there; the Firebase client configuration is required, so a
-release always has push notifications), signs them in a separate job that
-alone can read the key, and checks that each APK carries exactly the release
-certificate (SHA-256
+release always has push notifications), merges them into the AAB in
+another (checked with bundletool, pinned by SHA-256, and for 16 KB pages),
+signs them in a separate job that alone can read the key, and checks that
+each APK and the AAB carry exactly the release certificate (SHA-256
 `75:E0:D8:E0:22:4A:9F:32:D8:CC:40:C7:B9:5A:E7:82:43:B3:97:21:5A:99:C1:FE:D6:01:50:FC:6E:FF:B8:9C`),
 the application id `dev.yap.app`, and the version code and name. It then
 cold-starts the x86_64 APK on an emulator, and only then attaches the files
@@ -1250,11 +1285,14 @@ which creates no tag. Delete the draft when done. A test build is signed
 with the same key, so it installs over a release and the next release
 installs over it.
 
-Version codes are `(2000000 + minutes since 2026-01-01 UTC) * 10 + 2`
-(arm64-v8a) or `+ 4` (x86_64), from the clock of the run's plan job, so
-every build is above the one before (release or test build), above the
-earlier `(1000000 + run) * 10 + digit` builds (0.2.0, 0.3.0) and above every
-CI build (`run * 10 + digit` of the CI workflow). A CI build and a release
+The version code is `30000000 + minutes since 2026-01-01 UTC`, from the
+clock of the run's plan job, one code for both APKs and the AAB (an AAB
+holds every ABI under one code, and Play takes one code per upload). Every
+build is above the one before (release or test build) and above every code
+shipped before it: the per-ABI `(2000000 + minutes) * 10 + 2` (arm64-v8a)
+or `+ 4` (x86_64) codes of 0.3.1 to 0.11.1 (at most 24573684), the earlier
+`(1000000 + run) * 10 + digit` builds (0.2.0, 0.3.0) and every CI build
+(`100000 + run` now, `run * 10 + digit` before). A CI build and a release
 build cannot update each other anyway: they are different apps
 (`dev.yap.app.ci` and `dev.yap.app`), and Android installs an update only
 when it is signed with the same key.

@@ -3,8 +3,10 @@
 # dependency's cdylib would otherwise link for the host.
 # Naming lld here also skips qt-build-utils' probe for a system `ld`, which
 # a Windows host does not have.
+# 16 KB pages: any shared library cargo links itself (the app's own is
+# linked by CMake, which sets the same flag: CMakeLists.txt, "16 KB pages").
 [target.x86_64-linux-android]
-rustflags = ["-C", "link-arg=--target=x86_64-linux-android28", "-C", "link-arg=-fuse-ld=lld"]
+rustflags = ["-C", "link-arg=--target=x86_64-linux-android28", "-C", "link-arg=-fuse-ld=lld", "-C", "link-arg=-Wl,-z,max-page-size=16384"]
 
 [target.aarch64-linux-android]
-rustflags = ["-C", "link-arg=--target=aarch64-linux-android28", "-C", "link-arg=-fuse-ld=lld"]
+rustflags = ["-C", "link-arg=--target=aarch64-linux-android28", "-C", "link-arg=-fuse-ld=lld", "-C", "link-arg=-Wl,-z,max-page-size=16384"]
