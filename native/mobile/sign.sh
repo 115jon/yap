@@ -23,6 +23,9 @@ in="${1:?unsigned APK or AAB}"
 out="${2:?signed APK or AAB}"
 
 keystore="${YAP_KEYSTORE:-$HOME/.android/debug.keystore}"
+# A Windows path for the JDK's and SDK's tools from Git Bash (MSYS_NO_PATHCONV
+# may be set).
+command -v cygpath >/dev/null 2>&1 && keystore="$(cygpath -m "$keystore")"
 store_pass="${YAP_KEYSTORE_PASS:-android}"
 alias="${YAP_KEY_ALIAS:-androiddebugkey}"
 key_pass="${YAP_KEY_PASS:-$store_pass}"
