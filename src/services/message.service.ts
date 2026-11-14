@@ -25,6 +25,7 @@ import {
   lookupCachedEmbeds,
 } from "./embed-fetcher";
 import type { MessagePush } from "./push.service";
+import { usersWhoBlocked } from "./block.service";
 import { callRecordFields } from "./call.service";
 
 const messageHistoryLog = clog("message-history");
@@ -1595,6 +1596,10 @@ export async function generateMessageNotifications(
   } | null;
 
   const serverId = channelInfo?.server_id ?? null;
+  // Someone who blocked the author hears nothing from them: no mention,
+  // reply or DM notification, so no inbox entry and no push either.
+  const blockers = await usersWhoBlocked(db, opts.authorId);
+  for (const blockerId of blockers) notifiedUserIds.add(blockerId);
   const senderName = opts.authorDisplayName?.trim() || opts.authorUsername;
   const pushFor = (
     delivered: DeliveredNotification,
@@ -1646,7 +1651,8 @@ export async function generateMessageNotifications(
 
     for (const mu of mentionedUsers ?? []) {
       const mentionedId = mu.id as string;
-      if (mentionedId === opts.authorId) continue;
+      if (mentionedId === opts.authorId || notifiedUserIds.has(mentionedId))
+        continue;
       notifiedUserIds.add(mentionedId);
 
       const notifId = opts.notificationId?.("mention", mentionedId) ?? genId();
