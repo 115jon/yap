@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // One shop cell (ShopItemCard.tsx): the whole tile is the key (ply-2, a
