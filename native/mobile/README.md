@@ -853,11 +853,34 @@ core's invites:
   invite, or Open `<server>` for a server you are in, and the expired,
   missing and failed states. A joined server opens on its tree after
   1.5 s. A chat link opens the channel and slides the chat in.
-- **No verified links yet.** The web's `/.well-known/assetlinks.json` names
-  only the Expo app's packages, so the filter is not `autoVerify`: on
-  Android 12 and later a web link opens in the browser until the user
-  turns on "Open supported links" for Yap. `yap://` links open the app
-  directly.
+- **Verified links.** The https filter is `autoVerify`: the web's
+  `/.well-known/assetlinks.json` (`src/server/assetlinks.ts`) lists
+  `dev.yap.app` with the release key's SHA-256, so on Android 12 and
+  later the release build opens web links without asking. A build signed
+  with another key, or under another application id (a side-by-side test
+  build), is not verified: its web links open in the browser until the
+  user turns on "Open supported links" for it. `yap://` links open the
+  app directly. The web's `/share/<token>` pages (a shared message's
+  public snapshot) are not taken: the app has no view for them.
+- **Sharing into Yap.** Another app's Share (`ACTION_SEND` and
+  `ACTION_SEND_MULTIPLE`, any type: pictures, videos, files, and text
+  such as a link from the browser) lands on `ShareActivity`, which hands
+  the intent, with its read grant, to the app's activity in the app's own
+  task, as `LinkActivity` does a link. `ShareShim` keeps the latest share
+  (its items still the sender's `content://` URIs, at most ten, the text
+  at most 4000 characters, the server's longest message) until Qt is up;
+  `Native.takeShareRequest` gives `Main.qml` its text and file count once
+  signed in (signed out, it waits for the sign-in). `SharePickerPage` then
+  asks where it goes: the open conversation and the switcher's recents
+  first (`CommandMenu`, the desktop's Ctrl+K rows), then every DM and the
+  open server's text channels, ranked as the switcher ranks them while
+  typing. A pick opens that conversation and copies the files into the
+  cache as the composer's picker does (`NativeShim.copyShared`: only
+  other apps' `content://` items, never a `file://` path or one of the
+  app's own providers; over the account's limit a sized stand-in, the
+  tray's too-big card); they go to its tray and the text after its draft,
+  with the keyboard up. The server strips the uploads' metadata as it
+  does every upload's. Back from the picker drops the share.
 
 Shared with the desktop (`Yap.Ui`): `InviteLandingState` (the landing's
 states, their copy and the redirect after a join; the desktop's
