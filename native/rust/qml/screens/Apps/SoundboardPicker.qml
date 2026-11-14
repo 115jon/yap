@@ -27,49 +27,13 @@ Popup {
     // Listen Together's header key: the host opens its panel at the key.
     signal listenTogether()
 
-    // The state is parsed afresh on every change, and a new object would
-    // rebuild every Repeater under it; this slice is replaced only when its
-    // content differs (as FriendsView and SearchPanel do).
-    readonly property var parsed: JSON.parse(Apps.state || "{}")
-    property var s: ({})
-    property string sKey: "{}"
-    // The MyInstants and radio searches, apart from the soundboard so that
-    // typing (which changes only these) does not rebuild every grid's tiles.
-    property var found: ({})
-    property string foundKey: "{}"
-
-    function syncS() {
-        const next = root.soundboardOf(parsed)
-        const key = JSON.stringify(next)
-        if (key !== sKey) {
-            sKey = key
-            s = next
-        }
-        const nextFound = { instants: parsed.instants ?? {}, radio: parsed.radio ?? {} }
-        const foundText = JSON.stringify(nextFound)
-        if (foundText !== foundKey) {
-            foundKey = foundText
-            found = nextFound
-        }
+    // The lists, the search and the sections (Yap.Ui's SoundboardCore,
+    // shared with the phone's sheet).
+    readonly property SoundboardCore core: SoundboardCore {
+        query: search.text
+        searchKind: root.view === "radio" ? "radio" : "myinstants"
     }
-    onParsedChanged: syncS()
-    Component.onCompleted: syncS()
-
-    // The soundboard's part of the state: Listen Together, Daily Word and
-    // the searches leave it (and its Repeaters) alone.
-    function soundboardOf(all) {
-        const next = Object.assign({}, all)
-        delete next.instants
-        delete next.radio
-        delete next.listen
-        delete next.wordle
-        delete next.others
-        delete next.activity
-        delete next.catalogs
-        delete next.joins
-        delete next.leaves
-        return next
-    }
+    readonly property var s: core.s
 
     // "soundboard", "myinstants", "radio" or "form" (UploadSoundModal:
     // add or edit a sound, in the popover).
@@ -84,24 +48,16 @@ Popup {
     property var sectionItems: ({})
     readonly property bool gridFocused: flick.activeFocus
 
-    readonly property string filter: search.text.trim().toLowerCase()
-    readonly property bool searching: filter.length > 0
-    readonly property var searchState: view === "radio" ? (found.radio ?? {}) : (found.instants ?? {})
-    // `isDirectMessageScope`: no custom sounds, MyInstants or radio there.
-    readonly property bool dmCall: s.inCall === true && (s.serverId ?? "") === ""
-    // Custom sounds kept on this device: the web shows them only away from
-    // a server; native keeps any saved for this server reachable.
-    readonly property bool showCustom: !dmCall && (s.local ?? []).length > 0
-    readonly property var favorites: shown(s.favorites)
-    readonly property var defaults: shown(s.defaults)
-    readonly property var customs: showCustom ? shown(s.local) : []
+    readonly property bool searching: core.searching
+    readonly property var searchState: core.searchState
+    readonly property bool dmCall: core.dmCall
+    readonly property bool showCustom: core.showCustom
+    readonly property var favorites: core.favorites
+    readonly property var defaults: core.defaults
+    readonly property var customs: core.customs
     // A sound cell's width: four across inside the grid's 4 px gutters,
     // 2 px apart (`grid grid-cols-4 gap-0.5`, `px-1`).
     readonly property real cellW: Math.floor((flick.width - 8 - 6) / 4)
-
-    function shown(list) {
-        return (list ?? []).filter(x => root.filter.length === 0 || x.name.toLowerCase().includes(root.filter))
-    }
 
     // Above `anchor` from its left edge, kept 10 inside the window, 600
     // high at most and shortened to the room above it (max-height
@@ -122,10 +78,8 @@ Popup {
         deleting = null
         search.text = ""
         keyCell = null
-        if (next === "myinstants")
-            Apps.searchInstants("")
-        else if (next === "radio")
-            Apps.searchRadio("")
+        if (next === "myinstants" || next === "radio")
+            core.search(next, "")
         Qt.callLater(() => search.forceActiveFocus())
     }
     function startEdit(sound) {
@@ -163,7 +117,7 @@ Popup {
     function spy() {
         if (searching)
             return
-        const order = ["favorites"].concat((s.sections ?? []).map(x => "server:" + x.serverId), ["custom", "defaults"])
+        const order = core.sectionOrder
         let next = activeSection
         for (const id of order) {
             const item = sectionItems[id]
@@ -276,8 +230,7 @@ Popup {
         search.text = ""
         activeSection = "favorites"
         flick.contentY = 0
-        Apps.loadSounds()
-        Apps.loadFavorites()
+        core.load()
         soundboardVolume = Desktop.soundboardVolume
     }
     onOpened: search.forceActiveFocus()
@@ -295,10 +248,8 @@ Popup {
         id: debounce
         interval: 400
         onTriggered: {
-            if (root.view === "myinstants")
-                Apps.searchInstants(search.text)
-            else if (root.view === "radio")
-                Apps.searchRadio(search.text)
+            if (root.view === "myinstants" || root.view === "radio")
+                root.core.search(root.view, search.text)
         }
     }
 
@@ -713,9 +664,7 @@ Popup {
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
             elide: Text.ElideRight
-            text: confirm.sound?.kind === "custom"
-                ? qsTr("Delete %1 from this device?").arg(confirm.sound?.name ?? "")
-                : qsTr("Delete %1? Everyone loses it.").arg(confirm.sound?.name ?? "")
+            text: root.core.deletePrompt(confirm.sound)
             color: Theme.dangerInk
             font: Theme.type.caption
         }
@@ -1006,8 +955,8 @@ Popup {
                         delegate: Column {
                             id: serverSection
                             required property var modelData
-                            readonly property var sounds: root.shown(modelData.sounds)
-                            readonly property bool canAdd: modelData.own && !root.searching && root.s.canUpload === true
+                            readonly property var sounds: root.core.sectionSounds(modelData)
+                            readonly property bool canAdd: root.core.sectionCanAdd(modelData)
                             width: gridBody.width
                             Component.onCompleted: root.sectionItems["server:" + modelData.serverId] = serverSection
                             SectionLabel {

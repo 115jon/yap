@@ -5,8 +5,8 @@ import Yap.Ui
 
 // The open conversation, the pager's middle page: a floating header that
 // compacts as you read back (the drawer key, the server over the channel
-// or the DM's other half, the call label, a DM's call key, the search
-// key, the members key), a DM's call strip, the link strip and the unread banner under it,
+// or the DM's other half, the call label, a DM's call key, the search,
+// pins and threads keys, the members key), a DM's call strip, the link strip and the unread banner under it,
 // the desktop's MessageDelegate rows on its MessageListModel running up
 // behind them, the jump to the present, the typing line and the composer.
 // The keyboard pushes the composer up as it animates in (Native.imeHeight
@@ -338,6 +338,26 @@ Item {
                     tip: root.dm ? qsTr("Search messages with %1").arg(Nav.activeChannelName)
                         : qsTr("Search %1").arg(Nav.activeServerName)
                     onClicked: Router.open("SearchPage")
+                }
+                // The conversation's pinned messages (PinsPage).
+                IconKey {
+                    id: pinsKey
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: Nav.activeChannelId.length > 0
+                    iconName: "pin"
+                    tone: "ghost"
+                    tip: qsTr("Pinned messages")
+                    onClicked: Router.open("PinsPage")
+                }
+                // A server channel's threads (ThreadsPage); a DM has none.
+                IconKey {
+                    id: threadsKey
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: !root.dm && !Nav.home
+                    iconName: "threads"
+                    tone: "ghost"
+                    tip: qsTr("Threads")
+                    onClicked: Router.open("ThreadsPage")
                 }
                 IconKey {
                     id: peopleKey

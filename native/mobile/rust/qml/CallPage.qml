@@ -10,12 +10,12 @@ import Yap.Ui
 // leaf at phone size: square avatar with the 2 px talk ring, the name, the
 // state glyphs, the talk LED) under their cameras and shares and our own
 // self-view (CallVideo), and the one dock: mic, deafen, camera (and its
-// flip while it is on), where it plays, leave. Opened by joining
-// a voice channel in the drawer and from the drawer's call bar; Back
-// leaves the page, not the call. A DM call is the same page under the
-// other person's name; while ours rings them (no room joined yet) it
-// shows them ringing, with Cancel as its one key. Leave hangs a DM call
-// up (the core's Calls.leave, which ends it).
+// flip while it is on), where it plays, the soundboard (a sheet:
+// SoundboardSheet), leave. Opened by joining a voice channel in the drawer
+// and from the drawer's call bar; Back leaves the page, not the call. A DM
+// call is the same page under the other person's name; while ours rings
+// them (no room joined yet) it shows them ringing, with Cancel as its one
+// key. Leave hangs a DM call up (the core's Calls.leave, which ends it).
 Rectangle {
     id: root
 
@@ -430,8 +430,8 @@ Rectangle {
             id: keys
             anchors.horizontalCenter: parent.horizontalCenter
             y: 12
-            // Up to six keys; closer together on a narrow phone.
-            readonly property int count: flipKey.visible ? 6 : 5
+            // Up to seven keys; closer together on a narrow phone.
+            readonly property int count: flipKey.visible ? 7 : 6
             spacing: Math.max(4, Math.min(16, Math.floor((root.width - root.leftInset - root.rightInset - 32 - count * 48) / (count - 1))))
             visible: root.inCall
 
@@ -493,6 +493,18 @@ Rectangle {
                 onClicked: routes.open()
             }
             IconKey {
+                size: 48
+                iconName: "soundboard"
+                tone: soundboard.item && soundboard.item.up ? "toggled" : "rest"
+                tip: qsTr("Soundboard")
+                Accessible.name: tip
+                onClicked: {
+                    Native.haptic(Native.Tick)
+                    soundboard.active = true
+                    soundboard.item.open()
+                }
+            }
+            IconKey {
                 id: leaveKey
                 size: 48
                 iconName: "disconnect"
@@ -545,6 +557,15 @@ Rectangle {
             text: qsTr("Close")
             onClicked: root.closeRequested()
         }
+    }
+
+    // The soundboard (SoundboardSheet), made on first use.
+    Loader {
+        id: soundboard
+        anchors.fill: parent
+        z: 100
+        active: false
+        sourceComponent: SoundboardSheet {}
     }
 
     // Where the call plays (and which mic it uses): the system's routes.

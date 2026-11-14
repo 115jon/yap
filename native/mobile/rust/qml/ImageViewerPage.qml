@@ -12,7 +12,9 @@ import Yap.Media
 // picture follows the finger. A tap shows or hides the bar: close, "2 / 3",
 // the file name, Save image (into the gallery's Pictures/Yap) and Share
 // (the picture's link). `show(images, index)` takes MessageMedia's images
-// ({ url, name, mime, ... }).
+// ({ url, name, mime, ... }); a video among them is its first frame under
+// the play disc, and a tap plays it full screen in Android's player
+// (Player, cpp/videoplayer.h), where it was in the set.
 Item {
     id: root
 
@@ -223,8 +225,13 @@ Item {
             property point zoomCenter
 
             readonly property string url: modelData.url || ""
-            readonly property bool webp: modelData.mime === "image/webp" || /\.webp($|[?#])/i.test(url)
-            readonly property bool animated: modelData.gif === true || webp
+            readonly property bool video: modelData.kind === "video" || String(modelData.mime || "").startsWith("video/")
+            readonly property bool webp: !video && (modelData.mime === "image/webp" || /\.webp($|[?#])/i.test(url))
+            readonly property bool animated: !video && (modelData.gif === true || webp)
+            function play() {
+                Native.haptic(Native.Tick)
+                Player.play(page.url, 0, page.modelData.gif === true, page.modelData.name || "")
+            }
             // AnimatedPicture.Status has Image.Status's order.
             readonly property int status: !animated ? picture.status
                 : motion.item ? motion.item.status : Image.Loading
@@ -318,11 +325,21 @@ Item {
                     smooth: true
                     // Decoded to fit the screen's own pixels, and twice
                     // that once zoomed (the fitted copy stays up until the
-                    // sharper one is in); never larger than the file.
+                    // sharper one is in); never larger than the file. A
+                    // video's is its first frame, at the screen's size.
                     retainWhileLoading: true
-                    sourceSize: Qt.size(Math.round(page.width * Screen.devicePixelRatio * (page.sharp ? 2 : 1)),
-                                        Math.round(page.height * Screen.devicePixelRatio * (page.sharp ? 2 : 1)))
-                    source: page.animated ? "" : page.url
+                    sourceSize: Qt.size(Math.round(page.width * Screen.devicePixelRatio * (page.sharp && !page.video ? 2 : 1)),
+                                        Math.round(page.height * Screen.devicePixelRatio * (page.sharp && !page.video ? 2 : 1)))
+                    source: page.animated ? ""
+                        : page.video ? (/^https?:/i.test(page.url) ? "image://videoposter/" + encodeURIComponent(page.url) : "")
+                        : page.url
+                }
+                // A video: the disc over its frame; a tap plays it.
+                PlayDisc {
+                    visible: page.video
+                    x: (page.width - width) / 2
+                    y: (page.height - height) / 2
+                    scale: 1.5
                 }
                 // A GIF or an animated WebP plays while it is the picture
                 // on screen (the shared AnimatedPicture, as in the list).
@@ -347,10 +364,14 @@ Item {
                 TapHandler {
                     onPressedChanged: if (pressed) page.pinched = false
                     onTapped: (eventPoint, button) => {
-                        if (tapCount === 1)
+                        if (page.video)
+                            page.play()
+                        else if (tapCount === 1)
                             chromeTimer.restart()
                     }
                     onDoubleTapped: eventPoint => {
+                        if (page.video)
+                            return
                         chromeTimer.stop()
                         Native.haptic(Native.Tick)
                         if (page.zoomed)
@@ -375,7 +396,7 @@ Item {
                 onMedia: true
             }
             Column {
-                visible: page.status === Image.Error
+                visible: page.status === Image.Error && !page.video
                 anchors.centerIn: parent
                 spacing: 8
                 Icon {
@@ -479,6 +500,7 @@ Item {
                 iconName: "download"
                 tip: qsTr("Save image")
                 visible: root.current !== null && /^https?:/.test(String(root.current.url))
+                    && !(root.current.kind === "video" || String(root.current.mime || "").startsWith("video/"))
                 enabled: !root.saving
                 opacity: root.saving ? 0 : 1
                 onClicked: root.save()

@@ -58,6 +58,18 @@ pub mod qobject {
         #[cxx_name = "setSendVolume"]
         fn set_send_volume(self: &Apps, volume: f64);
 
+        /// This device's soundboard volume setting, 0..100, where the app
+        /// keeps it here (the phone); -1 where it does not (the desktop's
+        /// `Desktop.soundboardVolume`).
+        #[qinvokable]
+        #[cxx_name = "soundboardVolume"]
+        fn soundboard_volume(self: &Apps) -> i32;
+
+        /// Save the soundboard volume setting, 0..100 (the phone).
+        #[qinvokable]
+        #[cxx_name = "setSoundboardVolume"]
+        fn set_soundboard_volume(self: &Apps, volume: i32);
+
         /// Upload an audio file (a path from `Files.pickFiles`) as a sound.
         #[qinvokable]
         fn upload(self: &Apps, path: &QString, name: &QString, emoji: &QString, volume: f64);
@@ -368,6 +380,17 @@ impl qobject::Apps {
 
     pub fn set_send_volume(&self, volume: f64) {
         send(AppsCommand::SendVolume(volume));
+    }
+
+    pub fn soundboard_volume(&self) -> i32 {
+        crate::platform::platform()
+            .soundboard_volume()
+            .map_or(-1, i32::from)
+    }
+
+    pub fn set_soundboard_volume(&self, volume: i32) {
+        let volume = u8::try_from(volume.clamp(0, 100)).unwrap_or(100);
+        crate::platform::platform().set_soundboard_volume(volume);
     }
 
     pub fn upload(&self, path: &QString, name: &QString, emoji: &QString, volume: f64) {

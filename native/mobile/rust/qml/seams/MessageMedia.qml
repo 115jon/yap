@@ -8,8 +8,10 @@ import Yap.Media
 // wide slot); a GIF or an animated WebP shows its first frame, then plays
 // through the shared AnimatedPicture while it is on screen (two loads of
 // the file: the still that tells its size, as the desktop's tile learns a
-// WebP's, then the player). The desktop's MessageMedia adds video and the
-// sensitive-media frame through desktop C++; that is the next step here.
+// WebP's, then the player). A video is its first frame (InlineVideo) in
+// the same box at its own aspect (16:9 until the frame says), under the
+// sensitive-media frame while the high filter hides it; a tap plays it full
+// screen in Android's player, a GIF clip on repeat.
 Column {
     id: root
 
@@ -22,11 +24,22 @@ Column {
     signal download(var item)
     signal expandVideo(var item)
 
-    // The pictures, in order: a tap opens the viewer on them.
     function isPicture(item) {
         return String(item.mime || "").startsWith("image/")
     }
-    readonly property var images: items.filter(isPicture)
+    function isVideo(item) {
+        return item.kind === "video" || String(item.mime || "").startsWith("video/")
+    }
+    // media-safety.ts `shouldBlurSensitiveAttachment`, as the desktop's.
+    function hiddenVideo(item) {
+        return !!item.nsfw && ShellState.mediaFilter === "high" && !ShellState.isRevealed(item.id)
+    }
+    // What the viewer pages through, in order: the pictures and the videos
+    // that show (a hidden one stays out until it is shown).
+    function inViewer(item) {
+        return isPicture(item) || (isVideo(item) && !hiddenVideo(item))
+    }
+    readonly property var images: items.filter(inViewer)
 
     // The box a picture fits in.
     readonly property real boxWidth: Math.min(maxWidth, 320)
@@ -41,7 +54,8 @@ Column {
             required property var modelData
             required property int index
             readonly property bool picture: root.isPicture(modelData)
-            sourceComponent: picture ? image : file
+            readonly property bool video: !picture && root.isVideo(modelData)
+            sourceComponent: picture ? image : video ? clip : file
 
             Component {
                 id: image
@@ -81,7 +95,7 @@ Column {
                     }
                     onPlayingChanged: learn()
                     function open() {
-                        root.openImage(root.images, root.items.slice(0, slot.index).filter(root.isPicture).length)
+                        root.openImage(root.images, root.items.slice(0, slot.index).filter(root.inViewer).length)
                     }
 
                     width: known ? Math.max(1, Math.round(known.w * fit)) : root.boxWidth
@@ -154,6 +168,48 @@ Column {
                         // A sliver of a picture still takes a finger.
                         margin: 12
                         onTapped: frame.open()
+                    }
+                }
+            }
+            Component {
+                id: clip
+                Rectangle {
+                    id: tile
+
+                    readonly property string url: slot.modelData.url || ""
+                    readonly property bool hidden: root.hiddenVideo(slot.modelData)
+                    // The first frame's size, learnt once (InlineVideo's
+                    // sizeKnown), so a row that comes back is laid out at once.
+                    readonly property var known: ShellState.mediaSize(url)
+                    readonly property real fit: known ? Math.min(1, root.boxWidth / known.w, root.boxHeight / known.h) : 1
+
+                    width: known ? Math.max(48, Math.round(known.w * fit)) : root.boxWidth
+                    height: known ? Math.max(48, Math.round(known.h * fit)) : Math.round(root.boxWidth * 9 / 16)
+                    radius: Theme.radiusSheet * 2
+                    color: tile.hidden ? Theme.tint1 : "#000000"
+
+                    // Not made while hidden: no first frame is fetched.
+                    Loader {
+                        anchors.fill: parent
+                        active: !tile.hidden
+                        sourceComponent: InlineVideo {
+                            source: tile.url
+                            contentType: slot.modelData.mime || ""
+                            name: slot.modelData.name || ""
+                            animated: slot.modelData.gif === true
+                            clipTo: root.clipTo
+                            preview: true
+                            onSizeKnown: (w, h) => {
+                                if (!tile.known)
+                                    ShellState.rememberSize(tile.url, w, h)
+                            }
+                        }
+                    }
+                    // Sensitive: hidden until shown (SensitiveMediaFrame.tsx).
+                    SensitiveMediaFrame {
+                        attachmentId: slot.modelData.id || ""
+                        hidden: tile.hidden
+                        cornerRadius: tile.radius
                     }
                 }
             }

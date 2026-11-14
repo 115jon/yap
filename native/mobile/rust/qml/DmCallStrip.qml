@@ -8,8 +8,9 @@ import Yap.Ui
 // phone's size: the call itself is the call page). The other person's
 // avatar (with the ringing ring while it rings), what the call is doing,
 // and its keys: Cancel while ours rings, Decline and Answer while it rings
-// for us, Join while it goes on without us, and Leave once we are in it,
-// where a tap opens the call page.
+// for us, Join while it goes on without us, and the soundboard and Leave
+// once we are in it, where a tap opens the call page. The soundboard's
+// sheet (SoundboardSheet) covers the page the strip is on.
 Rectangle {
     id: root
 
@@ -124,6 +125,20 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 8
 
+        // In the call: the soundboard.
+        IconKey {
+            visible: call.joined
+            size: 44
+            iconName: "soundboard"
+            tone: soundboard.item && soundboard.item.up ? "toggled" : "rest"
+            tip: qsTr("Soundboard")
+            Accessible.name: tip
+            onClicked: {
+                Native.haptic(Native.Tick)
+                soundboard.active = true
+                soundboard.item.open()
+            }
+        }
         // Cancel, Decline and Leave: the danger key.
         IconKey {
             id: endKey
@@ -187,5 +202,23 @@ Rectangle {
         width: parent.width
         height: 1
         color: Theme.line
+    }
+
+    // Made on first use, over the whole page (the strip's parent) rather
+    // than the strip; it goes when the call does.
+    Loader {
+        id: soundboard
+        parent: root.parent
+        anchors.fill: parent
+        z: 100
+        active: false
+        sourceComponent: SoundboardSheet {}
+    }
+    Connections {
+        target: call
+        function onJoinedChanged() {
+            if (!call.joined && soundboard.item)
+                soundboard.item.close()
+        }
     }
 }

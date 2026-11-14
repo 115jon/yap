@@ -160,6 +160,9 @@ public:
   Q_INVOKABLE void pickMedia(qreal limitBytes);
   // The files picker (any type, several), the same way.
   Q_INVOKABLE void pickFiles(qreal limitBytes);
+  // The files picker on audio only, one file (a soundboard sound), the
+  // same way.
+  Q_INVOKABLE void pickAudio(qreal limitBytes);
   // The system camera; the photo's path arrives as mediaPicked. 0: it
   // opened; 1: no camera app; 2: the camera permission was asked for (try
   // again); 3: another pick is under way, or it could not start.

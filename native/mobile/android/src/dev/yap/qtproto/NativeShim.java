@@ -922,6 +922,20 @@ public final class NativeShim {
                 .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
     }
 
+    /**
+     * The soundboard's Add sound: the documents UI on audio files, one at a
+     * time. Its result goes through mediaPicked too; the copy keeps the
+     * extension its type implies, which the core types the upload by.
+     */
+    public static Intent pickAudioIntent(long limitBytes) {
+        pickLimit = limitBytes > 0 ? limitBytes : Long.MAX_VALUE;
+        pickPicture = false;
+        return new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("audio/*")
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false);
+    }
+
     /** The photo the camera is taking (takePhotoIntent), until photoTaken. */
     private static File pendingPhoto;
     /**

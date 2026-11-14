@@ -9,6 +9,8 @@ mod client;
 mod crash;
 // Qt's network loads over the core's rustls (cpp/rustnetwork.cpp).
 mod http;
+// Media caps for the players that send no headers (cpp/videoplayer.cpp).
+mod mediacap;
 mod platform;
 // The FCM token and a notification's actions (cpp/push.cpp).
 mod push;

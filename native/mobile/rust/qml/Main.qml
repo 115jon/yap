@@ -661,6 +661,21 @@ Window {
         target: Native
         function onCallAnswered() { window.takeAnswered() }
     }
+    // A shared card's video asked for full screen (an X GIF's tile, the
+    // viewer): Android's player (Player, cpp/videoplayer.h). An X GIF
+    // (tweet_video, also inside a proxied URL) loops.
+    Connections {
+        target: ShellState
+        function onVideoViewerRequested(source, position) {
+            let decoded = String(source)
+            try {
+                decoded = decodeURIComponent(decoded)
+            } catch (e) {
+                // A stray % stays as it is.
+            }
+            Player.play(source, position, /\/tweet_video\//.test(decoded), "")
+        }
+    }
     // What the call notification shows, and where its Mute starts from.
     // Sent once per update of the core's: its properties change one after
     // another (a deafen mutes too), and the shim must not see the half-way

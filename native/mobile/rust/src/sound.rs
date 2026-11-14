@@ -15,7 +15,7 @@
 use tokio::sync::mpsc;
 use yap_cache::settings::{self, DesktopSettings};
 use yap_core::shell::Sound;
-use yap_core::store::apps::AudioCommand;
+use yap_core::store::apps::{AppsCommand, AudioCommand};
 use yap_core::{AudioEvents, AudioHandle};
 
 /// The sound settings saved in the app's folder (the defaults until the
@@ -48,6 +48,39 @@ pub fn spawn(http: reqwest::Client, events: AudioEvents) -> AudioHandle {
         }
     });
     AudioHandle { commands: Some(tx) }
+}
+
+/// The soundboard volume setting, 0..=100 (the sheet's slider).
+pub fn soundboard_volume() -> u8 {
+    saved().sound_settings.soundboard_volume.min(100)
+}
+
+/// Saves the soundboard volume setting and applies it to the clips playing
+/// now and later, as the desktop's `Desktop.setVolume` does.
+pub fn set_soundboard_volume(volume: u8) {
+    let volume = volume.min(100);
+    if let Some(dir) = settings::app_dir() {
+        let mut next = settings::load_settings(&dir);
+        if next.sound_settings.soundboard_volume != volume {
+            next.sound_settings.soundboard_volume = volume;
+            if let Err(error) = settings::save_settings(&dir, &next) {
+                eprintln!("[sound] soundboard volume not saved: {error}");
+            }
+        }
+    }
+    yap_audio::player::set_soundboard_volume(volume);
+    send_local_settings();
+}
+
+/// The core's copy of the sound settings (join and leave sounds play at
+/// the sound volume, the soundboard at its own).
+pub fn send_local_settings() {
+    let s = saved();
+    yap_ui::apps::send(AppsCommand::LocalSettings {
+        sounds_enabled: s.sounds,
+        sound_volume: s.sound_settings.sound_volume,
+        soundboard_volume: s.sound_settings.soundboard_volume,
+    });
 }
 
 /// A soundboard command, not one of the Listen Together stream's.

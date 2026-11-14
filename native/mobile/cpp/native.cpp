@@ -389,6 +389,11 @@ void Native::pickFiles(qreal limitBytes)
   pickWith("pickFilesIntent", limitBytes);
 }
 
+void Native::pickAudio(qreal limitBytes)
+{
+  pickWith("pickAudioIntent", limitBytes);
+}
+
 void Native::pickImage(qreal limitBytes)
 {
   pickWith("pickImageIntent", limitBytes);

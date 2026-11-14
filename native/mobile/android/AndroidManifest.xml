@@ -130,6 +130,16 @@
                 android:value="true" />
         </activity>
 
+        <!-- A video full screen (media/PlayerActivity.java, Media3's
+             player): over the app in its task, turning with the phone
+             without being made again. -->
+        <activity
+            android:name="dev.yap.qtproto.media.PlayerActivity"
+            android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:screenOrientation="unspecified"
+            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+            android:exported="false" />
+
         <!-- Links into the app (LinkActivity hands them to YapActivity):
              the web's invite and chat links, as the Expo app took them
              (apps/mobile app.config.ts, branch archive/expo-mobile), on the
