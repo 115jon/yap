@@ -132,12 +132,16 @@
 
         <!-- Links into the app (LinkActivity hands them to YapActivity):
              the web's invite and chat links, as the Expo app took them
-             (apps/mobile app.config.ts, branch archive/expo-mobile), on the web origin the core uses
-             (yap-core config.rs `api_base`), and the yap:// links the core
-             reads (yap-core links.rs). Not autoVerify: the web serves no
-             Digital Asset Links statement for this app yet, so on Android
-             12+ an https link opens in the browser until the user turns on
-             "Open supported links" for it. -->
+             (apps/mobile app.config.ts, branch archive/expo-mobile), on the
+             web origin the core uses (yap-core config.rs `api_base`), and
+             the yap:// links the core reads (yap-core links.rs). The https
+             filter is autoVerify: the web's /.well-known/assetlinks.json
+             (src/server/assetlinks.ts) lists dev.yap.app with its release
+             key, so Android 12+ opens those links here without asking.
+             Another key (a debug build, another application id) is not
+             verified, and its links open in the browser until the user
+             turns on "Open supported links". Not /share/: the web's shared
+             message page is a public snapshot the app has no view for. -->
         <activity
             android:name="dev.yap.qtproto.LinkActivity"
             android:exported="true"
@@ -145,7 +149,7 @@
             android:noHistory="true"
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar">
-            <intent-filter>
+            <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
