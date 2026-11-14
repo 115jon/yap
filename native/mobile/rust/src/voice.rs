@@ -7,7 +7,8 @@
 //!
 //! Remote cameras and shares are shown (video.rs); no screen share or
 //! camera from the phone yet, and no RNNoise or per-person panning: those
-//! need the desktop's own audio path.
+//! need the desktop's own audio path. The soundboard and UI sounds play on
+//! the app's speaker (sound.rs), as call audio while a call runs.
 
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -62,6 +63,9 @@ impl Active {
         let mut running = RUNNING.lock().unwrap_or_else(PoisonError::into_inner);
         *running += 1;
         if *running == 1 {
+            // The soundboard and the UI sounds play as call audio: where
+            // the call plays, at its volume.
+            yap_speaker::speaker().set_call(true);
             // SAFETY: a plain C function, callable from any thread; it
             // posts to Android's main thread and returns.
             unsafe { yap_mobile_call_active(true) };
@@ -75,6 +79,9 @@ impl Drop for Active {
         let mut running = RUNNING.lock().unwrap_or_else(PoisonError::into_inner);
         *running = running.saturating_sub(1);
         if *running == 0 {
+            let speaker = yap_speaker::speaker();
+            speaker.set_call(false);
+            speaker.set_muted(false);
             // SAFETY: as in `begin`.
             unsafe { yap_mobile_call_active(false) };
         }
@@ -129,9 +136,11 @@ pub extern "C" fn yap_mobile_voice_mute(muted: bool) {
 }
 
 /// An audio focus loss deafens (which mutes, and remembers the mic);
-/// getting it back undeafens.
+/// getting it back undeafens. The speaker (soundboard, UI sounds) is
+/// silent for as long.
 #[no_mangle]
 pub extern "C" fn yap_mobile_voice_deafen(deafened: bool) {
+    yap_speaker::speaker().set_muted(deafened);
     client::command(Command::SetVoiceDeafened(deafened));
 }
 
