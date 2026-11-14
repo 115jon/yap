@@ -51,18 +51,9 @@ QtObject {
 
     signal profileEditorRequested()
 
-    // The theme picker's choices (AppearancePanel.tsx THEME_CHOICES).
-    readonly property var themes: [
-        { id: "dark", label: qsTr("Midnight") },
-        { id: "light", label: qsTr("Light") },
-        { id: "miku-dark", label: qsTr("Miku Dark") },
-        { id: "miku-light", label: qsTr("Miku Light") },
-        { id: "spiderman-dark", label: qsTr("Spider-Man Dark") },
-        { id: "spiderman-light", label: qsTr("Spider-Man Light") },
-        { id: "system", label: qsTr("Match system") },
-    ]
+    // A theme's name (Theme.themeCatalog), Midnight for an unknown id.
     function themeName(id) {
-        return themes.find(theme => theme.id === id)?.label ?? qsTr("Midnight")
+        return Theme.themeLabel(id) || qsTr("Midnight")
     }
 
     // Camera capture presets (CAMERA_QUALITY_PROFILES), "720p, 30 fps".

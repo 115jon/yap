@@ -1132,6 +1132,49 @@ landing that shows who is in a channel before joining, the phone's own
 audio path (RNNoise, panning, the soundboard), and iOS (AVAudioSession and
 CallKit in place of the service).
 
+### Crash reports
+
+Kept on the phone, as the desktop keeps its minidumps
+(`native/rust/src/crash.rs`): the app uploads nothing and has no crash
+SDK. `android/src/dev/yap/qtproto/crash`:
+
+- `CrashReports` (started by the `CrashInit` provider, before any
+  activity, service or receiver of the process runs) writes an
+  uncaught Java exception's stack to `files/crashes/java-<pid>.txt`; the
+  Rust panic hook (`rust/src/crash.rs`) writes a panic's message and
+  location to `rust-<pid>.txt` (the folder comes in `YAP_CRASH_DIR`).
+  Native crashes and ANRs need no handler: the next launch reads Android's
+  exit records (`ApplicationExitInfo`, API 30+), the tombstone (API 31+,
+  `Tombstone`: the signal, abort message, cause and crashing thread's
+  frames, nothing else) and the ANR trace's main thread.
+- The next launch joins them by pid into one report, redacted (`Redactor`:
+  tokens, keys, emails, IPs, ids, URL paths and queries, user and install
+  paths, double-quoted text and long single-quoted text), keeps it as `report-<time>.txt` (the newest
+  five; `files/` is not backed up) and asks once, "Yap closed
+  unexpectedly": **Share report** hands the text to the share sheet (the
+  user picks the app and the recipient and sees the text first),
+  **Delete** removes the reports, **Not now** keeps them.
+- The redaction and tombstone tests are plain Java (`android/test`; CI's
+  "Crash report tests" step):
+
+  ```sh
+  cd native/mobile/android
+  javac -d /tmp/ct src/dev/yap/qtproto/crash/{Redactor,Tombstone}.java test/dev/yap/qtproto/crash/CrashReportTest.java
+  java -cp /tmp/ct dev.yap.qtproto.crash.CrashReportTest
+  ```
+
+- A test build with `YAP_CRASH_TEST=1` in `build.sh`'s environment has a
+  trigger (`android/crash-test`; other builds, release ones included, get
+  an empty `CrashTest` and no trigger code). This crashes the app three
+  seconds later (`java`, `rust` for a panic, or `segv`), with made-up
+  secrets in the message for checking the redaction (`dump` prints the
+  saved reports to logcat under `yap-crash-dump`, as such a build is not
+  debuggable):
+
+  ```sh
+  adb shell am start -n <app id>/dev.yap.qtproto.YapActivity --es yap_crash_test rust
+  ```
+
 ### Build and run the Qt app
 
 Needs:

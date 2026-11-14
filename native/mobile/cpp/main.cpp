@@ -11,6 +11,7 @@
 #include <QtCore/QStandardPaths>
 #include <QtCore/QSysInfo>
 #ifdef Q_OS_ANDROID
+#include <QtCore/QJniEnvironment>
 #include <QtCore/QJniObject>
 #include <QtCore/qcoreapplication_platform.h>
 #endif
@@ -21,6 +22,7 @@
 #include <QtQuick/QQuickWindow>
 
 #include <algorithm>
+#include <iterator>
 #include <memory>
 #include <utility>
 #include <cstdio>
@@ -33,6 +35,27 @@
 #include "yap_ui.h"
 
 extern "C" void yap_mobile_init(const char* data_dir, const char* device_name);
+
+#if defined(Q_OS_ANDROID) && defined(YAP_CRASH_TEST)
+// The debug crash trigger (YAP_CRASH_TEST=1 builds only; rust/src/crash.rs,
+// android/crash-test/dev/yap/qtproto/crash/CrashTest.java).
+extern "C" void yap_crash_test(int kind);
+
+static void jniRustCrash(JNIEnv*, jclass, jint kind)
+{
+  yap_crash_test(kind);
+}
+
+static void installCrashTest()
+{
+  const JNINativeMethod methods[] = {
+    { "rustCrash", "(I)V", reinterpret_cast<void*>(jniRustCrash) },
+  };
+  QJniEnvironment env;
+  if (!env.registerNativeMethods("dev/yap/qtproto/crash/CrashTest", methods, std::size(methods)))
+    qWarning("[crash] could not register the crash test trigger");
+}
+#endif
 
 // The brand fonts, read in place: the resource is stored uncompressed
 // (CMakeLists.txt), so the font database and each FreeType face use the
@@ -73,6 +96,9 @@ int main(int argc, char* argv[])
   device = QJniObject::getStaticObjectField<jstring>("android/os/Build", "MODEL").toString();
 #endif
   yap_mobile_init(QFile::encodeName(data).constData(), device.toUtf8().constData());
+#if defined(Q_OS_ANDROID) && defined(YAP_CRASH_TEST)
+  installCrashTest();
+#endif
 
   registerFonts();
 

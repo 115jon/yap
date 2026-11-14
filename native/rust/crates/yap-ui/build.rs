@@ -31,6 +31,7 @@ fn main() {
         QmlFile::from("qml/components/ConnectionStrip.qml"),
         QmlFile::from("qml/components/FloatPlate.qml"),
         QmlFile::from("qml/components/FloatShadow.qml"),
+        QmlFile::from("qml/components/FriendsModel.qml"),
         QmlFile::from("qml/components/GameLine.qml"),
         QmlFile::from("qml/components/GifPickerCore.qml"),
         QmlFile::from("qml/components/Icon.qml"),

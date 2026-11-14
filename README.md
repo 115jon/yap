@@ -153,7 +153,7 @@ tool.
 
 ## Documentation and policies
 
-- [Privacy Policy](PRIVACY.md)
+- [Privacy Policy](https://yap.115jon.com/privacy) (source: [PRIVACY.md](PRIVACY.md))
 - [Code Signing Policy](CODE_SIGNING_POLICY.md)
 - [Security Policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)

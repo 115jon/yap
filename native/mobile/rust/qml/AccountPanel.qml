@@ -35,18 +35,10 @@ Item {
     // Read here, where the panel fills the window: the card asking for its
     // own would feed its position back in.
     readonly property real topInset: SafeArea.margins.top
-    readonly property var themes: ({
-        "dark": qsTr("Midnight"),
-        "light": qsTr("Light"),
-        "miku-dark": qsTr("Miku Dark"),
-        "miku-light": qsTr("Miku Light"),
-        "spiderman-dark": qsTr("Spider-Man Dark"),
-        "spiderman-light": qsTr("Spider-Man Light")
-    })
     // The theme picked (Settings.theme: an id or `system`), not the one
     // showing: Match system is not swapped away by a tap.
     readonly property bool systemTheme: Settings.theme === "system"
-    readonly property string themeName: systemTheme ? qsTr("Match system") : root.themes[Theme.themeId] ?? ""
+    readonly property string themeName: systemTheme ? qsTr("Match system") : Theme.themeLabel(Theme.themeId)
     // The same colourway on the other ground.
     readonly property string otherTheme: Theme.themeId.endsWith("-dark") ? Theme.themeId.replace(/-dark$/, "-light")
         : Theme.themeId.endsWith("-light") ? Theme.themeId.replace(/-light$/, "-dark")
@@ -298,7 +290,7 @@ Item {
                         text: qsTr("Theme")
                         hint: root.themeName
                         Accessible.name: root.systemTheme ? qsTr("Theme, %1. Open settings").arg(root.themeName)
-                            : qsTr("Theme, %1. Switch to %2").arg(root.themeName).arg(root.themes[root.otherTheme] ?? "")
+                            : qsTr("Theme, %1. Switch to %2").arg(root.themeName).arg(Theme.themeLabel(root.otherTheme))
                         // Match system is chosen among the themes, in Settings.
                         onTriggered: {
                             if (root.systemTheme) {

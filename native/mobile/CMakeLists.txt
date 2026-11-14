@@ -45,6 +45,15 @@ cxx_qt_import_crate(
   QMAKE "${YAP_TARGET_QMAKE}"
   QT_MODULES Qt::Core Qt::Gui Qt::Qml Qt::Quick Qt::QuickControls2)
 
+# The debug crash trigger (README, "Crash reports"): YAP_CRASH_TEST=1 in the
+# build's environment builds it into the Rust (feature crash-test), the C++
+# (main.cpp) and the Java (android/build.gradle). Release builds never set it.
+if("$ENV{YAP_CRASH_TEST}" STREQUAL "1")
+  set(YAP_CRASH_TEST ON)
+  corrosion_set_features(yap_mobile_qt FEATURES crash-test)
+  message(STATUS "YAP_CRASH_TEST=1: the crash test trigger is built in")
+endif()
+
 cxx_qt_import_qml_module(yap_mobile_qml
   URI "com.yap.mobile"
   SOURCE_CRATE yap_mobile_qt)
@@ -72,6 +81,9 @@ qt_add_executable(yapqt
   cpp/videoitem.cpp cpp/videoitem.h
   cpp/rustnetwork.cpp cpp/rustnetwork.h)
 target_include_directories(yapqt PRIVATE cpp)
+if(YAP_CRASH_TEST)
+  target_compile_definitions(yapqt PRIVATE YAP_CRASH_TEST)
+endif()
 target_link_libraries(yapqt PRIVATE
   yap_mobile_qml
   yap_ui_qml

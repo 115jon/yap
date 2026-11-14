@@ -27,7 +27,7 @@ Item {
 
     readonly property bool inCall: Voice.channelId.length > 0
     readonly property string presence: Session.meStatus.length > 0 ? Session.meStatus : "online"
-    readonly property string presenceWord: presence === "offline" ? qsTr("Invisible") : Theme.presenceWord(presence)
+    readonly property string presenceWord: Theme.ownPresenceWord(presence)
 
     implicitWidth: 280
     implicitHeight: rows.height
