@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0](https://github.com/115jon/yap/compare/qt-android-v0.8.1...qt-android-v0.9.0) (2026-11-14)
+
+
+### Features
+
+* **native:** ✨ add open source licences to settings about ([0aa234a](https://github.com/115jon/yap/commit/0aa234a2c7f34820bc44c575b17b7e2898eeaf79))
+
+
+### Bug Fixes
+
+* **native:** 🐛 ship third-party licence texts with the apps ([c4118f6](https://github.com/115jon/yap/commit/c4118f66703bd658c8235a63b1f2f1c0df3d6b78))
+* **native:** 🐛 show mark as sensitive only on images and videos ([241f069](https://github.com/115jon/yap/commit/241f0695bf8a2df178d22f548f6c974d6b2455b5))
+* **native:** ship third-party licence texts with the apps ([925573e](https://github.com/115jon/yap/commit/925573e7e964c5afcfe1e21a00c62ee6cb69ab8a))
+
 ## [0.8.1](https://github.com/115jon/yap/compare/qt-android-v0.8.0...qt-android-v0.8.1) (2026-11-14)
 
 
