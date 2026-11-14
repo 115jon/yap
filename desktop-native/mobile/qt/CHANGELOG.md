@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/115jon/yap/compare/qt-android-v0.8.0...qt-android-v0.8.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **api:** route third-party media through a signed media proxy ([01e1d39](https://github.com/115jon/yap/commit/01e1d3994ea8389954a950601b2fe862e56f29b3))
+
 ## [0.8.0](https://github.com/115jon/yap/compare/qt-android-v0.7.0...qt-android-v0.8.0) (2026-11-13)
 
 
