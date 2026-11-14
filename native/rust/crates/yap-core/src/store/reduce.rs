@@ -4668,6 +4668,17 @@ fn join_error_copy(error: &str) -> String {
         // Already written for people (yap-voice close reasons).
         return error.to_owned();
     }
+    // A DM call room refused over a block (socket-admission.ts
+    // BLOCK_CALL_COPY), or a block ended the call (endCallsBetween).
+    if has(&["unblock to call"]) {
+        return "You blocked this user. Unblock to call.".to_owned();
+    }
+    if has(&["can't call this user"]) {
+        return super::blocks::CALL_BLOCKED.to_owned();
+    }
+    if has(&["this call has ended"]) {
+        return "This call has ended.".to_owned();
+    }
     if has(&["403", "forbidden", "connect_denied"]) {
         return "You can't join this channel.".to_owned();
     }
@@ -4701,7 +4712,10 @@ fn unreachable(error: &ApiError) -> bool {
     match error {
         ApiError::Network(_) => true,
         ApiError::Http { status, .. } => *status == 429 || *status >= 500,
-        ApiError::Unauthorized | ApiError::Decode(_) | ApiError::Deletion(_) => false,
+        ApiError::Unauthorized
+        | ApiError::Decode(_)
+        | ApiError::Deletion(_)
+        | ApiError::Blocked { .. } => false,
     }
 }
 
@@ -4732,4 +4746,31 @@ fn earliest_start(
         .into_iter()
         .flatten()
         .min()
+}
+
+#[cfg(test)]
+mod join_error_tests {
+    use super::join_error_copy;
+
+    #[test]
+    fn a_call_refused_over_a_block_should_say_so() {
+        // ApiError::Blocked shows the server's sentence, no status.
+        assert_eq!(
+            join_error_copy("call admission: You can't call this user."),
+            "You can't call this user."
+        );
+        assert_eq!(
+            join_error_copy("call admission: You blocked this user. Unblock to call."),
+            "You blocked this user. Unblock to call."
+        );
+        assert_eq!(
+            join_error_copy("room closed: This call has ended."),
+            "This call has ended."
+        );
+        // Other refusals keep their copy.
+        assert_eq!(
+            join_error_copy("call admission: HTTP 403: CONNECT_DENIED"),
+            "You can't join this channel."
+        );
+    }
 }

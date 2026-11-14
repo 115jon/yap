@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
-use yap_core::store::blocks::{CALL_BLOCKED, DM_BLOCKED_YOU, DM_YOU_BLOCKED};
+use yap_core::store::blocks::{DmBlock, CALL_BLOCKED, DM_BLOCKED_YOU, DM_YOU_BLOCKED};
 use yap_core::store::view::{DmView, MessageRow};
 use yap_core::store::{
     reduce, ApiRequest, Command, Dispatch, Effect, GatewayEvent, Input, RequestId, State, ViewDiff,
@@ -163,8 +163,14 @@ fn views(fx: &[Effect]) -> Vec<&ViewUpdate> {
         .collect()
 }
 
+/// The server's refusal over a block, as `send` reads it (by its code).
 fn refusal(message: &str) -> ApiError {
-    ApiError::Http {
+    ApiError::Blocked {
+        block: if message == DM_YOU_BLOCKED {
+            DmBlock::YouBlocked
+        } else {
+            DmBlock::BlockedYou
+        },
         status: 403,
         message: message.into(),
     }
@@ -286,7 +292,14 @@ fn another_send_failure_should_keep_the_row_for_retry() {
         attachment_ids: Vec::new(),
         nsfw_attachment_ids: Vec::new(),
     };
-    client.fail(&post, refusal("Channel not found or access denied"));
+    // A 403 without a block code is any other refusal.
+    client.fail(
+        &post,
+        ApiError::Http {
+            status: 403,
+            message: "Channel not found or access denied".into(),
+        },
+    );
     assert_eq!(client.rows.len(), 1);
     assert!(client.rows[0].failed);
     assert!(client.dm.block.is_empty());

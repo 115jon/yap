@@ -90,6 +90,8 @@ pub(super) fn describe_error(error: &ApiError, action: &str) -> String {
         ApiError::Http { status, .. } if *status < 500 => {
             format!("Unable to {action}. Check the details and try again.")
         }
+        // A block: the server's sentence is written for people.
+        ApiError::Blocked { message, .. } => message.clone(),
         ApiError::Deletion(refusal) => describe_error(
             &ApiError::Http {
                 status: refusal.status(),
