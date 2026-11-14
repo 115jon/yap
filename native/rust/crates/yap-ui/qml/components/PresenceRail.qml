@@ -13,12 +13,7 @@ Rectangle {
     property string status: "online"
     signal chose(string value)
 
-    readonly property var options: [
-        { value: "online", label: qsTr("Online"), name: qsTr("Online") },
-        { value: "idle", label: qsTr("Idle"), name: qsTr("Idle") },
-        { value: "dnd", label: qsTr("DND"), name: qsTr("Do not disturb") },
-        { value: "offline", label: qsTr("Invisible"), name: qsTr("Invisible") }
-    ]
+    readonly property var options: Theme.presenceOptions
 
     // Every cell is as tall as an LED over a silkscreen line, a thumb at
     // least (it grows with the text size).
@@ -68,7 +63,7 @@ Rectangle {
                 color: chosen ? Theme.primaryFill : tap.pressed ? Theme.tint2 : "transparent"
                 EaseColor on color {}
                 Accessible.role: Accessible.RadioButton
-                Accessible.name: modelData.name
+                Accessible.name: modelData.label
                 Accessible.checked: chosen
                 Accessible.onPressAction: root.chose(cell.modelData.value)
 
@@ -93,7 +88,7 @@ Rectangle {
                         width: parent.width
                         horizontalAlignment: Text.AlignHCenter
                         textFormat: Text.PlainText
-                        text: cell.modelData.label
+                        text: cell.modelData.short
                         elide: Text.ElideRight
                         color: cell.chosen ? Theme.primaryFillInk : Theme.ink2
                         font: root.cellFont

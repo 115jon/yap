@@ -20,51 +20,20 @@ Rectangle {
     property string tab: "online"
     property bool adding: false
 
-    readonly property var model: JSON.parse(Friends.state)
     readonly property bool narrow: width < 560
-    // The tab's rows. Every state change parses `model` afresh, and a new
-    // array would rebuild every row in the Repeaters; this one is replaced
-    // only when the rows shown differ (as SearchPanel.parse does).
-    property var branches: []
-    property string branchesKey: ""
-    readonly property int shown: branches.reduce((n, b) => n + b.rows.length, 0)
 
-    function syncBranches() {
-        const next = tab === "pending"
-            ? [{ id: "incoming", label: qsTr("Incoming"), rows: model.incoming ?? [] },
-               { id: "sent", label: qsTr("Sent"), rows: model.sent ?? [] }].filter(b => b.rows.length > 0)
-            : [{ id: tab, label: listLabel(tab), rows: rowsOf(tab) }]
-        const key = JSON.stringify(next)
-        if (key !== branchesKey) {
-            branchesKey = key
-            branches = next
-        }
+    // The list's state: the tab's rows, the counts, each person's action.
+    FriendsModel {
+        id: friends
+        tab: root.tab
     }
-    onModelChanged: syncBranches()
-    onTabChanged: syncBranches()
 
-    function rowsOf(t) {
-        return t === "online" ? model.online ?? []
-            : t === "all" ? model.all ?? []
-            : t === "blocked" ? model.blocked ?? [] : []
-    }
-    function listLabel(t) {
-        return t === "online" ? qsTr("Online")
-            : t === "all" ? qsTr("All friends")
-            : t === "blocked" ? qsTr("Blocked") : qsTr("Pending")
-    }
-    function actOf(userId) {
-        return model.acts?.[userId] ?? { busy: "", error: "", failed: "", done: 0 }
-    }
     function toggleAdd() {
         adding = !adding
     }
 
     color: Theme.ply0
-    Component.onCompleted: {
-        syncBranches()
-        Friends.load()
-    }
+    Component.onCompleted: Friends.load()
 
     Item {
         id: header
@@ -162,7 +131,7 @@ Rectangle {
             visible: active
             width: parent.width
             sourceComponent: AddFriendForm {
-                status: root.model.add ?? { kind: "", message: "", sent: 0 }
+                status: friends.add
             }
         }
     }
@@ -184,21 +153,21 @@ Rectangle {
             bottomPadding: 16
 
             Loader {
-                active: root.model.loading && root.shown === 0
+                active: friends.loading && friends.shown === 0
                 visible: active
                 width: list.width - 16
                 sourceComponent: LoadingFriends {}
             }
 
             Loader {
-                active: !root.model.loading && root.shown === 0
+                active: !friends.loading && friends.shown === 0
                 visible: active
                 width: list.width - 16
                 sourceComponent: emptyState
             }
 
             Repeater {
-                model: root.shown > 0 ? root.branches : []
+                model: friends.shown > 0 ? friends.branches : []
                 delegate: Column {
                     id: branch
                     required property var modelData
@@ -237,7 +206,7 @@ Rectangle {
                             required property var modelData
                             person: modelData
                             width: branch.width
-                            busy: root.actOf(modelData.userId).busy.length > 0
+                            busy: friends.actOf(modelData.userId).busy.length > 0
                             onMessageRequested: Nav.openDm(friend.person.userId)
                             onProfileRequested: anchor => ShellState.showProfile(friend.person.userId, anchor, "right")
                             onMenuRequested: at => rowMenu.openFor(friend.person, friend, at)
@@ -374,7 +343,7 @@ Rectangle {
 
     RemoveFriendDialog {
         id: removeDialog
-        act: root.actOf(removeDialog.userId)
+        act: friends.actOf(removeDialog.userId)
     }
 
     component FriendsTab: T.AbstractButton {
