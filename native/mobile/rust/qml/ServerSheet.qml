@@ -27,8 +27,12 @@ BottomSheet {
     readonly property var leaveAct: JSON.parse(Admin.state).acts["leave-server"] ?? { busy: false, error: "", done: 0 }
     // The leave's finished count when it was asked for.
     property int leaveDone: 0
+    // The clear is queued, so the count can drop to 0 after askLeave read
+    // it: the next leave's count is then 1 again.
     onLeaveActChanged: {
-        if (leaving && leaveAct.done > leaveDone)
+        if (leaveAct.done < leaveDone)
+            leaveDone = leaveAct.done
+        else if (leaving && leaveAct.done > leaveDone)
             close()
     }
 

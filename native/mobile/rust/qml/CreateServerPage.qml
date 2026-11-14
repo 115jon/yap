@@ -48,7 +48,8 @@ Rectangle {
     Component.onDestruction: root.sweep(!creator.busy)
 
     function pickIcon() {
-        if (creator.busy || picking)
+        // Another pick still copying (the composer's) would land here.
+        if (creator.busy || picking || Native.pickingMedia)
             return
         Qt.inputMethod.hide()
         picking = true

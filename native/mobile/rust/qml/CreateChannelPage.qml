@@ -78,7 +78,8 @@ Rectangle {
         Qt.inputMethod.commit()
         channelBefore = Nav.activeChannelId
         creator.create(nameField.text)
-        if (creator.nameError.length > 0)
+        // The core answers later: an empty name is judged here.
+        if (Admin.sanitizeChannelName(nameField.text, creator.voice, true).length === 0)
             nameField.forceActiveFocus()
     }
     function pick(voice) {
