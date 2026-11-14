@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.1](https://github.com/115jon/yap/compare/qt-android-v0.11.0...qt-android-v0.11.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **native:** 🐛 open yap://signin links on android ([cd50ea8](https://github.com/115jon/yap/commit/cd50ea8be6e4b819d17d22869922169c971314a4))
+* **web:** let public pages scroll on phones and open the android app after sign-in ([9586c41](https://github.com/115jon/yap/commit/9586c419e22f96a519234f49b5dfb43d4edf5d40))
+
 ## [0.11.0](https://github.com/115jon/yap/compare/qt-android-v0.10.0...qt-android-v0.11.0) (2026-11-14)
 
 
