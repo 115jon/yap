@@ -24,12 +24,10 @@ export type SettingsPanelId =
   | "soundboard"
   | "keybinds"
   | "appearance"
-  | "notifications"
-  | "desktop";
+  | "notifications";
 
 /** What the current device can show. Rows outside it are not rendered. */
 export type SettingsEnvironment = {
-  desktop: boolean;
   /** Touch-only device (no hover, coarse pointer): no keyboard pages. */
   touch?: boolean;
 };
@@ -39,7 +37,6 @@ export type SettingsRowDef = {
   label: string;
   desc?: string;
   keywords?: string[];
-  desktopOnly?: boolean;
   /** Lives in the panel's preview rail rather than a card. */
   rail?: boolean;
 };
@@ -48,7 +45,6 @@ type SettingsSectionDef = {
   id: string;
   title: string;
   desc?: string;
-  desktopOnly?: boolean;
   rows: SettingsRowDef[];
 };
 
@@ -60,7 +56,6 @@ export type SettingsPanelDef = {
   blurb: string;
   /** The page's poster line (36-44px): the blurb's gist, a few words. */
   headline: string;
-  desktopOnly?: boolean;
   /** Hidden on touch-only devices (keyboard shortcuts). */
   keyboardOnly?: boolean;
   /** Rows that render in the preview rail, not in a card. */
@@ -708,22 +703,8 @@ const SETTINGS_PANELS: SettingsPanelDef[] = [
     title: "Notifications",
     icon: "bell",
     headline: "Alerts and sounds.",
-    blurb: "Desktop alerts and the sounds Yap plays.",
+    blurb: "The sounds Yap plays.",
     sections: [
-      {
-        id: "desktop-alerts",
-        title: "Desktop alerts",
-        desktopOnly: true,
-        rows: [
-          {
-            id: "desktop-notifications",
-            label: "Desktop notifications",
-            desc: "Native notifications for mentions, replies, DMs and unread activity.",
-            keywords: ["alerts", "native", "popup", "toast"],
-            desktopOnly: true,
-          },
-        ],
-      },
       {
         id: "sounds",
         title: "Sounds",
@@ -809,77 +790,6 @@ const SETTINGS_PANELS: SettingsPanelDef[] = [
       },
     ],
   },
-  {
-    id: "desktop",
-    title: "Desktop app",
-    icon: "monitor",
-    headline: "How the app starts and updates.",
-    blurb: "How the Yap app starts, closes and updates on this computer.",
-    desktopOnly: true,
-    sections: [
-      {
-        id: "startup",
-        title: "Startup and closing",
-        rows: [
-          {
-            id: "open-on-startup",
-            label: "Open on startup",
-            desc: "Yap opens when your computer starts.",
-            keywords: ["autostart", "login", "boot", "launch"],
-          },
-          {
-            id: "start-minimized",
-            label: "Start minimized",
-            desc: "When it opens on startup, Yap waits in the tray.",
-            keywords: ["background", "hidden", "tray"],
-          },
-          {
-            id: "close-to-tray",
-            label: "Close to tray",
-            desc: "The close button hides Yap in the tray instead of quitting.",
-            keywords: ["minimize", "quit", "system tray"],
-          },
-        ],
-      },
-      {
-        id: "performance",
-        title: "Performance",
-        rows: [
-          {
-            id: "hardware-acceleration",
-            label: "Hardware acceleration",
-            desc: "Uses your GPU for smoother rendering. Turn it off if you see visual glitches.",
-            keywords: ["gpu", "graphics", "glitch", "performance", "restart"],
-          },
-          {
-            id: "game-capture-hook",
-            label: "Game capture hook",
-            desc: "Captures games directly for smoother screen shares, using the OBS Studio capture hook. Turn it off to always use window capture.",
-            keywords: [
-              "screen share",
-              "game",
-              "capture",
-              "hook",
-              "obs",
-              "anti-cheat",
-              "wgc",
-            ],
-          },
-        ],
-      },
-      {
-        id: "updates",
-        title: "Updates",
-        rows: [
-          {
-            id: "app-version",
-            label: "Version",
-            keywords: ["update", "upgrade", "release", "check for updates"],
-          },
-        ],
-      },
-    ],
-  },
 ];
 
 export const SETTINGS_NAV_GROUPS: Array<{
@@ -891,7 +801,7 @@ export const SETTINGS_NAV_GROUPS: Array<{
     ids: ["account", "connections", "loud", "sessions", "privacy"],
   },
   { title: "Calls", ids: ["voice", "soundboard", "keybinds"] },
-  { title: "App", ids: ["appearance", "notifications", "desktop"] },
+  { title: "App", ids: ["appearance", "notifications"] },
 ];
 
 /** Panels with a live preview rail beside the cards. */
@@ -945,8 +855,7 @@ export function isPanelAvailable(
   panel: SettingsPanelDef,
   env: SettingsEnvironment,
 ): boolean {
-  if (panel.keyboardOnly && env.touch) return false;
-  return !panel.desktopOnly || env.desktop;
+  return !(panel.keyboardOnly && env.touch);
 }
 
 export function isRowAvailable(
@@ -955,9 +864,7 @@ export function isRowAvailable(
 ): boolean {
   const location = ROW_INDEX.get(rowId);
   if (!location) return false;
-  if (!isPanelAvailable(location.panel, env)) return false;
-  if (location.section?.desktopOnly && !env.desktop) return false;
-  return !location.row.desktopOnly || env.desktop;
+  return isPanelAvailable(location.panel, env);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1036,8 +943,7 @@ export function getSectionPosition(
   const entry = SECTION_INDEX.get(sectionId);
   if (!entry) return null;
   const sections = entry.panel.sections.filter(
-    (section) =>
-      (!section.desktopOnly || env.desktop) && !exclude.includes(section.id),
+    (section) => !exclude.includes(section.id),
   );
   const at = sections.findIndex((section) => section.id === sectionId);
   return at < 0 ? null : { index: at + 1, total: sections.length };
@@ -1051,7 +957,6 @@ export function visibleSectionRows(
 ): SettingsRowDef[] {
   const entry = SECTION_INDEX.get(sectionId);
   if (!entry) return [];
-  if (entry.section.desktopOnly && !env.desktop) return [];
   return entry.section.rows.filter(
     (row) => isRowAvailable(row.id, env) && rowMatches(row.id, query),
   );

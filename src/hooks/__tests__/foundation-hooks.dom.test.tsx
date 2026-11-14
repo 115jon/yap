@@ -6,37 +6,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AppActiveRoot,
   computeAppActive,
-  setAppOccluded,
   useAppActive,
 } from "@/hooks/useAppActive";
 import { useIsSpeaking, useSpeakingAttr } from "@/hooks/useIsSpeaking";
 import { selectIsSpeaking, useChatStore } from "@/stores/chat-store";
 
-const base = {
-  visible: true,
-  focused: true,
-  minimized: false,
-  occluded: false,
-};
-
 describe("computeAppActive", () => {
-  it("is inactive when the document is hidden", () => {
-    expect(computeAppActive({ ...base, visible: false }, false)).toBe(false);
-  });
-
-  it("keeps an unfocused web tab active", () => {
-    expect(computeAppActive({ ...base, focused: false }, false)).toBe(true);
-  });
-
-  it("desktop: minimised, or unfocused and covered, is inactive", () => {
-    expect(computeAppActive({ ...base, minimized: true }, true)).toBe(false);
-    expect(
-      computeAppActive({ ...base, focused: false, occluded: true }, true),
-    ).toBe(false);
-    // Unfocused but visible (a stream on a second monitor) stays active.
-    expect(computeAppActive({ ...base, focused: false }, true)).toBe(true);
-    // Focused wins over a stale occlusion signal.
-    expect(computeAppActive({ ...base, occluded: true }, true)).toBe(true);
+  it("is inactive only when the document is hidden", () => {
+    expect(computeAppActive({ visible: false })).toBe(false);
+    expect(computeAppActive({ visible: true })).toBe(true);
   });
 });
 
@@ -85,15 +63,6 @@ describe("AppActiveRoot", () => {
     expect(document.documentElement.hasAttribute("data-app-inactive")).toBe(
       false,
     );
-  });
-
-  it("ignores occlusion on the web", () => {
-    render(<AppActiveRoot />);
-    act(() => setAppOccluded(true));
-    expect(document.documentElement.hasAttribute("data-app-inactive")).toBe(
-      false,
-    );
-    act(() => setAppOccluded(false));
   });
 });
 

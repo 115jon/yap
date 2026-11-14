@@ -30,7 +30,7 @@ import {
   formatDeviceCode,
   isCompleteDeviceCode,
 } from "@/lib/device-code-format";
-import { isDesktop, isMobile, isTauri, isWindows } from "@/lib/platform";
+import { isWindows } from "@/lib/platform";
 
 /** The native client's own scheme. Never `yap:`, which the Tauri app may still own. */
 export const NATIVE_APP_SCHEME = "yap-native";
@@ -120,12 +120,10 @@ export function nativeInviteLink(code: string): string | null {
 
 /**
  * Whether this browser could hand a link to the Yap app: a browser on
- * Windows, not the Tauri desktop app (it renders this same UI and owns
- * `yap://`) and not the mobile app. False during server rendering.
+ * Windows. False during server rendering.
  */
 export function canOfferNativeApp(): boolean {
   if (typeof window === "undefined") return false;
-  if (isTauri() || isDesktop() || isMobile()) return false;
   return isWindows();
 }
 

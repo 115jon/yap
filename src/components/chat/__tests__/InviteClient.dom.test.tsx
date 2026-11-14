@@ -73,7 +73,7 @@ describe("InviteClient", () => {
     ).toBeTruthy();
   });
 
-  it("doesn't offer the Windows app where it can't open (Tauri, mobile)", async () => {
+  it("doesn't offer the Windows app where it can't open (off Windows)", async () => {
     mocks.apiGet.mockResolvedValue(INVITE);
     render(<InviteClient />);
     await screen.findByRole("button", { name: "Accept invite" });

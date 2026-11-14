@@ -14,17 +14,11 @@ const api = vi.hoisted(() => ({
 }));
 const loadCurrentUser = vi.hoisted(() => vi.fn(async () => true));
 const runtime = vi.hoisted(() => ({
-  desktop: false,
   voiceChannelStates: {} as Record<string, Array<{ user_id: string }>>,
   dmCall: false,
 }));
 
 vi.mock("@/lib/api-client", () => api);
-vi.mock("@/lib/runtime", () => ({
-  isDesktop: () => runtime.desktop,
-  isMobile: () => false,
-  isTauri: () => runtime.desktop,
-}));
 vi.mock("@/stores/chat-store", () => ({
   useChatStore: (select: (state: unknown) => unknown) =>
     select({
@@ -42,7 +36,7 @@ import ConnectionsPanel from "../ConnectionsPanel";
 import { SettingsContext, type SettingsContextValue } from "../primitives";
 
 const context: SettingsContextValue = {
-  env: { desktop: false },
+  env: {},
   query: "",
   target: null,
   registerEscape: () => () => {},
@@ -69,7 +63,6 @@ const linked: OwnConnection = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  runtime.desktop = false;
   runtime.voiceChannelStates = {};
   runtime.dmCall = false;
 });
@@ -147,19 +140,6 @@ describe("Settings › Connections", () => {
     expect(
       screen.getByRole("button", { name: "Connect Steam" }),
     ).not.toBeDisabled();
-  });
-
-  it("opens the web app in the browser from the desktop app", async () => {
-    runtime.desktop = true;
-    api.apiGet.mockResolvedValue({ connections: [] });
-    renderPanel();
-    const link = await screen.findByRole("link", {
-      name: "Connect Steam in browser",
-    });
-    expect(link).toHaveAttribute("target", "_blank");
-    expect(link).toHaveAttribute("rel", "noopener noreferrer");
-    expect(link.getAttribute("href")).toMatch(/\/chat\?settings=connections$/);
-    expect(link.getAttribute("href")).not.toContain(".site");
   });
 
   it("shows a linked account with its avatar, name, profile link and switch", async () => {

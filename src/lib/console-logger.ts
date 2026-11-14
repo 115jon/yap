@@ -63,7 +63,6 @@ const TAG_COLORS: Record<string, string> = {
   ScreenPicker: "color: #0d9488; font-weight: bold", // teal-dark
   "Voice:Devices": "color: #06b6d4; font-weight: bold", // cyan
   Preview: "color: #22d3ee; font-weight: bold", // cyan-light
-  useNativeShareStats: "color: #0891b2; font-weight: bold", // cyan-dark
   // ── Misc tags ─────────────────────────────────────────────────────────
   Mod: "color: #ef4444; font-weight: bold", // red
   MicTest: "color: #f472b6; font-weight: bold", // pink

@@ -23,9 +23,7 @@ import {
   type ConnectionProvider,
   type OwnConnection,
 } from "@/lib/connections";
-import { getPublicWebUrl } from "@/lib/platform";
 import { buildProxyMediaUrl } from "@/lib/proxy-media-url";
-import { isDesktop, isMobile } from "@/lib/runtime";
 import { useChatStore } from "@/stores/chat-store";
 import { useCallVoiceStore } from "@/stores/useCallVoiceStore";
 import { useCallback, useEffect, useState } from "react";
@@ -42,11 +40,6 @@ type LoadState =
   | { status: "loading" }
   | { status: "error"; message: string; sessionEnded: boolean }
   | { status: "ready"; connections: OwnConnection[] };
-
-/** The web app's Connections panel, for builds that link in a browser. */
-export function connectionsWebUrl(): string {
-  return `${getPublicWebUrl()}/chat?settings=connections`;
-}
 
 /** The users/me copy of the profile's connections, after any change. */
 function useRefreshProfile() {
@@ -119,8 +112,6 @@ function NotLinkedAccount({ provider }: { provider: ConnectionProvider }) {
   const inCall = useInCall();
   const { armed, arm, cancel, triggerRef } = useConfirm();
   const info = CONNECTION_PROVIDER_INFO[provider];
-  // The app builds hand the flow to the browser, where the web app runs it.
-  const viaBrowser = isDesktop() || isMobile();
 
   const start = () => {
     setBusy(true);
@@ -150,23 +141,7 @@ function NotLinkedAccount({ provider }: { provider: ConnectionProvider }) {
             </LedLabel>
           </div>
         </div>
-        {viaBrowser ? (
-          <Button
-            asChild
-            variant="secondary"
-            size="sm"
-            className="w-full @min-[560px]:w-auto"
-          >
-            <a
-              href={connectionsWebUrl()}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Icon name={info.icon} size="sm" />
-              Connect {info.label} in browser
-            </a>
-          </Button>
-        ) : !armed ? (
+        {!armed ? (
           // Full width under the account on a narrow page, trailing on a wide one.
           <Button
             ref={triggerRef}
@@ -443,15 +418,6 @@ export default function ConnectionsPanel() {
       cancelled = true;
     };
   }, [attempt]);
-
-  // The app builds link in the browser: look again when the app gets focus
-  // back, so a link made there shows without reopening settings.
-  useEffect(() => {
-    if (!isDesktop() && !isMobile()) return undefined;
-    const onFocus = () => setAttempt((value) => value + 1);
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, []);
 
   const update = useCallback((connection: OwnConnection) => {
     setState((current) =>

@@ -1,4 +1,3 @@
-import { isMobile, isTauri } from "@/lib/platform";
 import { useEffect, useRef } from "react";
 
 /**
@@ -9,7 +8,6 @@ type BackHandler = () => boolean;
 
 const backHandlers: BackHandler[] = [];
 let hasRegisteredGlobalListener = false;
-let globalInvoke: typeof import("@tauri-apps/api/core").invoke | null = null;
 
 // All active handlers share one browser history entry. Keeping one entry for
 // the stack avoids one handler's delayed cleanup consuming another handler's
@@ -27,7 +25,7 @@ let programmaticPopPending = false;
 let historyCleanupTimeout: ReturnType<typeof setTimeout> | null = null;
 
 function ensureHistoryEntry() {
-  if (typeof window === "undefined" || isTauri() || ownsHistoryEntry) {
+  if (typeof window === "undefined" || ownsHistoryEntry) {
     return;
   }
 
@@ -43,7 +41,6 @@ function ensureHistoryEntry() {
 function releaseHistoryEntry() {
   if (
     typeof window === "undefined" ||
-    isTauri() ||
     !ownsHistoryEntry ||
     historyCleanupTimeout !== null
   ) {
@@ -103,32 +100,6 @@ function initGlobalBackListener() {
       }, 0);
     }
   });
-
-  // Tauri Native Listener (handles Android back button in native Tauri app)
-  if (isTauri() && isMobile()) {
-    Promise.all([import("@tauri-apps/api/app"), import("@tauri-apps/api/core")])
-      .then(([{ onBackButtonPress }, { invoke }]) => {
-        globalInvoke = invoke;
-
-        onBackButtonPress((event) => {
-          // Execute the LIFO queue of specific back handlers
-          const handled = executeBackHandlers();
-
-          // If none of our app's specific hooks consumed the back button:
-          if (!handled) {
-            if (event.canGoBack) {
-              window.history.back();
-            } else {
-              // If the WebView itself has no remaining history, close the application.
-              if (globalInvoke) {
-                globalInvoke("exit_app").catch(console.error);
-              }
-            }
-          }
-        }).catch(console.error);
-      })
-      .catch(console.error);
-  }
 }
 
 /**

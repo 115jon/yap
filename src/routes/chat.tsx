@@ -7,14 +7,11 @@ import { ImageViewerModal } from "@/components/chat/ImageViewerModal";
 import { PendingDeletionGate } from "@/components/chat/PendingDeletionGate";
 import { SettingsHost } from "@/components/chat/SettingsHost";
 import {
-  getDesktopToken,
   getStoredKovaAuthSessionToken,
-  isDesktopAuthenticated,
   setStoredKovaAuthSessionToken,
 } from "@/lib/desktop-auth";
 import { useAuthCodeExchangePending } from "@/lib/auth-code-exchange";
 import { primeMediaGrant } from "@/lib/media-grant";
-import { isTauri } from "@/lib/platform";
 import { useAuth } from "@kova/react";
 import {
   createFileRoute,
@@ -61,14 +58,6 @@ function buildPostAuthCallbackUrl(): string {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
-/** Native auth guard accepts the persisted Ralph Auth app token. */
-function desktopAuthGuard() {
-  if (!isDesktopAuthenticated()) {
-    throw redirect({ to: "/" });
-  }
-  return { userId: "desktop" };
-}
-
 export const Route = createFileRoute("/chat")({
   component: ChatLayout,
   beforeLoad: async ({ location }) => {
@@ -79,15 +68,7 @@ export const Route = createFileRoute("/chat")({
       location.searchStr.includes("kova_auth_code=") ||
       location.searchStr.includes("ralph_auth_code=");
     if (hasAuthTransferCode) return { userId: "oauth-callback" };
-    if (isTauri()) {
-      const context = desktopAuthGuard();
-      await primeMediaGrant();
-      return context;
-    }
-    if (
-      typeof window !== "undefined" &&
-      (getDesktopToken() || getStoredKovaAuthSessionToken())
-    ) {
+    if (typeof window !== "undefined" && getStoredKovaAuthSessionToken()) {
       // Private media URLs are signed with the media grant: have it before
       // the first render, or the first images would load unsigned.
       await primeMediaGrant();

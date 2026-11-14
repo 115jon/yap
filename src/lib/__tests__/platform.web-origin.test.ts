@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setStoredKovaAuthSessionToken } from "../desktop-auth";
-import { getApiBaseUrl, getAuthAssetUrl, isTauri } from "../platform";
+import { getApiBaseUrl, getAuthAssetUrl } from "../platform";
 
 beforeEach(() => {
   vi.stubEnv("VITE_API_BASE_URL", "https://api.yap.example");
@@ -20,7 +20,6 @@ afterEach(() => {
 
 describe("getAuthAssetUrl on the web", () => {
   it("runs on the web origin", () => {
-    expect(isTauri()).toBe(false);
     expect(getApiBaseUrl()).toBe("");
     expect(window.location.origin).toBe("https://yap.example");
   });

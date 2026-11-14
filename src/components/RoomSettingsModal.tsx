@@ -26,7 +26,6 @@ import VoiceVideoPanel from "@/components/chat/settings/VoiceVideoPanel";
 import ThemePreviewSidebar from "@/components/chat/ThemePreviewSidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/useMediaQuery";
-import { isDesktop } from "@/lib/platform";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 export type RoomSettingsTab = "voice" | "camera" | "appearance";
@@ -93,7 +92,7 @@ export default function RoomSettingsModal({
 
   const contextValue = useMemo<SettingsContextValue>(
     () => ({
-      env: { desktop: isDesktop() },
+      env: {},
       query: "",
       target: null,
       // The workbench supplies the real escape stack.

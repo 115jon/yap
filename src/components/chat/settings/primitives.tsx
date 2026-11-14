@@ -76,7 +76,7 @@ export type SettingsContextValue = {
 const noop = () => () => {};
 
 export const SettingsContext = createContext<SettingsContextValue>({
-  env: { desktop: false },
+  env: {},
   query: "",
   target: null,
   registerEscape: noop,

@@ -7,8 +7,6 @@
  *     deny-busy,decide-error,approved,approved-native,approved-android,
  *     approved-ios,expired,rate-limited,mfa,network}
  *   pub-sign-in-device    sign-in reached from /activate (device waiting)
- *   pub-desktop-{idle,starting,pending,expiring,open-failed,verifying,
- *     rejected,unreachable,denied,expired,error,mfa}
  *   pub-invite-{loading,preview,signed-out,joining,joined,signin,
  *     invalid,expired,member,error}
  *   pub-share-{loaded,edited,loading,gone,error}
@@ -28,13 +26,11 @@ import InviteClient, {
 import SharedMessagePage, {
   type PublicShare,
 } from "@/components/chat/SharedMessagePage";
-import { DeviceSignInScreen } from "@/components/DesktopLogin";
 import { NotFoundPage, RouteErrorPage } from "@/components/PageState";
 import {
   clearStoredKovaAuthSessionToken,
   setStoredKovaAuthSessionToken,
 } from "@/lib/desktop-auth";
-import type { DeviceSignInHookState } from "@/lib/device-sign-in";
 import { setNativeAppLauncherForTests } from "@/lib/native-app-link";
 import { useFixtureSetup } from "@/components/dev/sp-fixtures/api-stub";
 import { SignIn } from "@kova/react";
@@ -231,59 +227,6 @@ function SignInDeviceFixture() {
   );
 }
 
-// ── DesktopLogin (Tauri) ─────────────────────────────────────────────────────
-
-function DesktopFixture({ surface }: { surface: string }) {
-  const step = surface.replace("pub-desktop-", "");
-  // Read the clock once, on mount (render must stay pure).
-  const [now] = useState(() => Date.now());
-  const pending = (secondsLeft: number): DeviceSignInHookState => ({
-    status: "pending",
-    userCode: "KDRW-7QXN",
-    verificationUri: "/activate",
-    verificationUriComplete: "/activate?code=KDRW-7QXN",
-    expiresAt: now + secondsLeft * 1000,
-    interval: 5,
-  });
-  const states: Record<string, DeviceSignInHookState> = {
-    idle: { status: "idle" },
-    starting: { status: "starting" },
-    pending: pending(600),
-    expiring: pending(42),
-    "open-failed": pending(600),
-    verifying: { status: "approved", sessionToken: "tok_fixture_verifying" },
-    rejected: { status: "approved", sessionToken: "tok_fixture_rejected" },
-    unreachable: {
-      status: "approved",
-      sessionToken: "tok_fixture_unreachable",
-    },
-    denied: { status: "denied" },
-    expired: { status: "expired" },
-    error: { status: "error", error: "network_error", retryable: true },
-    mfa: { status: "error", error: "mfa_required", retryable: false },
-  };
-  useState(() => {
-    // The pending view opens the system browser; keep the fixture in place.
-    window.open = (() => {
-      if (step === "open-failed") throw new Error("blocked");
-      return null;
-    }) as never;
-    return true;
-  });
-  useFetchStub((url) => {
-    if (!url.includes("/api/users/me")) return null;
-    if (step === "rejected") return json({ error: "nope" }, 401);
-    if (step === "unreachable") return json({ error: "down" }, 503);
-    return never();
-  });
-  const signIn = {
-    state: states[step] ?? states.idle,
-    start: () => {},
-    cancel: () => {},
-  } as never;
-  return <DeviceSignInScreen isSignedIn={false} signIn={signIn} />;
-}
-
 // ── /invite/<code> ───────────────────────────────────────────────────────────
 
 const INVITE: InvitePreview = {
@@ -402,8 +345,6 @@ export function PublicFixture({ surface }: { surface: string }) {
     content = <ActivateFixture surface={surface} />;
   } else if (surface === "pub-sign-in-device") {
     content = <SignInDeviceFixture />;
-  } else if (surface.startsWith("pub-desktop-")) {
-    content = <DesktopFixture surface={surface} />;
   } else if (surface.startsWith("pub-invite-")) {
     content = <InviteFixture surface={surface} />;
   } else if (surface.startsWith("pub-share-")) {

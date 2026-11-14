@@ -4,7 +4,6 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { DeferredToaster } from "@/components/DeferredToaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAppSessionRecovery } from "@/hooks/useAppSessionRecovery";
-import { useExternalLinkHandler } from "@/hooks/useExternalLinkHandler";
 import {
   DEBUG_DESKTOP_AUTH,
   getDesktopAuthHandoffToken,
@@ -14,16 +13,13 @@ import {
 } from "@/lib/desktop-auth";
 import { getKovaAuthConfig } from "@/lib/kova-auth-config";
 import { installMediaCapRepair } from "@/lib/media-repair";
-import { inviteCodeFromDeepLink } from "@/lib/desktop-deep-link";
-import { getHost } from "@/lib/host";
-import { getPublicWebUrl, isDesktop, isTauri } from "@/lib/platform";
+import { getPublicWebUrl } from "@/lib/platform";
 import { KovaAuthProvider, useAuth } from "@kova/react";
 import {
   HeadContent,
   Outlet,
   Scripts,
   createRootRoute,
-  useNavigate,
 } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { clog } from "@/lib/console-logger";
@@ -34,8 +30,6 @@ import bricolageFont from "@fontsource-variable/bricolage-grotesque/files/bricol
 import martianFont from "@fontsource-variable/martian-mono/files/martian-mono-latin-wdth-normal.woff2?url";
 
 const authLog = clog("DesktopAuth");
-const deepLinkLog = clog("DesktopDeepLinkBridge");
-const devtoolsLog = clog("DesktopDevtools");
 const faviconHref = import.meta.env.DEV ? "/favicon-dev.ico" : "/favicon.ico";
 const SITE_TITLE = "Yap: voice, chat and video rooms";
 const SITE_DESCRIPTION =
@@ -106,23 +100,7 @@ export const Route = createRootRoute({
 });
 
 function RootDocument({ children }: { children: React.ReactNode }) {
-  if (isTauri()) {
-    // Desktop: The app mounts inside `<div id="root">` in desktop/index.html.
-    // If we return `<html><body>` here, ReactDOM crashes silently when Portals are used,
-    // permanently dropping events in WebView2. Return a simple div wrapper instead.
-    return (
-      <div
-        className="h-full w-full bg-ply-0 text-ink-1 antialiased font-ui"
-        data-gramm="false"
-        data-gramm_editor="false"
-        data-enable-grammarly="false"
-      >
-        {children}
-      </div>
-    );
-  }
-
-  // Web: TanStack Start SSR root
+  // TanStack Start SSR root
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -143,8 +121,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 }
 
 function RootComponent() {
-  // Intercept external link clicks on desktop → open in system browser
-  useExternalLinkHandler();
   // Private media that failed unsigned or expired is signed again.
   useEffect(() => installMediaCapRepair(), []);
   const [sessionToken, setSessionToken] = useState<string | undefined>();
@@ -187,7 +163,6 @@ function RootComponent() {
       }}
     >
       <KovaMeetTokenBridge />
-      <DesktopDeepLinkBridge />
       {content}
     </KovaAuthProvider>
   );
@@ -198,57 +173,5 @@ function KovaMeetTokenBridge() {
   useKovaAuthTokenSync(getToken, isLoaded, isSignedIn);
   // A stored token Kova no longer knows: mint a new one from the cookie.
   useAppSessionRecovery();
-  return null;
-}
-
-function DesktopDeepLinkBridge() {
-  const navigate = useNavigate();
-
-  // The page's one deep-link handler. Rust dedupes links, reveals the window
-  // and queues links that arrive before this listens.
-  useEffect(() => {
-    if (!isDesktop()) return;
-
-    const { unsubscribe, ready } = getHost().deepLinks.subscribe((url) => {
-      // Auth no longer uses deep links (desktop signs in with a device code);
-      // invites are the only yap:// links handled here.
-      const code = inviteCodeFromDeepLink(url);
-      if (!code) {
-        deepLinkLog.warn("Deep link did not contain an invite");
-        return;
-      }
-      deepLinkLog.info("Deep link contained invite code");
-      void navigate({ to: "/invite/$code", params: { code } });
-    });
-    ready.catch((error: unknown) =>
-      deepLinkLog.error("Failed to listen for deep links:", error),
-    );
-    return unsubscribe;
-  }, [navigate]);
-
-  useEffect(() => {
-    if (!isDesktop()) return;
-
-    const handleKeyDown = async (event: KeyboardEvent) => {
-      const isDevtoolsShortcut =
-        event.key === "F12" ||
-        (event.key.toLowerCase() === "i" && event.ctrlKey && event.shiftKey);
-
-      if (!isDevtoolsShortcut) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-
-      try {
-        await getHost().window.toggleDevtools();
-      } catch (error) {
-        devtoolsLog.error("Failed to toggle devtools", error);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, []);
-
   return null;
 }

@@ -1,4 +1,3 @@
-import { getOSName } from "@/stores/useDesktopSettingsStore";
 import { Fragment } from "react";
 import { ComingLater, Kbd, SettingsCard, SettingsRow } from "./primitives";
 
@@ -25,7 +24,8 @@ function Keys({ keys, label }: { keys: string[]; label: string }) {
 }
 
 export default function KeybindsPanel() {
-  const mac = getOSName() === "macOS";
+  const mac =
+    typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
   const mod = mac ? "⌘" : "Ctrl";
   const modName = mac ? "Command" : "Control";
 

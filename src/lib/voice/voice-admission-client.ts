@@ -5,12 +5,8 @@
 // asks for only the socket that needs a new ticket.
 
 import { recoverAppSession } from "@/lib/app-session-recovery";
-import {
-  getDesktopToken,
-  getStoredKovaAuthSessionToken,
-} from "@/lib/desktop-auth";
-import { KOVA_AUTH_PUBLISHABLE_KEY } from "@/lib/kova-auth-config";
-import { getApiBaseUrl, isTauri } from "@/lib/platform";
+import { getStoredKovaAuthSessionToken } from "@/lib/desktop-auth";
+import { getApiBaseUrl } from "@/lib/platform";
 import type { IceServer } from "@/lib/types";
 import { buildSocketTicketProtocols } from "@/lib/voice/socket-ticket";
 import { SocketTicketError } from "@/lib/voice/socket-ticket-client";
@@ -54,9 +50,6 @@ function postAdmission(
 ): Promise<Response> {
   const headers = new Headers({ "Content-Type": "application/json" });
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (isTauri() && KOVA_AUTH_PUBLISHABLE_KEY) {
-    headers.set("X-Publishable-Key", KOVA_AUTH_PUBLISHABLE_KEY);
-  }
   return fetch(`${getApiBaseUrl()}/api/voice/admission`, {
     method: "POST",
     credentials: "include",
@@ -92,7 +85,7 @@ export async function requestVoiceAdmission(
     ...(options.participantId ? { participantId: options.participantId } : {}),
     ...(moveGrant ? { moveGrant } : {}),
   };
-  const token = getDesktopToken() ?? getStoredKovaAuthSessionToken();
+  const token = getStoredKovaAuthSessionToken();
   let response = await postAdmission(body, token, signal);
   if (response.status === 401) {
     const freshToken = await recoverAppSession(token);

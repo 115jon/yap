@@ -20,7 +20,6 @@ vi.mock("@/lib/kova-auth-config", () => ({
 }));
 vi.mock("@/lib/platform", () => ({
   apiUrl: (path: string) => `https://meet.test${path}`,
-  isTauri: () => "__TAURI_INTERNALS__" in window,
 }));
 vi.mock("@/lib/console-logger", () => ({
   clog: () => ({
@@ -59,12 +58,6 @@ function mintCalls() {
   return fetchMock.mock.calls.filter(([input]) => String(input) === MINT_URL);
 }
 
-function setTauri(on: boolean) {
-  const w = window as { __TAURI_INTERNALS__?: unknown };
-  if (on) w.__TAURI_INTERNALS__ = {};
-  else delete w.__TAURI_INTERNALS__;
-}
-
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
@@ -77,7 +70,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  setTauri(false);
 });
 
 async function freshClient() {
@@ -159,31 +151,5 @@ describe("api-client 401 recovery (web)", () => {
       status: 401,
     });
     expect(mintCalls()).toHaveLength(0);
-  });
-});
-
-describe("api-client 401 recovery (desktop)", () => {
-  beforeEach(() => {
-    setTauri(true);
-    localStorage.setItem("desktop_auth_token", "tok_revoked");
-  });
-
-  it("re-mints and retries when the webview still has a Kova session", async () => {
-    const { apiGet } = await freshClient();
-
-    await expect(apiGet("/api/users/me")).resolves.toMatchObject({
-      token: "tok_fresh",
-    });
-    expect(localStorage.getItem("desktop_auth_token")).toBe("tok_fresh");
-  });
-
-  it("asks for the device-code sign-in instead of hanging", async () => {
-    mint = () => Response.json({ error: "Not authenticated" }, { status: 401 });
-    const { apiGet, auth } = await freshClient();
-
-    await expect(apiGet("/api/users/me")).rejects.toMatchObject({
-      code: "DESKTOP_AUTH_REQUIRED",
-    });
-    expect(auth.getDesktopAuthHandoffToken()).toBeNull();
   });
 });

@@ -25,11 +25,6 @@ export interface UnifiedScreenShareModalProps {
   support?: ScreenShareSupport;
 }
 
-const DesktopScreenPickerModal = lazy(() =>
-  import("@/components/DesktopScreenPickerModal").then((mod) => ({
-    default: mod.DesktopScreenPickerModal,
-  })),
-);
 const ScreenShareModal = lazy(() =>
   import("@/components/ScreenShareModal").then((mod) => ({
     default: mod.ScreenShareModal,
@@ -40,8 +35,6 @@ const UNSUPPORTED_COPY: Record<
   Extract<ScreenShareSupport, { supported: false }>["reason"],
   string
 > = {
-  "mobile-app":
-    "The Yap phone app can't share your screen yet. You can still watch other people's streams here. To share, use the desktop app or a browser on a computer.",
   "mobile-browser":
     "Phone and tablet browsers can't share a screen. You can still watch other people's streams here. To share, open Yap on a computer.",
   browser:
@@ -72,18 +65,15 @@ export function ScreenShareUnsupportedDialog({
           </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
         <ResponsiveDialogFooter>
-          {/* The phone app's own URL isn't a link a computer can open. */}
-          {reason === "mobile-app" ? null : (
-            <Button
-              variant="secondary"
-              onClick={() =>
-                void copyToClipboard(window.location.href, "Link copied")
-              }
-            >
-              <Icon name="link" size="sm" />
-              Copy link for my computer
-            </Button>
-          )}
+          <Button
+            variant="secondary"
+            onClick={() =>
+              void copyToClipboard(window.location.href, "Link copied")
+            }
+          >
+            <Icon name="link" size="sm" />
+            Copy link for my computer
+          </Button>
           <Button autoFocus onClick={onClose}>
             Got it
           </Button>
@@ -111,19 +101,6 @@ export function UnifiedScreenShareModal({
         onClose={onClose}
         reason={support.reason}
       />
-    );
-  }
-
-  if (support.picker === "desktop-app") {
-    return (
-      <Suspense fallback={null}>
-        <DesktopScreenPickerModal
-          isOpen={isOpen}
-          onClose={onClose}
-          onStart={onStart}
-          availableQualities={availableQualities}
-        />
-      </Suspense>
     );
   }
 

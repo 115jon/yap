@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/desktop-auth", () => ({
   getDesktopAuthHandoffToken: vi.fn(() => null),
-  getDesktopToken: vi.fn(() => null),
   getStoredKovaAuthSessionToken: vi.fn(() => "test-token"),
   waitForDesktopToken: vi.fn(async () => "test-token"),
 }));
@@ -15,7 +14,6 @@ vi.mock("@/lib/app-session-recovery", () => ({
 
 vi.mock("@/lib/platform", () => ({
   apiUrl: (path: string) => `https://meet.test${path}`,
-  isTauri: () => false,
 }));
 
 vi.mock("@/lib/kova-auth-config", () => ({

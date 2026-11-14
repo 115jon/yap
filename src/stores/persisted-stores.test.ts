@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 // zustand's `persist` only exposes `persist.getOptions()` and `rehydrate()`
 // when a storage exists, and `window.localStorage` is jsdom's here.
 import { useChatStore } from "@/stores/chat-store";
-import { useDesktopSettingsStore } from "@/stores/useDesktopSettingsStore";
 import { useListenTogetherAudioSettingsStore } from "@/stores/useListenTogetherAudioSettingsStore";
 import { useMediaPlaybackSettingsStore } from "@/stores/useMediaPlaybackSettingsStore";
 import { useMediaSafetySettingsStore } from "@/stores/useMediaSafetySettingsStore";
@@ -28,44 +27,6 @@ function options(store: { persist: { getOptions: () => object } }) {
     migrate: (persisted: unknown, version: number) => Hydrated;
   };
 }
-
-describe("useDesktopSettingsStore", () => {
-  const { merge } = options(useDesktopSettingsStore);
-  const current = useDesktopSettingsStore.getState();
-
-  it("keeps stored booleans and defaults everything else", () => {
-    expect(
-      merge(
-        {
-          openOnStartup: true,
-          closeToTray: "yes",
-          hardwareAcceleration: 0,
-          desktopNotifications: false,
-          updateSettings: "not a function",
-          somethingElse: 1,
-        },
-        current as never,
-      ),
-    ).toMatchObject({
-      openOnStartup: true,
-      startMinimized: false,
-      closeToTray: true,
-      hardwareAcceleration: true,
-      desktopNotifications: false,
-      updateSettings: current.updateSettings,
-    });
-    expect(merge({ somethingElse: 1 }, current as never)).not.toHaveProperty(
-      "somethingElse",
-    );
-  });
-
-  it.each(NOT_STATE)("falls back to the defaults for %j", (stored) => {
-    expect(merge(stored, current as never)).toMatchObject({
-      openOnStartup: false,
-      closeToTray: true,
-    });
-  });
-});
 
 describe("useMediaPlaybackSettingsStore", () => {
   const { merge } = options(useMediaPlaybackSettingsStore);
@@ -580,15 +541,9 @@ describe("rehydrating from localStorage", () => {
       "sound-settings-storage",
       JSON.stringify({ version: 1, state: "oops" }),
     );
-    storage.setItem(
-      "desktop-settings-storage",
-      JSON.stringify({ version: 1, state: { closeToTray: "yes" } }),
-    );
 
     await useSoundSettingsStore.persist.rehydrate();
-    await useDesktopSettingsStore.persist.rehydrate();
 
     expect(useSoundSettingsStore.getState().userSettings).toEqual({});
-    expect(useDesktopSettingsStore.getState().closeToTray).toBe(true);
   });
 });

@@ -10,7 +10,6 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { DesktopScreenPickerModal } from "../DesktopScreenPickerModal";
 import { ScreenShareModal } from "../ScreenShareModal";
 import { UnifiedScreenShareModal } from "../UnifiedScreenShareModal";
 
@@ -104,106 +103,6 @@ describe("stream dialogs on a phone", () => {
     });
   });
 
-  it("desktop picker becomes a full-height sheet with one-column tiles", async () => {
-    const invoke = vi.fn(async (cmd: string) =>
-      cmd === "get_screen_sources"
-        ? [
-            {
-              id: "w-1",
-              name: "Editor",
-              kind: "window",
-              thumbnail: "",
-              app_name: "Code",
-            },
-            {
-              id: "m-1",
-              name: "Display 1",
-              kind: "monitor",
-              thumbnail: "",
-              app_name: "",
-            },
-          ]
-        : "",
-    );
-    render(
-      <DesktopScreenPickerModal
-        isOpen
-        onClose={() => {}}
-        onStart={() => {}}
-        availableQualities={QUALITIES}
-        invoke={invoke}
-      />,
-    );
-    await waitFor(() => drawer());
-    expect(drawer().className).toContain(
-      "h-[calc(100dvh-var(--app-chrome-top,0px)-24px)]",
-    );
-
-    const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((tab) => tab.textContent)).toEqual([
-      "Applications",
-      "Entire screen",
-      "Devices",
-    ]);
-    for (const tab of tabs) expect(tab.className).toContain("min-h-11");
-    expect(screen.getByRole("tablist").className).toContain("overflow-x-auto");
-    // The tab list is inset inside its wrapper so the focus ring isn't clipped.
-    expect(screen.getByRole("tablist").className).toContain("py-1");
-
-    const group = await screen.findByRole("radiogroup", { name: "Sources" });
-    expect(group.className).toContain("grid-cols-1");
-    expect(screen.getByRole("radio", { name: /Editor/ }).className).not.toMatch(
-      /\bw-\[\d+px\]/,
-    );
-    for (const chip of within(
-      screen.getByRole("radiogroup", { name: "Resolution" }),
-    ).getAllByRole("radio")) {
-      expect(chip.className).toContain("pointer-coarse:h-11");
-    }
-    expect(screen.getByRole("button", { name: "Go live" })).toBeEnabled();
-  });
-
-  it("keeps Go live disabled until a source is picked and offers the Screens tab when no app is open", async () => {
-    const user = userEvent.setup();
-    const invoke = vi.fn(async (cmd: string) =>
-      cmd === "get_screen_sources"
-        ? [
-            {
-              id: "m-1",
-              name: "Display 1",
-              kind: "monitor",
-              thumbnail: "",
-              app_name: "",
-            },
-          ]
-        : "",
-    );
-    render(
-      <DesktopScreenPickerModal
-        isOpen
-        onClose={() => {}}
-        onStart={() => {}}
-        availableQualities={QUALITIES}
-        invoke={invoke}
-      />,
-    );
-    await waitFor(() => drawer());
-    expect(await screen.findByText("No open apps to share")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Go live" })).toBeDisabled();
-
-    await user.click(
-      screen.getByRole("button", { name: "Share entire screen" }),
-    );
-    expect(screen.getByRole("tab", { name: "Entire screen" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(
-      await screen.findByRole("radio", { name: /Display 1/ }),
-    ).toBeChecked();
-    expect(screen.getByRole("button", { name: "Go live" })).toBeEnabled();
-  });
-
   it("explains instead of offering a picker where sharing can't run", async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
@@ -229,22 +128,5 @@ describe("stream dialogs on a phone", () => {
     ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Got it" }));
     expect(onClose).toHaveBeenCalled();
-  });
-
-  it("uses app copy in the phone app", async () => {
-    render(
-      <UnifiedScreenShareModal
-        isOpen
-        onClose={() => {}}
-        onStart={() => {}}
-        availableQualities={QUALITIES}
-        support={{ supported: false, reason: "mobile-app" }}
-      />,
-    );
-    await waitFor(() => drawer());
-    expect(screen.getByText(/phone app can't share/)).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: "Copy link for my computer" }),
-    ).toBeNull();
   });
 });

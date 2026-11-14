@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/desktop-auth", () => ({
-  getDesktopToken: () => null,
   getStoredKovaAuthSessionToken: () => null,
 }));
 vi.mock("@/lib/kova-auth-config", () => ({
@@ -9,7 +8,6 @@ vi.mock("@/lib/kova-auth-config", () => ({
 }));
 vi.mock("@/lib/platform", () => ({
   getApiBaseUrl: () => "https://meet.test",
-  isTauri: () => false,
 }));
 
 import {

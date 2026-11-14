@@ -1,10 +1,8 @@
-import { LazyDesktopLogin } from "@/components/LazyDesktopLogin";
 import HomePageClient from "@/components/HomePageClient";
-import { isTauri } from "@/lib/platform";
 import { createFileRoute } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({
-  component: HomePage,
+  component: HomePageClient,
   head: () => ({
     meta: [
       { title: "Yap: voice, chat and video rooms" },
@@ -16,11 +14,3 @@ export const Route = createFileRoute("/")({
     ],
   }),
 });
-
-function HomePage() {
-  // Local app: show browser-based sign-in page for native auth
-  if (isTauri()) {
-    return <LazyDesktopLogin />;
-  }
-  return <HomePageClient />;
-}

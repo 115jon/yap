@@ -295,8 +295,6 @@ export default defineConfig({
       // These modules deliberately export shared helpers beside their components.
       // Moving them would change established import contracts without improving HMR.
       files: [
-        "src/components/DesktopScreenPickerUI.tsx",
-        "src/components/StandaloneUpdater.tsx",
         "src/components/chat/ImageViewerToolbar.tsx",
         "src/components/chat/ProfileCollectiblesLayer.tsx",
         "src/components/chat/ReplyPreviewContent.tsx",

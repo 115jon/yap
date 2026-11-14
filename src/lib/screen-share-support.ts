@@ -2,9 +2,7 @@
  * Where screen sharing can actually run, and the quality presets every share
  * picker offers.
  *
- *   Tauri desktop       native picker (windows, screens, capture devices)
  *   desktop browsers    getDisplayMedia (the browser draws its own picker)
- *   Tauri iOS/Android   no capture API in the webview, nothing to pick
  *   phone browsers      iOS/iPadOS Safari and Android browsers do not ship
  *                       getDisplayMedia, so there is no picker either
  *
@@ -12,18 +10,14 @@
  * later gets the browser picker without a code change.
  */
 
-import { isMobile, isTauri } from "@/lib/platform";
-
 export type ScreenShareSupport =
-  | { supported: true; picker: "desktop-app" | "browser" }
+  | { supported: true; picker: "browser" }
   | {
       supported: false;
-      reason: "mobile-app" | "mobile-browser" | "browser";
+      reason: "mobile-browser" | "browser";
     };
 
 export interface ScreenShareEnvironment {
-  tauri: boolean;
-  tauriMobile: boolean;
   hasDisplayMedia: boolean;
   userAgent: string;
 }
@@ -31,8 +25,6 @@ export interface ScreenShareEnvironment {
 function readEnvironment(): ScreenShareEnvironment {
   const nav = typeof navigator === "undefined" ? undefined : navigator;
   return {
-    tauri: isTauri(),
-    tauriMobile: isMobile(),
     hasDisplayMedia: typeof nav?.mediaDevices?.getDisplayMedia === "function",
     userAgent: nav?.userAgent ?? "",
   };
@@ -43,11 +35,6 @@ const PHONE_OR_TABLET_UA = /android|iphone|ipad|ipod|mobile/i;
 export function getScreenShareSupport(
   env: ScreenShareEnvironment = readEnvironment(),
 ): ScreenShareSupport {
-  if (env.tauri) {
-    return env.tauriMobile
-      ? { supported: false, reason: "mobile-app" }
-      : { supported: true, picker: "desktop-app" };
-  }
   if (env.hasDisplayMedia) return { supported: true, picker: "browser" };
   return {
     supported: false,

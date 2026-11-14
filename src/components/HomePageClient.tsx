@@ -1,5 +1,5 @@
 /**
- * Public landing page (web only; Tauri shows DesktopLogin instead).
+ * Public landing page.
  *
  * Sections, top to bottom: header, the horizon-band hero (copy on the plain
  * canvas, the product lit by a still dithered horizon), the product features,
