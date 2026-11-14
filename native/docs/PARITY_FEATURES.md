@@ -351,8 +351,7 @@ WebView2 territory.
 | GET `/api/wordle/today`                                                    | Wordle activity                                                                          | `WordleActivityStage.tsx:824`                                                   |
 
 Not for desktop: `/api/push-tokens` (mobile FCM), `/api/auth/sync`
-(webhook), `/api/collectibles/ingest` (admin), `/api/auth/desktop` (old
-`ralphmeet://auth` link flow; sign-in is now device code).
+(webhook), `/api/collectibles/ingest` (admin).
 
 ---
 
