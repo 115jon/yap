@@ -73,6 +73,22 @@ pub trait Platform: Send + Sync + 'static {
         let _ = participant_id;
     }
 
+    /// What we hear of someone in a call, where the app keeps it through
+    /// here (the phone): their volume in percent (0 to 400) and our local
+    /// mute for them. `None`: the app keeps it elsewhere (the desktop's
+    /// `Audio.peerVolume`).
+    fn peer_audio(&self, user_id: &str) -> Option<(u16, bool)> {
+        let _ = user_id;
+        None
+    }
+
+    /// Sets someone's volume (0 to 400) and our local mute for them, heard
+    /// in the call at once; `save` also keeps it for later calls (a slider
+    /// mid-drag does not).
+    fn set_peer_audio(&self, user_id: &str, volume: u16, muted: bool, save: bool) {
+        let _ = (user_id, volume, muted, save);
+    }
+
     /// Screen share lists only our own windows (`YAP_SHARE_ONLY_OURS=1`,
     /// tests).
     fn share_only_ours(&self) -> bool {

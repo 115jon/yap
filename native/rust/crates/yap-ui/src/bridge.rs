@@ -682,6 +682,35 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "setStage"]
         fn set_stage(self: &Voice, participant_id: &QString);
+
+        /// Someone's volume in the call, 0..400 percent, where the app
+        /// keeps it here (the phone); -1 where it does not (the desktop's
+        /// `Audio.peerVolume`).
+        #[qinvokable]
+        #[cxx_name = "peerVolume"]
+        fn peer_volume(self: &Voice, user_id: &QString) -> i32;
+
+        /// Our local mute for someone (the phone; the desktop's
+        /// `Audio.peerMuted`).
+        #[qinvokable]
+        #[cxx_name = "peerMuted"]
+        fn peer_muted(self: &Voice, user_id: &QString) -> bool;
+
+        /// Their volume, 0..400, heard at once and saved.
+        #[qinvokable]
+        #[cxx_name = "setPeerVolume"]
+        fn set_peer_volume(self: &Voice, user_id: &QString, volume: i32);
+
+        /// Their volume heard at once but not saved (a slider mid-drag);
+        /// `setPeerVolume` saves it.
+        #[qinvokable]
+        #[cxx_name = "previewPeerVolume"]
+        fn preview_peer_volume(self: &Voice, user_id: &QString, volume: i32);
+
+        /// Our local mute for them, heard at once and saved.
+        #[qinvokable]
+        #[cxx_name = "setPeerMuted"]
+        fn set_peer_muted(self: &Voice, user_id: &QString, muted: bool);
     }
 
     impl cxx_qt::Initialize for Voice {}
@@ -1507,6 +1536,50 @@ impl qobject::Voice {
     pub fn set_stage(&self, participant_id: &QString) {
         crate::platform::platform().set_video_stage(&participant_id.to_string());
     }
+
+    pub fn peer_volume(&self, user_id: &QString) -> i32 {
+        crate::platform::platform()
+            .peer_audio(&user_id.to_string())
+            .map_or(-1, |(volume, _)| i32::from(volume))
+    }
+
+    pub fn peer_muted(&self, user_id: &QString) -> bool {
+        crate::platform::platform()
+            .peer_audio(&user_id.to_string())
+            .is_some_and(|(_, muted)| muted)
+    }
+
+    pub fn set_peer_volume(&self, user_id: &QString, volume: i32) {
+        edit_peer(user_id, true, |peer| peer.0 = peer_percent(volume));
+    }
+
+    pub fn preview_peer_volume(&self, user_id: &QString, volume: i32) {
+        edit_peer(user_id, false, |peer| peer.0 = peer_percent(volume));
+    }
+
+    pub fn set_peer_muted(&self, user_id: &QString, muted: bool) {
+        edit_peer(user_id, true, |peer| peer.1 = muted);
+    }
+}
+
+/// A per-person volume from QML, clamped to 0..=400 percent.
+fn peer_percent(volume: i32) -> u16 {
+    u16::try_from(volume.clamp(0, 400)).unwrap_or(100)
+}
+
+/// Changes someone's (volume, muted) where the app keeps them here (the
+/// phone); nothing where it does not.
+fn edit_peer(user_id: &QString, save: bool, f: impl FnOnce(&mut (u16, bool))) {
+    let user_id = user_id.to_string();
+    let platform = crate::platform::platform();
+    if user_id.is_empty() {
+        return;
+    }
+    let Some(mut peer) = platform.peer_audio(&user_id) else {
+        return;
+    };
+    f(&mut peer);
+    platform.set_peer_audio(&user_id, peer.0, peer.1, save);
 }
 
 macro_rules! registered {
