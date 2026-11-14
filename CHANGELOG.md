@@ -1,5 +1,21 @@
 # Changelog
 
+## [4.3.0](https://github.com/115jon/yap/compare/v4.2.0...v4.3.0) (2026-11-14)
+
+
+### Features
+
+* **chat:** block stops direct messages and hides blocked users' messages ([e2077b0](https://github.com/115jon/yap/commit/e2077b069185f89eca2c0aac55ce10af308c23cb))
+
+
+### Bug Fixes
+
+* **api:** 🐛 end rings and dm calls when a user is blocked ([0700e91](https://github.com/115jon/yap/commit/0700e917b2ad55ae0f4ed2572469dfb38f9293c0))
+* **api:** 🐛 keep a raced block when accepting a friend request ([37121e5](https://github.com/115jon/yap/commit/37121e57a58a89a3f26f9822065f373fc4db03fb))
+* **api:** 🐛 refuse edits and pins in a blocked dm ([827b615](https://github.com/115jon/yap/commit/827b61558fb8a7e21d753de1828683deec4cf184))
+* **api:** 🐛 refuse the dm call room across a block ([68dbedb](https://github.com/115jon/yap/commit/68dbedb0112cc5232f675b1bf0a29a1ffe88d216))
+* **native:** 🐛 read block refusals by their code ([307ceb8](https://github.com/115jon/yap/commit/307ceb87cc341b5098fbc4544b2df8b715d5bf2c))
+
 ## [4.2.0](https://github.com/115jon/yap/compare/v4.1.5...v4.2.0) (2026-11-14)
 
 
