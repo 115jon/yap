@@ -84,7 +84,7 @@ use crate::audio::{resolve, AudioDevice, AudioDevices, Processing};
 use crate::camera::live::{set_sink, Keepalive};
 use crate::dsp::mix::Stream;
 use crate::dsp::RATE;
-use crate::layers::CAMERA_SIMULCAST;
+use crate::layers::{CameraEncoding, CAMERA_SIMULCAST};
 use crate::machine::MediaState;
 use crate::share::live::{
     set_audio as set_share_audio, set_sink as set_share_sink, AudioKeepalive, Refresher,
@@ -884,12 +884,18 @@ fn apply_screen_encoding(sender: &RtpSender, encoding: &ShareEncoding, hardware:
 /// The highest rate any capture profile runs at.
 const CAMERA_MAX_FPS: f64 = 60.0;
 
-/// The camera simulcast encodings in libwebrtc's terms. A layer the web
-/// leaves uncapped gets the highest profile rate: the capture is paced to
-/// the chosen profile already, and libwebrtc otherwise holds the source to
-/// the lowest cap it is given (every layer at `q`'s 15 fps).
-fn camera_encodings() -> Vec<RtpEncodingParameters> {
-    CAMERA_SIMULCAST
+/// The camera's encodings in libwebrtc's terms (the host's, else
+/// [`CAMERA_SIMULCAST`]). A layer the web leaves uncapped gets the highest
+/// profile rate: the capture is paced to the chosen profile already, and
+/// libwebrtc otherwise holds the source to the lowest cap it is given
+/// (every layer at `q`'s 15 fps).
+fn camera_encodings(layers: &[CameraEncoding]) -> Vec<RtpEncodingParameters> {
+    let layers = if layers.is_empty() {
+        &CAMERA_SIMULCAST[..]
+    } else {
+        layers
+    };
+    layers
         .iter()
         .map(|layer| RtpEncodingParameters {
             rid: layer.rid.to_owned(),
@@ -900,6 +906,25 @@ fn camera_encodings() -> Vec<RtpEncodingParameters> {
             ..RtpEncodingParameters::default()
         })
         .collect()
+}
+
+/// `layers` onto a pushed camera's sender, layer by layer, when it has as
+/// many; `false` when it has another count (it keeps its own).
+fn apply_camera_encodings(sender: &RtpSender, layers: &[CameraEncoding]) -> bool {
+    let mut parameters = sender.parameters();
+    if layers.is_empty() || parameters.encodings.len() != layers.len() {
+        return false;
+    }
+    for (e, layer) in parameters.encodings.iter_mut().zip(layers) {
+        e.scale_resolution_down_by = Some(layer.scale_down_by);
+        e.max_bitrate = layer.max_bitrate;
+        e.max_framerate = layer.max_framerate.or(Some(CAMERA_MAX_FPS));
+    }
+    if let Err(error) = sender.set_parameters(parameters) {
+        eprintln!("[camera] encodings refused: {error:?}");
+        return false;
+    }
+    true
 }
 
 /// The video codecs with VP8 first, as Chrome offers them (the web sets no
@@ -974,6 +999,8 @@ pub struct LibwebrtcSession {
     mic_transceiver: Arc<Mutex<Option<RtpTransceiver>>>,
     sender: Arc<Mutex<Option<RtpSender>>>,
     camera: Arc<Mutex<Option<CameraSend>>>,
+    /// The host's camera encodings (empty: [`CAMERA_SIMULCAST`]).
+    camera_layers: Arc<Mutex<Vec<CameraEncoding>>>,
     screen: Arc<Mutex<Option<ScreenSend>>>,
     screen_audio: Arc<Mutex<Option<ScreenAudioSend>>>,
     /// Mic, camera, share and share audio transceivers a fresh push replaced,
@@ -1151,6 +1178,7 @@ impl LibwebrtcEngine {
                 mic_transceiver: Arc::new(Mutex::new(None)),
                 sender: Arc::new(Mutex::new(None)),
                 camera: Arc::new(Mutex::new(None)),
+                camera_layers: Arc::new(Mutex::new(Vec::new())),
                 screen: Arc::new(Mutex::new(None)),
                 screen_audio: Arc::new(Mutex::new(None)),
                 retired: Arc::new(Mutex::new(Vec::new())),
@@ -1370,7 +1398,7 @@ impl MediaSession for LibwebrtcSession {
                 RtpTransceiverInit {
                     direction: RtpTransceiverDirection::SendOnly,
                     stream_ids: vec![stream_id.to_owned()],
-                    send_encodings: camera_encodings(),
+                    send_encodings: camera_encodings(&lock(&self.camera_layers)),
                 },
             )
             .map_err(err("add camera transceiver"))?;
@@ -1427,6 +1455,16 @@ impl MediaSession for LibwebrtcSession {
         if let Some(camera) = camera.as_ref() {
             camera.keepalive.park(!live);
             set_sink(live.then(|| camera.source.clone()));
+        }
+    }
+
+    fn set_camera_encodings(&self, encodings: &[CameraEncoding]) {
+        *lock(&self.camera_layers) = encodings.to_vec();
+        let camera = lock(&self.camera);
+        if let Some(camera) = camera.as_ref() {
+            if !apply_camera_encodings(&camera.transceiver.sender(), encodings) {
+                eprintln!("[camera] new encodings wait for the next push");
+            }
         }
     }
 

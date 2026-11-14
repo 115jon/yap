@@ -13,6 +13,7 @@ use yap_realtime::StopReason;
 
 use crate::audio::{Playback, Processing};
 use crate::engine::MediaStats;
+use crate::layers::CameraEncoding;
 use crate::layers::{
     resolve_quality, select_rid, Quality, RenderSize, LAYER_DOWNGRADE_DELAY, LAYER_SWITCH_SETTLE,
     LAYER_UPGRADE_DELAY,
@@ -294,6 +295,11 @@ pub enum UserCommand {
     /// keepalive, so on again resumes the same track (SCREEN_SHARE.md
     /// "Keepalive park and reuse").
     SetCamera(bool),
+    /// What our camera is sent as, highest first (the host's choice: the
+    /// desktop's [`crate::CAMERA_SIMULCAST`], a phone's one layer for its
+    /// heat and network). The next push takes them, and a live camera
+    /// takes them in place when it has as many layers.
+    SetCameraEncodings(Vec<CameraEncoding>),
     /// Share a source (SCREEN_SHARE.md `start`): always a new capture.
     StartShare(ShareRequest),
     /// Stop sharing (`stop`).
@@ -633,6 +639,9 @@ pub enum Effect {
     },
     /// Send camera frames (`true`) or the keepalive's black frames.
     SetCameraLive(bool),
+    /// Our camera's encodings, for the next push and in place
+    /// ([`UserCommand::SetCameraEncodings`]).
+    SetCameraEncodings(Vec<CameraEncoding>),
     /// Start capturing a share source; answer with [`Input::ShareCaptured`]
     /// (and [`Input::ShareCaptureEnded`] when its source goes away).
     StartShareCapture {
@@ -715,6 +724,9 @@ struct Camera {
     /// Sending camera frames and announced. Off: parked on the keepalive,
     /// never announced.
     on: bool,
+    /// The host's encodings, as last handed on (empty: none yet; the
+    /// engine keeps its default).
+    encodings: Vec<CameraEncoding>,
 }
 
 /// One pulled camera's simulcast layer.
@@ -1923,6 +1935,12 @@ impl CallMachine {
                 self.sync_watch(fx);
             }
             UserCommand::SetCamera(on) => self.set_camera(fx, on),
+            UserCommand::SetCameraEncodings(encodings) => {
+                if encodings != self.camera.encodings {
+                    self.camera.encodings = encodings.clone();
+                    fx.push(Effect::SetCameraEncodings(encodings));
+                }
+            }
             UserCommand::StartShare(request) => self.start_share(fx, request),
             UserCommand::StopShare => self.stop_share(fx),
             UserCommand::SetShareAudio(on) => self.set_share_audio(fx, on),

@@ -1936,6 +1936,40 @@ fn camera_on_should_push_then_announce_its_layers_and_self_video() {
 }
 
 #[test]
+fn the_hosts_camera_encodings_should_go_to_the_engine_once_per_change() {
+    use yap_voice::layers::{PHONE_CAMERA, PHONE_CAMERA_LOW};
+    let mut m = joined();
+    let set = |enc: &[yap_voice::CameraEncoding]| {
+        Input::Command(UserCommand::SetCameraEncodings(enc.to_vec()))
+    };
+    let fx = m.handle(set(&[PHONE_CAMERA]));
+    assert_eq!(fx, vec![Effect::SetCameraEncodings(vec![PHONE_CAMERA])]);
+    // The same again changes nothing.
+    assert!(m.handle(set(&[PHONE_CAMERA])).is_empty());
+    // Before the camera is on, and while it is: the engine keeps them for
+    // the next push and applies them to a live camera.
+    let mut m = camera_on();
+    let fx = m.handle(set(&[PHONE_CAMERA_LOW]));
+    assert_eq!(fx, vec![Effect::SetCameraEncodings(vec![PHONE_CAMERA_LOW])]);
+}
+
+#[test]
+fn a_single_layer_camera_should_be_announced_without_simulcast_rids() {
+    let mut m = joined();
+    m.handle(Input::Command(UserCommand::SetCamera(true)));
+    let fx = m.handle(Input::CameraPublished(Ok(CameraPublished {
+        sfu_track_name: "cam-sfu-1".into(),
+        simulcast_rids: Vec::new(),
+    })));
+    let announce = camera_announces(&fx);
+    assert_eq!(announce.len(), 1);
+    let track = &announce[0]["d"]["tracks"][0];
+    assert!(track
+        .get("simulcast_rids")
+        .is_none_or(|rids| rids.is_null() || rids == &json!([])));
+}
+
+#[test]
 fn camera_off_should_park_it_and_say_so() {
     let mut m = camera_on();
     let fx = m.handle(Input::Command(UserCommand::SetCamera(false)));

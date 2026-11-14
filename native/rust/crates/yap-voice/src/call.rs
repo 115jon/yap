@@ -19,9 +19,9 @@ use yap_core::{
 };
 
 use crate::{
-    run_call, AdmissionApi, ApiFailure, CallEnv, CallTarget, LibwebrtcEngine, Notice, Playback,
-    Processing, Sensitivity, ShareCapturer, ShareEnd, ShareInfo, ShareNotice, ShareRequest,
-    SourceKind, SpatialLocal, SpatialState, Still, UserCommand, VideoIntent,
+    run_call, AdmissionApi, ApiFailure, CallEnv, CallTarget, CameraEncoding, LibwebrtcEngine,
+    Notice, Playback, Processing, Sensitivity, ShareCapturer, ShareEnd, ShareInfo, ShareNotice,
+    ShareRequest, SourceKind, SpatialLocal, SpatialState, Still, UserCommand, VideoIntent,
 };
 
 pub use yap_core::VoiceTarget as Target;
@@ -39,6 +39,13 @@ pub trait Host: Send + Sync + 'static {
 
     /// Which remote videos are on screen, at what size, and the stage.
     fn video(&self) -> watch::Receiver<VideoIntent>;
+
+    /// What our camera is sent as, highest first, as it changes (a phone's
+    /// one layer for its heat and network). `None`: the camera simulcast,
+    /// [`crate::CAMERA_SIMULCAST`], as the web sends it.
+    fn camera_encodings(&self) -> Option<watch::Receiver<Vec<CameraEncoding>>> {
+        None
+    }
 
     /// The mic's level while a call runs (`None`: it ended), for a meter.
     fn mic_level(&self, level: Option<f64>) {
@@ -120,6 +127,8 @@ struct Commands {
     audio: watch::Receiver<CallAudio>,
     video: watch::Receiver<VideoIntent>,
     transmit: watch::Receiver<bool>,
+    /// The host's camera encodings, when it chooses them.
+    camera: Option<watch::Receiver<Vec<CameraEncoding>>>,
     /// Settings commands not handed out yet.
     pending: VecDeque<UserCommand>,
 }
@@ -128,7 +137,9 @@ impl Commands {
     fn new(
         store: UnboundedReceiver<VoiceCommand>,
         mut video: watch::Receiver<VideoIntent>,
+        mut camera: Option<watch::Receiver<Vec<CameraEncoding>>>,
     ) -> Self {
+        let encodings = camera.as_mut().map(|c| c.borrow_and_update().clone());
         let mut audio = call_audio().subscribe();
         let first = audio.borrow_and_update().clone();
         let shown = video.borrow_and_update().clone();
@@ -139,11 +150,17 @@ impl Commands {
             audio,
             video,
             transmit,
+            camera,
             pending: VecDeque::new(),
         };
         commands.queue(&first);
         commands.pending.push_back(UserCommand::SetVideo(shown));
         commands.pending.push_back(UserCommand::SetTransmit(open));
+        if let Some(encodings) = encodings {
+            commands
+                .pending
+                .push_back(UserCommand::SetCameraEncodings(encodings));
+        }
         commands
     }
 
@@ -175,6 +192,9 @@ impl crate::Commands for Commands {
                 Ok(()) = self.transmit.changed() => {
                     return Some(UserCommand::SetTransmit(*self.transmit.borrow_and_update()));
                 }
+                Some(encodings) = camera_changed(&mut self.camera) => {
+                    return Some(UserCommand::SetCameraEncodings(encodings));
+                }
                 // The sender is a static: this never ends.
                 Ok(()) = self.audio.changed() => {
                     let audio = self.audio.borrow_and_update().clone();
@@ -183,6 +203,21 @@ impl crate::Commands for Commands {
             }
         }
     }
+}
+
+/// The host's next camera encodings; pending forever without a host
+/// choice (or once its sender is gone).
+async fn camera_changed(
+    camera: &mut Option<watch::Receiver<Vec<CameraEncoding>>>,
+) -> Option<Vec<CameraEncoding>> {
+    let Some(receiver) = camera.as_mut() else {
+        return std::future::pending().await;
+    };
+    if receiver.changed().await.is_err() {
+        *camera = None;
+        return std::future::pending().await;
+    }
+    Some(receiver.borrow_and_update().clone())
 }
 
 /// A store command as the call takes it; `None` drops it (a spatial edit
@@ -647,7 +682,13 @@ pub async fn run<H: Host>(
                 .collect(),
         )),
     };
-    let error = run_call(env, target, Commands::new(commands, host.video()), notify).await;
+    let error = run_call(
+        env,
+        target,
+        Commands::new(commands, host.video(), host.camera_encodings()),
+        notify,
+    )
+    .await;
     if let Some(task) = stills.lock().unwrap_or_else(PoisonError::into_inner).take() {
         task.abort();
     }
