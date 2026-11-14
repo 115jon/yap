@@ -1,11 +1,11 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // One suggestion or idle row (SuggestionContent.tsx in OPTION_ROW): 32
 // high, px-2, a 20 px lead (glyph or picture), the label at 13/500 (a
 // key's hint after it in ink-3; a person's name in their role colour), and
-// a trailing meta at 12 in ink-3. Tint-2 while lit, tint-1 on hover.
+// a trailing meta at 12 in ink-3. Tint-2 while lit, tint-1 on hover. On
+// touch a row is the tree's 44.
 Rectangle {
     id: root
 
@@ -16,7 +16,7 @@ Rectangle {
     signal picked()
     signal hovered()
 
-    implicitHeight: Theme.keySm
+    implicitHeight: Theme.touch ? Theme.treeRow : Theme.keySm
     radius: Theme.radius
     color: lit || activeFocus ? Theme.tint2 : hover.hovered ? Theme.tint1 : "transparent"
     EaseColor on color {}
