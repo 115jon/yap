@@ -9,6 +9,8 @@
  *   ring or show typing. The blocked user is told "You can't message this
  *   user"; the blocker is told to unblock first (Discord also stops the
  *   blocker from messaging someone they blocked);
+ * - neither side can join the DM's call room, and a block ends a ring or a
+ *   call already running between them;
  * - a blocked user's friend requests are refused;
  * - a blocked user's mentions, replies and DMs never notify the blocker.
  *
@@ -33,6 +35,12 @@ export const BLOCK_ERROR = {
 export const BLOCK_MESSAGE_COPY = {
   you_blocked: "You blocked this user. Unblock to message.",
   blocked_you: "You can't message this user.",
+} as const satisfies Record<BlockState, string>;
+
+/** The refusal copy for joining a 1:1 DM's call room across a block. */
+export const BLOCK_CALL_COPY = {
+  you_blocked: "You blocked this user. Unblock to call.",
+  blocked_you: "You can't call this user.",
 } as const satisfies Record<BlockState, string>;
 
 /**
