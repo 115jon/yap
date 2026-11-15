@@ -286,7 +286,8 @@ Rectangle {
     }
 
     // A server's right-click menu (ServerList.tsx handleServerContextMenu):
-    // Mark as read (off without unread channels) and Copy ID. The web has
+    // Mark as read (off without unread channels), Mute server (or Unmute),
+    // Notification settings, and Copy ID. The web has
     // no Leave server here yet ("returns once the API exists").
     LazyPopup {
         id: serverMenu
@@ -297,6 +298,7 @@ Rectangle {
             function openFor(id, isUnread, anchor, x, y) {
                 serverId = id
                 unread = isUnread
+                Chat.inspectNotify("server", id)
                 popup(anchor, x, y)
             }
             ClipboardText { id: clipboard }
@@ -306,6 +308,22 @@ Rectangle {
                 enabled: menu.unread
                 onTriggered: Chat.markServerRead(menu.serverId)
             }
+            MenuRule {}
+            NotifyMuteMenu {
+                targetType: "server"
+                targetId: menu.serverId
+                label: qsTr("Mute server")
+            }
+            NotifyUnmuteRow {
+                targetType: "server"
+                targetId: menu.serverId
+                text: qsTr("Unmute server")
+            }
+            NotifyLevelMenu {
+                targetType: "server"
+                targetId: menu.serverId
+            }
+            MenuRule {}
             MenuRow {
                 text: qsTr("Copy ID")
                 glyph: "copy"

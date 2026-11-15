@@ -10,9 +10,11 @@ import Yap.Ui
 T.Menu {
     id: control
 
-    // As a submenu: the glyph its row in the parent menu shows, and whether
-    // that row shows at all.
+    // As a submenu: the glyph its row in the parent menu shows, a second
+    // line under its label (MenuRow `subtitle`), and whether that row shows
+    // at all.
     property string glyph: ""
+    property string subtitle: ""
     property bool shown: true
 
     implicitWidth: Math.min(280, Math.max(200, contentItem.implicitWidth + leftPadding + rightPadding))

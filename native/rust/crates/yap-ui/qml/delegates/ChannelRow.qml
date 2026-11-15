@@ -19,6 +19,9 @@ Rectangle {
     property bool joined: false
     property bool unread: false
     property int mentions: 0
+    // Muted, or in a muted server (notification settings): the name dimmed
+    // to ink-3 while the row is not open, hovered or unread.
+    property bool notifyMuted: false
     property bool manage: false
     property bool draggable: false
     // A voice channel in use: how many are in the call and since when (ms),
@@ -43,6 +46,7 @@ Rectangle {
 
     Accessible.role: Accessible.Button
     Accessible.name: (voice ? qsTr("Voice channel %1") : qsTr("Text channel %1")).arg(name)
+        + (notifyMuted ? qsTr(", muted") : "")
         + (mentions > 0 ? qsTr(", %n mention(s)", "", mentions) : unread ? qsTr(", unread") : "")
 
     Rectangle {
@@ -70,7 +74,8 @@ Rectangle {
         textFormat: Text.PlainText
         text: row.name
         elide: Text.ElideRight
-        color: row.active || hover.hovered || row.unread ? Theme.ink1 : Theme.ink2
+        color: row.active || hover.hovered || row.unread ? Theme.ink1
+            : row.notifyMuted ? Theme.ink3 : Theme.ink2
         // The open channel is font-semibold, as an unread one is.
         font: row.unread || row.active ? Theme.type.rowUnread : Theme.type.row
     }
