@@ -340,13 +340,20 @@ const READ_PUSH_MIN_INTERVAL_MS = 10_000;
  * `created_at` is ISO text from the app, but defaults and older rows are
  * SQLite's `YYYY-MM-DD HH:MM:SS`; `julianday()` reads both. The lookback and
  * `LIMIT 1` keep it cheap, and `idx_notifications_user` narrows it to the
- * user's rows.
+ * user's rows. The messages side also compares `created_at` as text against
+ * a day a little before the lookback (a prefix both formats sort after), so
+ * the channel's history index reads only that range, not every message.
  */
 export async function hasNotificationsSinceLastRead(
   db: D1Database,
   userId: string,
   channelId: string,
 ): Promise<boolean> {
+  const since = new Date(
+    Date.now() - (READ_PUSH_LOOKBACK_DAYS + 1) * 86_400_000,
+  )
+    .toISOString()
+    .slice(0, 10);
   const row = await db
     .prepare(
       `SELECT 1 AS found FROM notifications
@@ -359,7 +366,7 @@ export async function hasNotificationsSinceLastRead(
        SELECT 1 AS found FROM messages m
        JOIN notification_delivery_markers k
          ON k.dedupe_key = m.id || ':message:' || ?
-       WHERE m.channel_id = ?
+       WHERE m.channel_id = ? AND m.created_at >= ?
          AND julianday(m.created_at) > julianday('now', '-${READ_PUSH_LOOKBACK_DAYS} days')
          AND julianday(m.created_at) > COALESCE(
            (SELECT julianday(last_read_at) FROM read_states
@@ -373,6 +380,7 @@ export async function hasNotificationsSinceLastRead(
       channelId,
       userId,
       channelId,
+      since,
       userId,
       channelId,
     )
