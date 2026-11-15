@@ -30,6 +30,12 @@ export const SIDEBAR_ROW_SELECTED = "bg-tint-2 text-ink-1";
 
 const SIDEBAR_ROW_UNREAD = "text-ink-1 font-semibold";
 
+/**
+ * Muted (notification mute on the channel, its server, or the DM): the name
+ * steps down to ink-3 and never reads as unread; hover lifts it to ink-2.
+ */
+export const SIDEBAR_ROW_MUTED = "text-ink-3 pointer-fine:hover:text-ink-2";
+
 /** Fixed leading slot: a 16px icon centred in 20px, ink-3. */
 export const SIDEBAR_ICON_SLOT =
   "flex size-5 shrink-0 items-center justify-center text-ink-3 [&_svg]:size-4";
@@ -101,6 +107,8 @@ export type SidebarRowOptions = {
   tall?: boolean;
   /** The 28px tree channel row instead of the 32px member/DM row. */
   tree?: boolean;
+  /** Notifications muted: dimmed, and unread is ignored. */
+  muted?: boolean;
   className?: string;
 };
 
@@ -110,13 +118,14 @@ export function sidebarRowClass({
   unread = false,
   tall = false,
   tree = false,
+  muted = false,
   className,
 }: SidebarRowOptions = {}) {
   return cn(
     tree ? TREE_ROW : SIDEBAR_ROW,
     tall && !tree && SIDEBAR_ROW_TALL,
     selected ? SIDEBAR_ROW_SELECTED : SIDEBAR_ROW_IDLE,
-    unread && !selected && SIDEBAR_ROW_UNREAD,
+    !selected && (muted ? SIDEBAR_ROW_MUTED : unread && SIDEBAR_ROW_UNREAD),
     className,
   );
 }

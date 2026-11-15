@@ -175,6 +175,8 @@ rows! {
         unread: bool => Unread "unread",
         /// Unread mentions and replies.
         mentions: i64 => Mentions "mentions",
+        /// Muted (notification settings): no unread pill, the tile dimmed.
+        notify_muted: bool => NotifyMuted "notifyMuted",
         /// Someone is in one of its voice channels (the dot on the tile).
         voice: bool => Voice "voice",
         /// Your call is in it (the path ring and speaker disc).
@@ -212,6 +214,9 @@ rows! {
         unread: bool => Unread "unread",
         /// Channels: unread mentions and replies.
         mentions: i64 => Mentions "mentions",
+        /// Channels: muted, or in a muted server (notification settings):
+        /// no unread mark (`unread` stays false) and the name dimmed.
+        notify_muted: bool => NotifyMuted "notifyMuted",
         /// Channels: the user may edit it (Manage channels in the server
         /// or on the channel); labels: in the server.
         manage: bool => Manage "manage",
@@ -394,6 +399,8 @@ rows! {
         unread: bool => Unread "unread",
         /// Unread DM, mention and reply notifications (DMListPanel.tsx).
         mentions: i64 => Mentions "mentions",
+        /// Muted (notification settings): never unread, the name dimmed.
+        notify_muted: bool => NotifyMuted "notifyMuted",
         /// Position among the unread DMs on the rail, or -1.
         rail: i64 => Rail "rail",
         /// The rail key's count: unread notifications, at least 1.
@@ -1275,6 +1282,9 @@ pub enum ViewUpdate {
     Board(Box<super::board::BoardView>),
     /// The saved GIF and clip favourites (`provider:id`).
     GifFavorites(Vec<String>),
+    /// The notification settings of the target a menu opened on
+    /// ([`super::notify::NotifyTargetView`] as JSON), empty when none is.
+    NotifyTarget(String),
     /// The account's camera backgrounds.
     CameraBackgrounds(Box<super::backgrounds::BackgroundsView>),
     /// The inbox, reactions, details tabs and the other extras.
@@ -1641,8 +1651,8 @@ pub(crate) fn is_still_url(url: &str) -> bool {
             .any(|kind| url.starts_with(&format!("data:image/{kind};base64,")))
 }
 
-/// A badge: unread, and the mention count.
-pub(super) type Badge = (bool, i64);
+/// A badge: unread (muted ones never are), the mention count, and muted.
+pub(super) type Badge = (bool, i64, bool);
 
 pub(super) fn server_rows(
     servers: &[Server],
@@ -1653,7 +1663,7 @@ pub(super) fn server_rows(
     servers
         .iter()
         .map(|s| {
-            let (unread, mentions) = badge_of(&s.id);
+            let (unread, mentions, notify_muted) = badge_of(&s.id);
             let voice = voice_of(&s.id);
             ServerRow {
                 id: s.id.clone(),
@@ -1662,6 +1672,7 @@ pub(super) fn server_rows(
                 icon: absolute_url(api_base, s.icon_url.as_deref()),
                 unread,
                 mentions,
+                notify_muted,
                 voice: !voice.channels.is_empty(),
                 voice_here: voice.here && !voice.channels.is_empty(),
                 voice_tip: voice.tip(),
@@ -1740,6 +1751,7 @@ fn plain_row(kind: TreeKind, id: &str, name: &str) -> ChannelTreeRow {
         lit: 0,
         unread: false,
         mentions: 0,
+        notify_muted: false,
         manage: false,
         category: String::new(),
         status: String::new(),
@@ -1756,11 +1768,16 @@ fn plain_row(kind: TreeKind, id: &str, name: &str) -> ChannelTreeRow {
     }
 }
 
-fn channel_row(channel: &Channel, (unread, mentions): Badge, manage_all: bool) -> ChannelTreeRow {
+fn channel_row(
+    channel: &Channel,
+    (unread, mentions, notify_muted): Badge,
+    manage_all: bool,
+) -> ChannelTreeRow {
     ChannelTreeRow {
         voice: channel.channel_type == ChannelType::Voice,
         unread,
         mentions,
+        notify_muted,
         manage: crate::admin::can_manage_channel(manage_all, channel.permissions),
         category: channel.category_id.clone().unwrap_or_default(),
         ..plain_row(TreeKind::Channel, &channel.id, &channel.name)
@@ -2270,6 +2287,8 @@ pub(super) struct DmBadge {
     pub has_unread: bool,
     pub mentions: i64,
     pub notifications: i64,
+    /// Muted (notification settings); `unread` and `has_unread` are false.
+    pub muted: bool,
 }
 
 /// The home DM list in `/api/dms` order, and how many of them are unread
@@ -2316,6 +2335,7 @@ pub(super) fn dm_rows(
                 game_icon: game_icon(presence, &user.id, api_base),
                 unread: badge.unread,
                 mentions: badge.mentions,
+                notify_muted: badge.muted,
                 rail: rank,
                 rail_count: badge.notifications.max(1),
                 deco: collectibles::decoration_url(user.avatar_display.as_ref()),

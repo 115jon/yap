@@ -33,6 +33,8 @@ Item {
     signal callRequested()
     signal serverMenuRequested()
     signal channelMenuRequested(string channelId, string name, bool voice)
+    // A long press on a DM: its notification settings.
+    signal dmMenuRequested(string channelId, string name)
     // The open DM's call (ChatPage.dmCallRequested).
     signal dmCallRequested(string action)
     // A message's "N replies": its thread, as a page.
@@ -310,6 +312,7 @@ Item {
         onCallRequested: pager.callRequested()
         onServerMenuRequested: pager.serverMenuRequested()
         onChannelMenuRequested: (channelId, name, voice) => pager.channelMenuRequested(channelId, name, voice)
+        onDmMenuRequested: (channelId, name) => pager.dmMenuRequested(channelId, name)
     }
 
     Item {

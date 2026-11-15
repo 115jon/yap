@@ -22,6 +22,7 @@ import { useReducer } from "react";
 import { useShallow } from "zustand/shallow";
 import ContextMenu from "./ContextMenu";
 import { DMListPanel } from "./DMListPanel";
+import { notificationsMenuItem } from "./NotificationSettingsMenu";
 import UserProfilePopover from "./UserProfilePopover";
 
 interface Props {
@@ -190,6 +191,12 @@ export default function DMSidebar({
             },
           ]
         : []),
+      // A label-less spacer ends the group above.
+      { label: "", onClick: () => {}, divider: true },
+      notificationsMenuItem(
+        { kind: "dm", channelId: dm.id },
+        { divider: true },
+      ),
       {
         label: "Copy ID",
         icon: <Icon name="copy" size="sm" />,

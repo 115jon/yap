@@ -10,6 +10,11 @@ import {
   shouldPlayCurrentChannelMessageSound,
 } from "@/lib/reconnect-sound-guard";
 import { playMessageReceived } from "@/lib/sounds";
+import {
+  effectiveSettingsFor,
+  silencesChannelSounds,
+  targetForChannel,
+} from "@/lib/notification-settings-client";
 import { dragOverSituation, type TooBigSituation } from "@/lib/too-big-copy";
 import type { Attachment, Message } from "@/lib/types";
 import { useMyEntitlement } from "@/hooks/useEntitlement";
@@ -29,6 +34,18 @@ import type { VirtualMessageListHandle } from "./VirtualMessageList";
 
 function messageHistoryCursor(message: Pick<Message, "created_at" | "id">) {
   return `${message.created_at}|${message.id}`;
+}
+
+/** A muted channel (or one set to Nothing) keeps its message sound quiet. */
+function isChannelSilenced(channelId: string): boolean {
+  const state = useChatStore.getState();
+  return silencesChannelSounds(
+    effectiveSettingsFor(
+      state.notificationSettings,
+      targetForChannel(channelId, state),
+      Math.max(Date.now(), state.notificationSettingsNow),
+    ),
+  );
 }
 
 export function useChatArea({
@@ -208,7 +225,8 @@ export function useChatArea({
         previous.messages,
         state.messages,
         state.user?.id,
-      )
+      ) &&
+      !(channelId && isChannelSilenced(channelId))
     ) {
       playMessageReceived();
     }

@@ -15,6 +15,9 @@ Item {
     required property bool active
     required property bool unread
     required property int mentions
+    // Muted (notification settings): no unread pill (the core says so) and
+    // the tile dimmed while it is not the selected or hovered one.
+    required property bool notifyMuted
     required property bool voice
     required property bool voiceHere
     required property string voiceTip
@@ -37,8 +40,9 @@ Item {
     Accessible.role: Accessible.Button
     Accessible.name: {
         const base = entry.voice ? qsTr("%1, %2").arg(entry.name).arg(entry.voiceLines[0]) : entry.name
-        return entry.mentions > 0 ? qsTr("%1, %n mention(s)", "", entry.mentions).arg(base)
-            : entry.unread ? qsTr("%1, unread messages").arg(base) : base
+        const named = entry.notifyMuted ? qsTr("%1, muted").arg(base) : base
+        return entry.mentions > 0 ? qsTr("%1, %n mention(s)", "", entry.mentions).arg(named)
+            : entry.unread ? qsTr("%1, unread messages").arg(named) : named
     }
 
     RailPill {
@@ -56,6 +60,8 @@ Item {
         height: Theme.railTile
         radius: Theme.radius
         color: entry.active && picture.status !== Image.Ready ? Theme.primaryFill : Theme.tint1
+        opacity: entry.notifyMuted && !entry.active && !hover.hovered ? 0.5 : 1
+        Behavior on opacity { NumberAnimation { duration: Theme.dur1 } }
         scale: tap.pressed ? Theme.scalePressIcon : 1
         Behavior on scale { NumberAnimation { duration: Theme.dur1; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
 

@@ -36,6 +36,9 @@ BottomSheet {
             close()
     }
 
+    // Notification settings: NotifySheet takes over (Main.qml).
+    signal notifyRequested(string targetType, string targetId, string name, bool inServer)
+
     function openServer() {
         channelId = ""
         channelName = ""
@@ -115,6 +118,18 @@ BottomSheet {
                     Chat.markChannelRead(sheet.channelId)
                 else
                     Chat.markServerRead(sheet.serverId)
+            }
+        }
+        SheetRow {
+            visible: !sheet.leaving
+            iconName: "bell"
+            text: qsTr("Notification settings")
+            onTriggered: {
+                sheet.close()
+                if (sheet.onChannel)
+                    sheet.notifyRequested("channel", sheet.channelId, sheet.title, true)
+                else
+                    sheet.notifyRequested("server", sheet.serverId, sheet.serverName, false)
             }
         }
         SheetRow {

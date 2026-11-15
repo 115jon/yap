@@ -16,6 +16,8 @@ Item {
     property bool chatHasRows: false
     signal profileRequested(string userId)
     signal friendsRequested()
+    // A long press on a conversation: its notification settings.
+    signal dmMenuRequested(string channelId, string name)
     // Room under the last row for what floats over the pane's foot (the
     // drawer's account plate).
     property real bottomClear: 8
@@ -113,6 +115,10 @@ Item {
                 root.openConversation(dm.channelId)
             }
             onProfileRequested: root.profileRequested(dm.userId)
+            onMenuRequested: {
+                Native.haptic(Native.LongPress)
+                root.dmMenuRequested(dm.channelId, dm.name)
+            }
         }
     }
 

@@ -181,7 +181,8 @@ const NATIVE_FORMAT = "2";
 export interface MessagePush {
   recipientId: string;
   notificationId: string;
-  type: "mention" | "reply" | "dm";
+  /** "message": a plain message in a channel set to "all messages". */
+  type: "mention" | "reply" | "dm" | "message";
   channelId: string;
   serverId: string | null;
   messageId: string;
@@ -331,19 +332,28 @@ const READ_PUSH_MIN_INTERVAL_MS = 10_000;
 
 /**
  * Whether marking `channelId` read now clears anything: the user has a
- * notification there newer than their previous `last_read_at` (or any, with
- * no read state yet). Call it before `markChannelAsRead` moves the mark.
+ * notification there, or was pushed a message as an "all messages" member
+ * (a delivery marker, no notification row), newer than their previous
+ * `last_read_at` (or any, with no read state yet). Call it before
+ * `markChannelAsRead` moves the mark.
  *
  * `created_at` is ISO text from the app, but defaults and older rows are
  * SQLite's `YYYY-MM-DD HH:MM:SS`; `julianday()` reads both. The lookback and
  * `LIMIT 1` keep it cheap, and `idx_notifications_user` narrows it to the
- * user's rows.
+ * user's rows. The messages side also compares `created_at` as text against
+ * a day a little before the lookback (a prefix both formats sort after), so
+ * the channel's history index reads only that range, not every message.
  */
 export async function hasNotificationsSinceLastRead(
   db: D1Database,
   userId: string,
   channelId: string,
 ): Promise<boolean> {
+  const since = new Date(
+    Date.now() - (READ_PUSH_LOOKBACK_DAYS + 1) * 86_400_000,
+  )
+    .toISOString()
+    .slice(0, 10);
   const row = await db
     .prepare(
       `SELECT 1 AS found FROM notifications
@@ -352,9 +362,28 @@ export async function hasNotificationsSinceLastRead(
          AND julianday(created_at) > COALESCE(
            (SELECT julianday(last_read_at) FROM read_states
             WHERE user_id = ? AND channel_id = ?), 0)
+       UNION ALL
+       SELECT 1 AS found FROM messages m
+       JOIN notification_delivery_markers k
+         ON k.dedupe_key = m.id || ':message:' || ?
+       WHERE m.channel_id = ? AND m.created_at >= ?
+         AND julianday(m.created_at) > julianday('now', '-${READ_PUSH_LOOKBACK_DAYS} days')
+         AND julianday(m.created_at) > COALESCE(
+           (SELECT julianday(last_read_at) FROM read_states
+            WHERE user_id = ? AND channel_id = ?), 0)
        LIMIT 1`,
     )
-    .bind(userId, channelId, userId, channelId)
+    .bind(
+      userId,
+      channelId,
+      userId,
+      channelId,
+      userId,
+      channelId,
+      since,
+      userId,
+      channelId,
+    )
     .first();
   return row !== null && row !== undefined;
 }

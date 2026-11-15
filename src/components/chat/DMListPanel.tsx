@@ -14,6 +14,7 @@ import {
   UserStatusDot,
 } from "./UserStatusDot";
 import { useChatStore } from "@/stores/chat-store";
+import { useNotificationMutes } from "@/hooks/useNotificationMutes";
 import { useMemo } from "react";
 import { AvatarImage } from "./AvatarImage";
 import { avatarShape } from "@/components/ui/avatar-shape";
@@ -72,6 +73,7 @@ export function DMListPanel({
   const notifications = useChatStore((s) => s.notifications);
   const onlineUsers = useChatStore((s) => s.onlineUsers);
   const gameActivities = useChatStore((s) => s.gameActivityByUserId);
+  const mutes = useNotificationMutes();
   const dmUnreadCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const n of notifications) {
@@ -111,8 +113,12 @@ export function DMListPanel({
 
   const rows = dmChannels.map((dm) => {
     const selected = activeChannelId === dm.id;
+    // A muted DM is dimmed and never reads as unread.
+    const dmMuted = mutes.isDmMuted(dm.id);
     const dmIsUnread =
-      !selected && isUnread(dm.id, state.readStates, state.lastMessageAt);
+      !selected &&
+      !dmMuted &&
+      isUnread(dm.id, state.readStates, state.lastMessageAt);
     const dmNotifCount = dmUnreadCounts[dm.id] ?? 0;
     const displayName = getDisplayName(dm.recipient, dm.name ?? "Unknown");
     const presence = livePresenceStatus(
@@ -137,10 +143,12 @@ export function DMListPanel({
                 PHONE_DM_ROW,
                 secondLine && "min-h-14",
                 selected && "bg-tint-2 text-ink-1",
+                dmMuted && !selected && "text-ink-3",
               )
             : sidebarRowClass({
                 selected,
                 unread: dmIsUnread,
+                muted: dmMuted,
                 tall: secondLine,
               })
         }
@@ -151,13 +159,22 @@ export function DMListPanel({
           onClick={() => onSelectDm(dm.id)}
           onContextMenu={(e) => handleDmContextMenu(e, dm)}
           {...bindDmLongPress(dm)}
-          aria-label={`Open DM with ${displayName}`}
+          aria-label={
+            dmMuted
+              ? `Open DM with ${displayName}, muted`
+              : `Open DM with ${displayName}`
+          }
           aria-current={selected ? "page" : undefined}
         />
         {dmIsUnread && !phone && (
           <span aria-hidden className={SIDEBAR_UNREAD_PILL} />
         )}
-        <div className="relative shrink-0">
+        <div
+          className={cn(
+            "relative shrink-0",
+            dmMuted && !selected && "opacity-60",
+          )}
+        >
           <button
             type="button"
             className={cn(

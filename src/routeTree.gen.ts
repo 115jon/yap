@@ -31,6 +31,7 @@ import { Route as ApiProxyMediaRouteImport } from './routes/api/proxy-media'
 import { Route as ApiPresenceRouteImport } from './routes/api/presence'
 import { Route as ApiOembedRouteImport } from './routes/api/oembed'
 import { Route as ApiNotificationsRouteImport } from './routes/api/notifications'
+import { Route as ApiNotificationSettingsRouteImport } from './routes/api/notification-settings'
 import { Route as ApiMyinstantsRouteImport } from './routes/api/myinstants'
 import { Route as ApiInstagramVideoRouteImport } from './routes/api/instagram-video'
 import { Route as ApiGifsRouteImport } from './routes/api/gifs'
@@ -246,6 +247,11 @@ const ApiOembedRoute = ApiOembedRouteImport.update({
 const ApiNotificationsRoute = ApiNotificationsRouteImport.update({
   id: '/api/notifications',
   path: '/api/notifications',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiNotificationSettingsRoute = ApiNotificationSettingsRouteImport.update({
+  id: '/api/notification-settings',
+  path: '/api/notification-settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiMyinstantsRoute = ApiMyinstantsRouteImport.update({
@@ -822,6 +828,7 @@ export interface FileRoutesByFullPath {
   '/api/gifs': typeof ApiGifsRoute
   '/api/instagram-video': typeof ApiInstagramVideoRoute
   '/api/myinstants': typeof ApiMyinstantsRouteWithChildren
+  '/api/notification-settings': typeof ApiNotificationSettingsRoute
   '/api/notifications': typeof ApiNotificationsRoute
   '/api/oembed': typeof ApiOembedRoute
   '/api/presence': typeof ApiPresenceRoute
@@ -952,6 +959,7 @@ export interface FileRoutesByTo {
   '/api/gifs': typeof ApiGifsRoute
   '/api/instagram-video': typeof ApiInstagramVideoRoute
   '/api/myinstants': typeof ApiMyinstantsRouteWithChildren
+  '/api/notification-settings': typeof ApiNotificationSettingsRoute
   '/api/notifications': typeof ApiNotificationsRoute
   '/api/oembed': typeof ApiOembedRoute
   '/api/presence': typeof ApiPresenceRoute
@@ -1083,6 +1091,7 @@ export interface FileRoutesById {
   '/api/gifs': typeof ApiGifsRoute
   '/api/instagram-video': typeof ApiInstagramVideoRoute
   '/api/myinstants': typeof ApiMyinstantsRouteWithChildren
+  '/api/notification-settings': typeof ApiNotificationSettingsRoute
   '/api/notifications': typeof ApiNotificationsRoute
   '/api/oembed': typeof ApiOembedRoute
   '/api/presence': typeof ApiPresenceRoute
@@ -1215,6 +1224,7 @@ export interface FileRouteTypes {
     | '/api/gifs'
     | '/api/instagram-video'
     | '/api/myinstants'
+    | '/api/notification-settings'
     | '/api/notifications'
     | '/api/oembed'
     | '/api/presence'
@@ -1345,6 +1355,7 @@ export interface FileRouteTypes {
     | '/api/gifs'
     | '/api/instagram-video'
     | '/api/myinstants'
+    | '/api/notification-settings'
     | '/api/notifications'
     | '/api/oembed'
     | '/api/presence'
@@ -1475,6 +1486,7 @@ export interface FileRouteTypes {
     | '/api/gifs'
     | '/api/instagram-video'
     | '/api/myinstants'
+    | '/api/notification-settings'
     | '/api/notifications'
     | '/api/oembed'
     | '/api/presence'
@@ -1606,6 +1618,7 @@ export interface RootRouteChildren {
   ApiGifsRoute: typeof ApiGifsRoute
   ApiInstagramVideoRoute: typeof ApiInstagramVideoRoute
   ApiMyinstantsRoute: typeof ApiMyinstantsRouteWithChildren
+  ApiNotificationSettingsRoute: typeof ApiNotificationSettingsRoute
   ApiNotificationsRoute: typeof ApiNotificationsRoute
   ApiOembedRoute: typeof ApiOembedRoute
   ApiPresenceRoute: typeof ApiPresenceRoute
@@ -1822,6 +1835,13 @@ declare module '@tanstack/react-router' {
       path: '/api/notifications'
       fullPath: '/api/notifications'
       preLoaderRoute: typeof ApiNotificationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/notification-settings': {
+      id: '/api/notification-settings'
+      path: '/api/notification-settings'
+      fullPath: '/api/notification-settings'
+      preLoaderRoute: typeof ApiNotificationSettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/myinstants': {
@@ -2931,6 +2951,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiGifsRoute: ApiGifsRoute,
   ApiInstagramVideoRoute: ApiInstagramVideoRoute,
   ApiMyinstantsRoute: ApiMyinstantsRouteWithChildren,
+  ApiNotificationSettingsRoute: ApiNotificationSettingsRoute,
   ApiNotificationsRoute: ApiNotificationsRoute,
   ApiOembedRoute: ApiOembedRoute,
   ApiPresenceRoute: ApiPresenceRoute,

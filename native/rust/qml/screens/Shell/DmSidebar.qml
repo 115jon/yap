@@ -241,11 +241,15 @@ Item {
             onSelected: Nav.selectChannel(dm.channelId)
             onProfileRequested: anchor => ShellState.showProfile(dm.userId, anchor, "right")
             // Right click: the conversation's menu (Start a call asks first).
-            onMenuRequested: at => rowMenu.load()?.popup(dm, at.x, at.y)
+            onMenuRequested: at => {
+                Chat.inspectNotify("channel", dm.channelId)
+                rowMenu.load()?.popup(dm, at.x, at.y)
+            }
             LazyPopup {
                 id: rowMenu
                 // DMSidebar.tsx: Profile (the full profile), Start a call (not
-                // while it rings or runs), Copy ID ("Channel ID copied").
+                // while it rings or runs), Mute conversation (or Unmute) and
+                // Notification settings, Copy ID ("Channel ID copied").
                 sourceComponent: MenuPanel {
                     MenuRow {
                         text: qsTr("Profile")
@@ -260,6 +264,22 @@ Item {
                         glyph: "call"
                         onTriggered: ShellState.startCall(dm.channelId, dm.name, true)
                     }
+                    MenuRule {}
+                    NotifyMuteMenu {
+                        targetType: "channel"
+                        targetId: dm.channelId
+                        label: qsTr("Mute conversation")
+                    }
+                    NotifyUnmuteRow {
+                        targetType: "channel"
+                        targetId: dm.channelId
+                        text: qsTr("Unmute conversation")
+                    }
+                    NotifyLevelMenu {
+                        targetType: "channel"
+                        targetId: dm.channelId
+                    }
+                    MenuRule {}
                     MenuRow {
                         text: qsTr("Copy ID")
                         glyph: "copy"

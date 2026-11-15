@@ -32,7 +32,7 @@ T.MenuItem {
     property string badge: ""
     // ContextMenu.tsx `subtitle` (one line, 12 ink-2, the row min-h-11)
     // and `rightIcon` (a trailing chevron on a row that is not a submenu).
-    property string subtitle: ""
+    property string subtitle: subMenu ? (subMenu.subtitle || "") : ""
     property bool chevron: false
     // Shift was held over the row (the pointer reports its modifiers): the
     // message menu's Pin and Delete skip their confirm then (isShiftHeld).

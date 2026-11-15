@@ -870,6 +870,8 @@ pub(super) struct Pending {
     pub board: HashMap<RequestId, super::board::BoardOp>,
     /// GIF and clip favourites.
     pub favorites: HashMap<RequestId, super::favorites::FavoritesOp>,
+    /// Notification settings (the list and each change).
+    pub notify: HashMap<RequestId, super::notify::NotifyOp>,
     /// Camera backgrounds.
     pub backgrounds: HashMap<RequestId, super::backgrounds::BackgroundsOp>,
     /// The inbox, details tabs, voice status and the other extras.
@@ -1300,6 +1302,8 @@ pub struct State {
     pub(super) board: super::board::BoardState,
     /// GIF and clip favourites.
     pub(super) favorites: super::favorites::FavoritesState,
+    /// Notification levels and mutes.
+    pub(super) notify: super::notify::NotifyState,
     /// The account's camera backgrounds.
     pub(super) backgrounds: super::backgrounds::BackgroundsState,
     pub(super) extras: super::extras::ExtrasState,
@@ -1432,6 +1436,7 @@ impl State {
             shop: Default::default(),
             board: Default::default(),
             favorites: Default::default(),
+            notify: Default::default(),
             backgrounds: Default::default(),
             extras: Default::default(),
             deletion: Default::default(),
@@ -1656,12 +1661,18 @@ impl State {
         i64::try_from(n).unwrap_or(i64::MAX)
     }
 
-    /// Any text channel of the server is unread.
+    /// Any text channel of the server is unread. A muted server never is,
+    /// and its muted channels do not count (notification settings).
     pub fn server_unread(&self, server_id: &str) -> bool {
+        if self.server_notify_muted(server_id) {
+            return false;
+        }
         self.channels.get(server_id).is_some_and(|list| {
-            list.channels
-                .iter()
-                .any(|c| c.channel_type == ChannelType::Text && self.is_unread(&c.id))
+            list.channels.iter().any(|c| {
+                c.channel_type == ChannelType::Text
+                    && self.is_unread(&c.id)
+                    && !self.notify_effective_in(Some(server_id), &c.id).muted
+            })
         })
     }
 

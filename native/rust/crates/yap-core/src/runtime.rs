@@ -534,7 +534,18 @@ impl Runner {
                 let inbox = self.inbox.clone();
                 tokio::spawn(async move {
                     tokio::time::sleep(delay).await;
-                    let _ = inbox.send(*input);
+                    // A command comes back stamped with the clock it fires
+                    // at, as one from the UI is (a timed mute's end).
+                    let input = match *input {
+                        Input::UserAt { command, .. } => Input::UserAt {
+                            command,
+                            now_ms: SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX)),
+                        },
+                        other => other,
+                    };
+                    let _ = inbox.send(input);
                 });
             }
             Effect::Http {

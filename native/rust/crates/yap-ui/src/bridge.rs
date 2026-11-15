@@ -289,6 +289,10 @@ pub mod qobject {
         // favourites mode, rate limit, the start screen's categories and
         // Favorites/Trending media, and the search terms.
         #[qproperty(QString, gif_browse, cxx_name = "gifBrowse")]
+        // The notification settings of the target a menu opened on
+        // (yap-core `NotifyTargetView` JSON: level, inherited, effective,
+        // muted, mutedLabel, serverMuted, isDm, key), empty when none is.
+        #[qproperty(QString, notify_target, cxx_name = "notifyTarget")]
         type Chat = super::ChatRust;
 
         /// A download landed at `path`; `open` it (else reveal it).
@@ -489,6 +493,28 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "markChannelRead"]
         fn mark_channel_read(self: &Chat, channel_id: &QString);
+
+        /// A notification menu opened on a target (`server`, or `channel`
+        /// for a server channel or a DM): `notifyTarget` shows its
+        /// settings while it is open. An empty type: the menu closed.
+        #[qinvokable]
+        #[cxx_name = "inspectNotify"]
+        fn inspect_notify(self: &Chat, target_type: &QString, target_id: &QString);
+
+        /// `all`, `mentions`, `none`, or empty for "Use server default".
+        #[qinvokable]
+        #[cxx_name = "setNotifyLevel"]
+        fn set_notify_level(
+            self: &Chat,
+            target_type: &QString,
+            target_id: &QString,
+            level: &QString,
+        );
+
+        /// `1h`, `8h`, `24h`, `forever` (until turned back on) or `off`.
+        #[qinvokable]
+        #[cxx_name = "muteNotify"]
+        fn mute_notify(self: &Chat, target_type: &QString, target_id: &QString, duration: &QString);
 
         /// A category label's click: collapse or expand it (kept per user).
         #[qinvokable]
@@ -787,8 +813,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QList, QString, QStringList};
 use yap_core::account_deletion;
+use yap_core::notification_levels::{MuteChoice, NotificationLevel, NotificationTargetType};
 use yap_core::store::deletion::DeletionCommand;
 use yap_core::store::favorites::FavoritesCommand;
+use yap_core::store::notify::NotifyCommand;
 use yap_core::store::time::{format_rfc3339, local_date};
 use yap_core::{Phase, ViewUpdate};
 
@@ -898,6 +926,7 @@ pub struct ChatRust {
     gif_count1: i32,
     gif_favorites: QString,
     gif_browse: QString,
+    notify_target: QString,
 }
 
 #[derive(Default)]
@@ -1371,6 +1400,45 @@ impl qobject::Chat {
 
     pub fn mark_channel_read(&self, channel_id: &QString) {
         client::command(Command::MarkChannelRead(channel_id.to_string()));
+    }
+
+    pub fn inspect_notify(&self, target_type: &QString, target_id: &QString) {
+        let target = NotificationTargetType::parse(&target_type.to_string())
+            .map(|kind| (kind, target_id.to_string()))
+            .filter(|(_, id)| !id.is_empty());
+        client::command(Command::Notify(NotifyCommand::Inspect(target)));
+    }
+
+    pub fn set_notify_level(&self, target_type: &QString, target_id: &QString, level: &QString) {
+        let level = level.to_string();
+        let (Some(target_type), Some(level)) = (
+            NotificationTargetType::parse(&target_type.to_string()),
+            match level.as_str() {
+                "" => Some(None),
+                name => NotificationLevel::parse(name).map(Some),
+            },
+        ) else {
+            return eprintln!("[notify] level: not a target or level");
+        };
+        client::command(Command::Notify(NotifyCommand::SetLevel {
+            target_type,
+            target_id: target_id.to_string(),
+            level,
+        }));
+    }
+
+    pub fn mute_notify(&self, target_type: &QString, target_id: &QString, duration: &QString) {
+        let (Some(target_type), Some(mute)) = (
+            NotificationTargetType::parse(&target_type.to_string()),
+            MuteChoice::parse(&duration.to_string()),
+        ) else {
+            return eprintln!("[notify] mute: not a target or duration");
+        };
+        client::command(Command::Notify(NotifyCommand::Mute {
+            target_type,
+            target_id: target_id.to_string(),
+            mute,
+        }));
     }
 
     pub fn toggle_category(&self, category_id: &QString) {

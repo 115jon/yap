@@ -1167,3 +1167,100 @@ describe("chat gateway and blocked users", () => {
     gateway.disconnectGateway();
   });
 });
+
+describe("chat gateway notification settings", () => {
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    mocks.fetchSocketProtocols.mockResolvedValue([]);
+    mocks.bootstrapChat.mockResolvedValue(undefined);
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+  });
+
+  async function connect(state: ChatState) {
+    const dispatch = vi.fn();
+    const applyNotificationSetting = vi.fn();
+    const actions = {
+      bootstrapChat: mocks.bootstrapChat,
+      loadMessages: mocks.loadMessages,
+      applyNotificationSetting,
+    } as unknown as ChatRestActions;
+    const gateway = createChatGateway(() => state, dispatch, actions);
+    gateway.initGateway("user-1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const socket = FakeWebSocket.instances[0]!;
+    socket.open();
+    socket.message({ op: 8, d: { heartbeat_interval: 45_000 } });
+    socket.message({ op: 2, d: { participant_id: "session-1" } });
+    return { gateway, socket, dispatch, applyNotificationSetting };
+  }
+
+  it("hands NOTIFICATION_SETTINGS_UPDATE to the store", async () => {
+    const setting = {
+      target_type: "channel",
+      target_id: "channel-2",
+      level: "all",
+      muted: true,
+      muted_until: null,
+    };
+    const { gateway, socket, applyNotificationSetting } = await connect({
+      ...initialState,
+      user: { id: "user-1" } as ChatState["user"],
+    });
+    socket.message({
+      op: 19,
+      d: { seq: 1, event: "NOTIFICATION_SETTINGS_UPDATE", data: setting },
+    });
+    expect(applyNotificationSetting).toHaveBeenCalledWith(setting);
+    gateway.disconnectGateway();
+  });
+
+  it("keeps a muted DM's notification quiet but still lists it", async () => {
+    const { areReconnectSoundsSuppressed } =
+      await import("@/lib/reconnect-sound-guard");
+    const { playNotification } = await import("@/lib/sounds");
+    vi.mocked(areReconnectSoundsSuppressed).mockReturnValue(false);
+    vi.mocked(playNotification).mockClear();
+    const { gateway, socket, dispatch } = await connect({
+      ...initialState,
+      user: { id: "user-1" } as ChatState["user"],
+      notificationSettings: {
+        "channel:dm-muted": {
+          target_type: "channel",
+          target_id: "dm-muted",
+          level: null,
+          muted: true,
+          muted_until: null,
+        },
+      },
+    });
+    const notify = (channelId: string, id: string) =>
+      socket.message({
+        op: 19,
+        d: {
+          seq: 1,
+          event: "NOTIFICATION_CREATE",
+          data: {
+            id,
+            type: "dm",
+            channel_id: channelId,
+            message_id: `message-${id}`,
+            server_id: null,
+            is_read: false,
+            created_at: "2026-11-14T12:00:00.000Z",
+          },
+        },
+      });
+
+    notify("dm-muted", "n1");
+    expect(playNotification).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "ADD_NOTIFICATION" }),
+    );
+
+    notify("dm-open", "n2");
+    expect(playNotification).toHaveBeenCalledTimes(1);
+
+    vi.mocked(areReconnectSoundsSuppressed).mockReturnValue(true);
+    gateway.disconnectGateway();
+  });
+});

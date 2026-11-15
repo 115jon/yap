@@ -3,8 +3,9 @@ import com.yap.native
 import Yap.Ui
 
 // The tree's right-click menus (ChannelSidebar.tsx `useSidebarContextMenus`):
-//   channel   Mark as read; Invite to channel, Copy link; Mute channel and Notification settings (disabled,
-//             as on the web); with Manage channels on it, Edit channel and
+//   channel   Mark as read; Invite to channel, Copy link; Mute channel (or
+//             Unmute channel) and Notification settings; with Manage
+//             channels on it, Edit channel and
 //             Duplicate channel; with it server-wide, Create text channel;
 //             Copy channel ID; Delete channel
 //   category  Create channel, Copy ID, Delete category
@@ -29,6 +30,8 @@ MenuPanel {
         voice = isVoice
         categoryId = category
         manage = canManage
+        if (what === "channel")
+            Chat.inspectNotify("channel", id)
         popup(anchor, x, y)
     }
 
@@ -67,22 +70,23 @@ MenuPanel {
         }
     }
     MenuRule { visible: menu.onChannel; height: visible ? implicitHeight : 0 }
-    MenuRow {
-        visible: menu.onChannel
-        height: visible ? implicitHeight : 0
-        text: qsTr("Mute channel")
-        glyph: "speakerOff"
-        chevron: true
-        enabled: false
+    NotifyMuteMenu {
+        available: menu.onChannel
+        targetType: "channel"
+        targetId: menu.itemId
+        label: qsTr("Mute channel")
     }
-    MenuRow {
-        visible: menu.onChannel
-        height: visible ? implicitHeight : 0
-        text: qsTr("Notification settings")
-        subtitle: qsTr("All messages")
-        glyph: "bell"
-        chevron: true
-        enabled: false
+    NotifyUnmuteRow {
+        available: menu.onChannel
+        targetType: "channel"
+        targetId: menu.itemId
+        text: qsTr("Unmute channel")
+    }
+    NotifyLevelMenu {
+        available: menu.onChannel
+        targetType: "channel"
+        targetId: menu.itemId
+        inServer: true
     }
     MenuRule { visible: menu.onChannel && (menu.manage || menu.manageAll); height: visible ? implicitHeight : 0 }
     MenuRow {

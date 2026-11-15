@@ -13,6 +13,12 @@ import {
   showNativeDesktopToast,
   syncDesktopNotificationState,
 } from "@/lib/desktop-native-sync";
+import { shouldNotify } from "@/lib/notification-levels";
+import {
+  effectiveSettingsFor,
+  mutedChannelPredicate,
+  type NotificationTarget,
+} from "@/lib/notification-settings-client";
 import {
   getCurrentPresencePlatform,
   isTauri as _isTauri,
@@ -260,6 +266,7 @@ export function createChatGateway(
         lastMessageAt: state.lastMessageAt,
         readStates: state.readStates,
         dmChannelIds: state.dmChannels.map((dm) => dm.id),
+        isMuted: mutedChannelPredicate(state),
       });
 
     await syncDesktopNotificationState({
@@ -267,6 +274,25 @@ export function createChatGateway(
       unreadDmChannelIds,
       unreadServerChannelIds,
     });
+  };
+
+  /**
+   * Whether a message there should ding or toast here, by the user's level
+   * and mute (notification-levels). `addressed`: a mention or a reply.
+   */
+  const wantsNotification = (
+    target: NotificationTarget,
+    addressed: boolean,
+  ) => {
+    const state = get();
+    return shouldNotify(
+      effectiveSettingsFor(
+        state.notificationSettings,
+        target,
+        Math.max(Date.now(), state.notificationSettingsNow),
+      ),
+      addressed,
+    );
   };
 
   const messageTargetsCurrentUser = (message: Message) => {
@@ -334,6 +360,22 @@ export function createChatGateway(
           msg.author_id !== state.user?.id &&
           !hasBlocked(state.relationships, msg.author_id) &&
           !messageTargetsCurrentUser(msg) &&
+          wantsNotification(
+            {
+              kind: "channel",
+              channelId: msg.channel_id,
+              serverId:
+                (
+                  state.channels.find(
+                    (candidate) => candidate.id === msg.channel_id,
+                  ) ??
+                  Object.values(state.channelsByServerId)
+                    .flat()
+                    .find((candidate) => candidate.id === msg.channel_id)
+                )?.server_id ?? null,
+            },
+            false,
+          ) &&
           shouldNativeNotifyForChannelActivity({
             channelId: msg.channel_id,
             activeChannelId: state.activeChannelId,
@@ -706,6 +748,9 @@ export function createChatGateway(
         });
         void syncDesktopState();
         break;
+      case "NOTIFICATION_SETTINGS_UPDATE":
+        actions.applyNotificationSetting(d.data);
+        break;
       case "NOTIFICATIONS_CLEAR":
         dispatch({
           type: "CLEAR_NOTIFICATIONS",
@@ -775,11 +820,25 @@ export function createChatGateway(
           break;
         }
         dispatch({ type: "ADD_NOTIFICATION", notification: notif });
+        void syncDesktopState();
+
+        // The server already filters the inbox by level and mute; this
+        // covers a change made since it decided (another device, a mute
+        // that just started).
+        const wanted = wantsNotification(
+          notif.server_id
+            ? {
+                kind: "channel",
+                channelId: notif.channel_id,
+                serverId: notif.server_id,
+              }
+            : { kind: "dm", channelId: notif.channel_id },
+          notif.type === "mention" || notif.type === "reply",
+        );
+        if (!wanted) break;
 
         // Play notification sound
         if (!areReconnectSoundsSuppressed()) playNotification();
-
-        void syncDesktopState();
 
         // Fire a native OS toast when desktop notifications are enabled and
         // the user is not actively looking at the same channel.

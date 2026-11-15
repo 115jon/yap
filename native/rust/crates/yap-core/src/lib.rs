@@ -28,6 +28,7 @@ pub mod install;
 pub mod limits;
 pub mod links;
 pub mod markdown;
+pub mod notification_levels;
 pub mod picker;
 pub mod profile_board;
 pub mod runtime;

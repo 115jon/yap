@@ -33,6 +33,8 @@ Item {
     // The open server's menu, and a channel's (ServerSheet).
     signal serverMenuRequested()
     signal channelMenuRequested(string channelId, string name, bool voice)
+    // A long press on a DM (NotifySheet).
+    signal dmMenuRequested(string channelId, string name)
 
     // A conversation picked in the drawer. The open one picked again is a
     // way back to it, not a reload: the desktop's reselect lays the list
@@ -325,6 +327,7 @@ Item {
                 onConversationOpened: root.conversationOpened()
                 onProfileRequested: userId => root.profileRequested(userId)
                 onFriendsRequested: root.friendsRequested()
+                onDmMenuRequested: (channelId, name) => root.dmMenuRequested(channelId, name)
             }
         }
     }

@@ -375,6 +375,11 @@ describe("hasNotificationsSinceLastRead", () => {
       "chan-1",
       "user-1",
       "chan-1",
+      "user-1",
+      "chan-1",
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      "user-1",
+      "chan-1",
     ]);
   });
 

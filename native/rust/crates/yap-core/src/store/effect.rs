@@ -449,6 +449,8 @@ pub enum ApiRequest {
     Embeds(super::embeds::EmbedsRequest),
     /// The GIF and clip favourites.
     Favorites(super::favorites::FavoritesRequest),
+    /// Notification levels and mutes.
+    Notify(super::notify::NotifyRequest),
     /// The account's camera backgrounds.
     Backgrounds(super::backgrounds::BackgroundsRequest),
     /// `PATCH /api/channels/{id}/messages {message_id, embeds: []}`.
@@ -518,6 +520,7 @@ pub enum ApiResponse {
     Embeds(Value),
     /// The whole favourites list.
     Favorites(Vec<Value>),
+    Notify(super::notify::NotifyResponse),
     Backgrounds(super::backgrounds::BackgroundsResponse),
     Extras(super::extras::ExtrasResponse),
     /// What `/api/account/deletion` answered.
@@ -582,6 +585,7 @@ impl ApiRequest {
             Self::Board(request) => request.method(),
             Self::Embeds(request) => request.method(),
             Self::Favorites(request) => request.method(),
+            Self::Notify(request) => request.method(),
             Self::Backgrounds(request) => request.method(),
             Self::Deletion(request) => request.method(),
             Self::RemoveEmbeds { .. } => Method::Patch,
@@ -637,6 +641,7 @@ impl ApiRequest {
             Self::Board(request) => request.path(),
             Self::Embeds(request) => request.path(),
             Self::Favorites(request) => request.path(),
+            Self::Notify(request) => request.path(),
             Self::Backgrounds(request) => request.path(),
             Self::Deletion(request) => request.path(),
             Self::RemoveEmbeds { channel_id, .. } => format!("/api/channels/{channel_id}/messages"),
@@ -767,6 +772,7 @@ impl ApiRequest {
             Self::Board(request) => request.body(),
             Self::Embeds(_) => Value::Null,
             Self::Favorites(request) => request.body(),
+            Self::Notify(request) => request.body(),
             Self::Backgrounds(request) => request.body(),
             Self::Deletion(request) => request.body(),
             Self::VoiceMove(request) => serde_json::to_value(request).unwrap_or(Value::Null),
@@ -879,6 +885,7 @@ impl ApiRequest {
             Self::Board(request) => ApiResponse::Board(request.decode(body)?),
             Self::Embeds(_) => ApiResponse::Embeds(body),
             Self::Favorites(request) => ApiResponse::Favorites(request.decode(body)?),
+            Self::Notify(request) => ApiResponse::Notify(request.decode(body)?),
             Self::Backgrounds(request) => ApiResponse::Backgrounds(request.decode(body)?),
             Self::Deletion(request) => ApiResponse::Deletion(request.decode(body)?),
             Self::RemoveEmbeds { .. } | Self::VoiceMove(_) => ApiResponse::Done,

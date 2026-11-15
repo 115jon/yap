@@ -7,8 +7,8 @@ import Yap.Ui
 // ink-1), what they play or their custom status under it. Selected tint-2,
 // hover (or a finger's press) tint-1. Unread draws the pill at the panel's
 // edge; mentions add a count chip. The avatar opens the profile; with a
-// pointer, a right click asks for the conversation's menu (the desktop's
-// DmSidebar has it).
+// pointer a right click, with a finger a long press, asks for the
+// conversation's menu (the desktop's DmSidebar, the phone's NotifySheet).
 Rectangle {
     id: row
 
@@ -28,6 +28,8 @@ Rectangle {
     required property string nameStyle
     required property bool unread
     required property int mentions
+    // Muted (notification settings): never unread, the name dimmed.
+    required property bool notifyMuted
     required property bool active
     signal selected()
     signal profileRequested(Item anchor)
@@ -57,6 +59,7 @@ Rectangle {
 
     Accessible.role: Accessible.Button
     Accessible.name: qsTr("Open DM with %1").arg(name)
+        + (notifyMuted ? qsTr(", muted") : "")
         + (mentions > 0 ? qsTr(", %n mention(s)", "", mentions) : unread ? qsTr(", unread") : "")
     Accessible.onPressAction: row.selected()
 
@@ -73,6 +76,8 @@ Rectangle {
     TapHandler {
         id: tap
         onTapped: row.selected()
+        // A finger's right click.
+        onLongPressed: if (Theme.touch) row.menuRequested(point.position)
     }
     TapHandler {
         // Not under a finger: a touch carries no button, so its tap would
@@ -116,7 +121,8 @@ Rectangle {
             width: parent.width
             text: row.name
             nameStyle: row.nameStyle
-            color: row.active || hover.hovered || row.unread ? Theme.ink1 : Theme.ink2
+            color: row.active || hover.hovered || row.unread ? Theme.ink1
+                : row.notifyMuted ? Theme.ink3 : Theme.ink2
             font: row.unread && !row.active ? Theme.type.rowUnread : Theme.type.row
             ground: Theme.ply1
             playing: hover.hovered

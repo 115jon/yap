@@ -31,6 +31,8 @@ Loader {
     required property int lit
     required property bool unread
     required property int mentions
+    // Channels: muted, or in a muted server (dimmed, never unread).
+    required property bool notifyMuted
     required property bool manage
     required property string categoryId
     required property string voiceStatus
@@ -139,6 +141,7 @@ Loader {
                 joined: cell.itemId === cell.callId
                 unread: cell.unread
                 mentions: cell.mentions
+                notifyMuted: cell.notifyMuted
                 manage: cell.manage
                 occupants: cell.occupants
                 startedAt: cell.startedAt

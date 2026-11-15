@@ -10,6 +10,9 @@ import type {
 } from "@/lib/types";
 import { getDisplayName } from "@/lib/display-name";
 import type { GameActivity } from "@/lib/gateway-protocol";
+import { notificationSettingKey } from "@/lib/notification-levels";
+import type { NotificationSetting } from "@/lib/notification-levels";
+import type { NotificationSettingsMap } from "@/lib/notification-settings-client";
 import type { PresencePlatform } from "@/lib/presence-platform";
 import type { SharedSpatialAudioState } from "@/lib/voice/spatial-audio";
 
@@ -127,6 +130,14 @@ export interface ChatState {
   scrollPositions: Record<string, string>;
   /** Jump anchor per channel: channelId → messageId (set when position was from a manual jump) */
   jumpAnchors: Record<string, string>;
+  /** Notification levels and mutes: `server:<id>` / `channel:<id>` → setting */
+  notificationSettings: NotificationSettingsMap;
+  /**
+   * The clock (server-adjusted epoch ms) mutes are judged against. It moves
+   * when settings change and when a timed mute runs out, so the rows that
+   * read it re-render exactly then.
+   */
+  notificationSettingsNow: number;
 }
 
 export interface VoiceChannelMember {
@@ -211,6 +222,8 @@ export const initialState: ChatState = {
   channelMentionCounts: {},
   scrollPositions: {},
   jumpAnchors: {},
+  notificationSettings: {},
+  notificationSettingsNow: 0,
 };
 
 function reconcileChannelIdentity(
@@ -455,7 +468,24 @@ export type ChatAction =
   | { type: "CLEAR_NOTIFICATIONS"; clearedAt?: string }
   | { type: "SET_SCROLL_POSITION"; channelId: string; messageId: string }
   | { type: "SET_JUMP_ANCHOR"; channelId: string; messageId: string }
-  | { type: "CLEAR_JUMP_ANCHOR"; channelId: string };
+  | { type: "CLEAR_JUMP_ANCHOR"; channelId: string }
+  | {
+      type: "SET_NOTIFICATION_SETTINGS";
+      settings: NotificationSettingsMap;
+      nowMs: number;
+    }
+  | {
+      type: "UPSERT_NOTIFICATION_SETTING";
+      setting: NotificationSetting;
+      nowMs: number;
+    }
+  | {
+      type: "REMOVE_NOTIFICATION_SETTING";
+      targetType: NotificationSetting["target_type"];
+      targetId: string;
+      nowMs: number;
+    }
+  | { type: "TICK_NOTIFICATION_SETTINGS"; nowMs: number };
 
 // ── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -2495,6 +2525,53 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         jumpAnchors: rest,
       };
     }
+
+    case "SET_NOTIFICATION_SETTINGS":
+      return {
+        ...state,
+        notificationSettings: action.settings,
+        notificationSettingsNow: Math.max(
+          state.notificationSettingsNow,
+          action.nowMs,
+        ),
+      };
+
+    case "UPSERT_NOTIFICATION_SETTING": {
+      const key = notificationSettingKey(
+        action.setting.target_type,
+        action.setting.target_id,
+      );
+      return {
+        ...state,
+        notificationSettings: {
+          ...state.notificationSettings,
+          [key]: action.setting,
+        },
+        notificationSettingsNow: Math.max(
+          state.notificationSettingsNow,
+          action.nowMs,
+        ),
+      };
+    }
+
+    case "REMOVE_NOTIFICATION_SETTING": {
+      const key = notificationSettingKey(action.targetType, action.targetId);
+      if (!(key in state.notificationSettings)) return state;
+      const { [key]: _, ...rest } = state.notificationSettings;
+      return {
+        ...state,
+        notificationSettings: rest,
+        notificationSettingsNow: Math.max(
+          state.notificationSettingsNow,
+          action.nowMs,
+        ),
+      };
+    }
+
+    case "TICK_NOTIFICATION_SETTINGS":
+      return action.nowMs > state.notificationSettingsNow
+        ? { ...state, notificationSettingsNow: action.nowMs }
+        : state;
 
     default:
       return state;

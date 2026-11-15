@@ -82,6 +82,8 @@ export function getUnreadChannelState(input: {
   lastMessageAt: Record<string, string>;
   readStates: Record<string, string>;
   dmChannelIds: Iterable<string>;
+  /** Muted channels and DMs show no unread, so they skip the badge too. */
+  isMuted?: (channelId: string, isDm: boolean) => boolean;
 }): UnreadChannelState {
   const unreadDmChannelIds: string[] = [];
   const unreadServerChannelIds: string[] = [];
@@ -95,7 +97,10 @@ export function getUnreadChannelState(input: {
     if (lastReadTimestamp && lastMessageTimestamp <= lastReadTimestamp)
       continue;
 
-    if (dmChannelIdSet.has(channelId)) {
+    const isDm = dmChannelIdSet.has(channelId);
+    if (input.isMuted?.(channelId, isDm)) continue;
+
+    if (isDm) {
       unreadDmChannelIds.push(channelId);
     } else {
       unreadServerChannelIds.push(channelId);

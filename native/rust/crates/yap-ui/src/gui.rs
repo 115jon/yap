@@ -644,6 +644,7 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             with::<Chat>(|chat| chat.set_gif_favorites(q(&text)));
             scalars(|s| s.gif_favorites = text);
         }
+        ViewUpdate::NotifyTarget(text) => with::<Chat>(|chat| chat.set_notify_target(q(&text))),
         ViewUpdate::Apps(view) => crate::apps::on_view(*view),
         ViewUpdate::Extras(view) => crate::extras::on_view(*view),
         ViewUpdate::Invites(view) => crate::invites::on_view(*view),

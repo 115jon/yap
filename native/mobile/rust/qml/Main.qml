@@ -797,6 +797,7 @@ Window {
                 onThreadRequested: messageId => window.openThread(messageId)
                 onServerMenuRequested: serverSheet.openServer()
                 onChannelMenuRequested: (channelId, name, voice) => serverSheet.openChannel(channelId, name, voice)
+                onDmMenuRequested: (channelId, name) => notifySheet.openFor("channel", channelId, name, false)
             }
 
             pushEnter: Transition {
@@ -826,6 +827,14 @@ Window {
     // share sheet), Mark as read, a channel's Copy link.
     ServerSheet {
         id: serverSheet
+        anchors.fill: parent
+        anchors.bottomMargin: Native.clippedBottom
+        onNotifyRequested: (type, id, name, inServer) => notifySheet.openFor(type, id, name, inServer)
+    }
+
+    // A server's, channel's or DM's notification level and mute.
+    NotifySheet {
+        id: notifySheet
         anchors.fill: parent
         anchors.bottomMargin: Native.clippedBottom
     }
