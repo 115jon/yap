@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <vector>
 
+#include "a11y.h"
 #include "native.h"
 #include "rustnetwork.h"
 #include "videohub.h"
@@ -115,6 +116,8 @@ int main(int argc, char* argv[])
   qmlRegisterSingletonInstance("Yap.Chrome", 1, 0, "DesktopShell", shell);
   auto* native = new Native(&app);
   qmlRegisterSingletonInstance("Yap.Mobile", 1, 0, "Native", native);
+  // What TalkBack reaches while a sheet is up (a11y.h).
+  installA11y();
   // Call video (seams/VideoSurface.qml draws with it). The hub is made here,
   // on the GUI thread, before a call's media thread can ask for it.
   VideoHub::instance();

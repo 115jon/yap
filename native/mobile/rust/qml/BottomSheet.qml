@@ -90,6 +90,8 @@ FocusScope {
     }
 
     visible: up
+    // TalkBack reads only the sheet while it is up (cpp/a11y.h).
+    A11y.modal: up && !closing
     z: 100
     // Hidden from above while open (the page under it went away): gone at
     // once, and Back is given back.
