@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/115jon/yap/compare/qt-android-v0.12.0...qt-android-v0.13.0) (2026-11-15)
+
+
+### Features
+
+* **notifications:** message pushes carry ids only; android fetches the text ([#345](https://github.com/115jon/yap/issues/345)) ([ae092be](https://github.com/115jon/yap/commit/ae092beac335cfe67dbfdb1714c9344f9bf430c3))
+
 ## [0.12.0](https://github.com/115jon/yap/compare/qt-android-v0.11.1...qt-android-v0.12.0) (2026-11-15)
 
 
