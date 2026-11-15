@@ -197,6 +197,24 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "changeThemeSync"]
         fn change_theme_sync(self: &Settings, on: bool);
+
+        /// This device's UI sound settings as JSON where the app keeps them
+        /// here (the phone, `Platform::sound_settings_json`), else empty
+        /// (the desktop's `Desktop`).
+        #[qinvokable]
+        #[cxx_name = "soundSettings"]
+        fn sound_settings(self: &Settings) -> QString;
+
+        /// Saves one UI sound setting (a switch as 0 or 1, `soundVolume`
+        /// 0 to 100).
+        #[qinvokable]
+        #[cxx_name = "setSoundSetting"]
+        fn set_sound_setting(self: &Settings, key: &QString, value: i32);
+
+        /// Plays the notification sound (Test).
+        #[qinvokable]
+        #[cxx_name = "playTestSound"]
+        fn play_test_sound(self: &Settings);
     }
 
     impl cxx_qt::Initialize for Settings {}
@@ -652,6 +670,20 @@ impl qobject::Settings {
 
     pub fn load_billing(&self) {
         client::command(Command::LoadBilling);
+    }
+
+    pub fn sound_settings(&self) -> QString {
+        q(&crate::platform::platform()
+            .sound_settings_json()
+            .unwrap_or_default())
+    }
+
+    pub fn set_sound_setting(&self, key: &QString, value: i32) {
+        crate::platform::platform().set_sound_setting(&key.to_string(), value);
+    }
+
+    pub fn play_test_sound(&self) {
+        crate::platform::platform().play_test_sound();
     }
 
     pub fn load_shares(&self) {

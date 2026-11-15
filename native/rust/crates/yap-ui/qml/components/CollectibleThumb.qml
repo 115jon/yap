@@ -1,6 +1,6 @@
 import QtQuick
 import Yap.Media
-import com.yap.native
+import Yap.Platform
 import Yap.Ui
 
 // An item on a shop tile (ShopItemCard.tsx ItemStage, CollectiblePreviews):

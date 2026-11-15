@@ -176,6 +176,40 @@ qt_add_resources(yapqt yap_fonts
   FILES ${YAP_FONT_PATHS}
   OPTIONS -no-compress)
 
+# The display-name effects' shaders (Yap.Ui DisplayName: Dither fade, Holo,
+# Chrome, ...), baked from the desktop's one source once per effect (MODE,
+# shaders/namefx.frag) into :/shaders/name-<effect>.frag.qsb as on the
+# desktop. The host Qt's qsb does it (qtshadertools, qt-sdk.lock.json's
+# host sets): the target Qt needs no ShaderTools. GLSL ES 300 for Android's
+# OpenGL ES, MSL for iOS; SPIR-V always comes along.
+find_program(YAP_QSB qsb HINTS "${QT_HOST_PATH}/bin" "${QT_HOST_PATH}/libexec" NO_DEFAULT_PATH REQUIRED)
+set(YAP_NAME_EFFECTS dither holo chrome pixel crt glitch ember sticker candlelit)
+set(YAP_NAME_SHADERS)
+set(mode 0)
+foreach(effect IN LISTS YAP_NAME_EFFECTS)
+  set(out ${CMAKE_CURRENT_BINARY_DIR}/shaders/name-${effect}.frag.qsb)
+  add_custom_command(OUTPUT ${out}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/shaders
+    COMMAND ${YAP_QSB} --glsl "300es,330" --msl 12 -DMODE=${mode} -o ${out} ${DESKTOP}/shaders/namefx.frag
+    DEPENDS ${DESKTOP}/shaders/namefx.frag
+    VERBATIM)
+  list(APPEND YAP_NAME_SHADERS ${out})
+  math(EXPR mode "${mode} + 1")
+endforeach()
+# Their vertex stage: OpenGL ES links a program only when both stages
+# share a GLSL version, and Qt's built-in ShaderEffect one has no 300 es.
+set(out ${CMAKE_CURRENT_BINARY_DIR}/shaders/namefx.vert.qsb)
+add_custom_command(OUTPUT ${out}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/shaders
+  COMMAND ${YAP_QSB} --glsl "300es,330" --msl 12 -o ${out} ${DESKTOP}/shaders/namefx.vert
+  DEPENDS ${DESKTOP}/shaders/namefx.vert
+  VERBATIM)
+list(APPEND YAP_NAME_SHADERS ${out})
+qt_add_resources(yapqt yap_shaders
+  PREFIX /shaders
+  BASE ${CMAKE_CURRENT_BINARY_DIR}/shaders
+  FILES ${YAP_NAME_SHADERS})
+
 # Only the plugins the app uses (androiddeployqt otherwise ships every one
 # of each module): GIF, JPEG, WebP and SVG pictures; no QML debugger or
 # profiler services, no icon engines or network-information backends.

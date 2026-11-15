@@ -1266,8 +1266,11 @@ Needs:
   the repository's `Updates.xml` and the `.sha256` files download.qt.io
   publishes next to each archive. Sets: `android-x86_64`,
   `android-arm64_v8a`, `host-linux`, `host-mac`, `ios` (qtbase,
-  qtdeclarative, qtsvg, qtimageformats, and ICU on Linux). On Windows the
-  host is the custom static Qt in `tools/toolchain.lock.json`;
+  qtdeclarative, qtsvg, qtimageformats, and ICU on Linux; the host sets
+  add qtshadertools, whose `qsb` bakes the name-effect shaders). On Windows
+  the host is the custom static Qt in `tools/toolchain.lock.json`. On
+  Linux, `qsb` needs libEGL, libGL, libxkbcommon, fontconfig and X11 even
+  without a display;
 - the Android SDK, NDK r27c (27.2.12479018, the one Qt 6.11.3 for Android
   was built with; `build.sh` takes `$ANDROID_NDK_ROOT` or the SDK's
   `ndk/27.2.12479018`, and NDK 27.1 also works), JDK 17+, Ninja, 7-Zip,

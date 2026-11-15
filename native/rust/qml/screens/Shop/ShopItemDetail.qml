@@ -16,7 +16,9 @@ Popup {
     // Which instance answers (the shop page's, or the picker's while a
     // picker is open).
     property bool owner: true
-    readonly property var detail: JSON.parse(Shop.detail)
+    // Yap.Ui's ShopCore: the detail and its keys, shared with the phone.
+    readonly property ShopCore core: ShopCore {}
+    readonly property var detail: core.detail
     readonly property bool shown: owner && detail !== null
 
     parent: Overlay.overlay
@@ -30,7 +32,7 @@ Popup {
     padding: 0
     onShownChanged: shown ? open() : close()
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-    onClosed: if (shown) Shop.openDetail("")
+    onClosed: if (shown) core.closeDetail()
 
     Overlay.modal: Scrim { color: Theme.scrim }
     enter: PresenceIn { fromScale: Theme.scaleDialog }
@@ -190,7 +192,7 @@ Popup {
                                     border.color: Theme.lineStrong
                                 }
                                 HoverHandler { id: swatchHover; cursorShape: Qt.PointingHandCursor }
-                                TapHandler { onTapped: Shop.selectVariant(swatch.modelData.id) }
+                                TapHandler { onTapped: root.core.selectVariant(swatch.modelData.id) }
                                 Tooltip { visible: swatchHover.hovered; text: swatch.modelData.label }
                                 Accessible.role: Accessible.Button
                                 Accessible.name: modelData.label
@@ -265,7 +267,7 @@ Popup {
                         loading: root.shown && root.detail.busy
                         enabled: !(root.shown && root.detail.busy)
                         ground: Theme.ply3
-                        onClicked: Shop.remove(root.detail.kind)
+                        onClicked: root.core.removeDetail()
                     }
                 }
                 KitButton {
@@ -276,7 +278,7 @@ Popup {
                     loading: root.shown && root.detail.busy
                     enabled: !(root.shown && root.detail.busy)
                     ground: Theme.ply3
-                    onClicked: Shop.equip(root.detail.id)
+                    onClicked: root.core.equipDetail()
                 }
             }
         }

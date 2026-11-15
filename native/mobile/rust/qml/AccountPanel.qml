@@ -9,7 +9,8 @@ import Yap.Ui
 // scrim. Your card on top, your presence as a segmented rail, then the
 // account rows (Yap.Ui's AccountMenuRow, the desktop's account menu rows):
 // your custom status (edited in place), your profile and Edit profile
-// (the desktop's account menu has it too), the theme (a tap
+// (the desktop's account menu has it too), the collectibles shop, the
+// theme (a tap
 // swaps its light and dark; Match system opens Settings), and Settings,
 // the one notched primary key. The plate's own rows stay at its foot,
 // where the plate is, so nothing jumps. On a short screen (a phone on its
@@ -284,6 +285,20 @@ Item {
                         glyph: "edit"
                         text: qsTr("Edit profile")
                         onTriggered: root.profileEditRequested()
+                    }
+                    // The collectibles shop (the desktop's Shop row): a page
+                    // through the router, the panel closing behind it.
+                    AccountMenuRow {
+                        x: 4
+                        width: parent.width - 8
+                        glyph: "shop"
+                        text: qsTr("Shop")
+                        hint: qsTr("Free")
+                        Accessible.name: qsTr("Shop, every collectible is free")
+                        onTriggered: {
+                            root.close()
+                            Router.open("ShopPage")
+                        }
                     }
                     AccountMenuRow {
                         x: 4

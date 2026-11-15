@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // A collection in the Featured rail (ShopView.tsx CollectionCard): its

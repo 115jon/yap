@@ -34,6 +34,8 @@ on:
       # the desktop QML for the QML plugins to link.
       - "native/rust/qml/**"
       - "native/assets/**"
+      # The name-effect shaders the app bakes (mobile CMakeLists.txt).
+      - "native/shaders/**"
   workflow_dispatch:
   schedule:
     - cron: "41 5 * * 1"
@@ -81,11 +83,13 @@ jobs:
               - 'native/patches/**'
               - 'native/rust/qml/**'
               - 'native/assets/**'
+              - 'native/shaders/**'
             ios:
               - '.github/workflows/native-mobile.yml'
               - 'native/mobile/**'
               - 'native/rust/crates/yap-ui/**'
               - 'native/patches/**'
+              - 'native/shaders/**'
 
   qt-android:
     name: qt-android (${{ matrix.abi }})
@@ -137,6 +141,21 @@ jobs:
           for attempt in 1 2 3 4; do
             sudo apt-get update -qq -o Acquire::Retries=3 || true
             if sudo apt-get install -y -qq -o Acquire::Retries=3 ninja-build p7zip-full; then
+              exit 0
+            fi
+            sleep $((attempt * 15))
+          done
+          exit 1
+
+      - name: Host qsb's libraries
+        # The host Qt's qsb bakes the name-effect shaders (mobile
+        # CMakeLists.txt). It links QtGui, which loads EGL, OpenGL, X11,
+        # xkbcommon and fontconfig even with no display. Retried like the
+        # step above.
+        run: |
+          for attempt in 1 2 3 4; do
+            sudo apt-get update -qq -o Acquire::Retries=3 || true
+            if sudo apt-get install -y -qq -o Acquire::Retries=3                 libegl1 libgl1 libopengl0 libxkbcommon0 libfontconfig1 libfreetype6 libx11-6; then
               exit 0
             fi
             sleep $((attempt * 15))

@@ -10,16 +10,15 @@ import Yap.Ui
 Column {
     id: root
 
-    readonly property var sessions: JSON.parse(Settings.sessions)
-    readonly property var current: sessions.filter(session => session.current)
-    readonly property var others: sessions.filter(session => !session.current)
-    readonly property bool loadingFirst: Settings.sessionsState === "loading" && sessions.length === 0
-    readonly property bool failed: Settings.sessionsState === "error"
-    readonly property var account: JSON.parse(Extras.account)
-    property string armed: ""
+    // The list, its states and the revoke (shared with the phone).
+    readonly property SessionsModel model: SessionsModel {}
+    readonly property var current: model.current
+    readonly property var others: model.others
+    readonly property bool loadingFirst: model.loadingFirst
+    readonly property bool failed: model.failed
 
     spacing: 40
-    Component.onCompleted: Settings.loadSessions()
+    Component.onCompleted: model.load()
 
     SettingsCard {
         width: parent.width
@@ -36,13 +35,13 @@ Column {
                     visible: root.failed
                     width: parent.width
                     spacing: 8
-                    RowError { above: 0; text: Settings.sessionsError }
+                    RowError { above: 0; text: root.model.error }
                     KitButton {
                         size: "sm"
                         iconName: "refresh"
                         text: qsTr("Try again")
-                        loading: Settings.sessionsState === "loading"
-                        onClicked: Settings.loadSessions()
+                        loading: root.model.loading
+                        onClicked: root.model.load()
                     }
                 }
                 Repeater {
@@ -64,7 +63,7 @@ Column {
                         size: "sm"
                         iconName: "refresh"
                         text: qsTr("Reload")
-                        onClicked: Settings.loadSessions()
+                        onClicked: root.model.load()
                     }
                 }
             }
@@ -161,24 +160,24 @@ Column {
             KitButton {
                 id: signOut
                 anchors.verticalCenter: parent.verticalCenter
-                visible: !session.modelData.current && root.armed !== session.modelData.id
+                visible: !session.modelData.current && root.model.armed !== session.modelData.id
                 variant: "secondary"
                 size: "sm"
                 text: qsTr("Sign out")
                 Accessible.name: qsTr("Sign out %1").arg(session.modelData.title)
-                onClicked: root.armed = session.modelData.id
+                onClicked: root.model.arm(session.modelData.id)
             }
         }
         Loader {
             width: parent.width
-            active: root.armed === item.modelData.id
+            active: root.model.armed === item.modelData.id
             sourceComponent: ConfirmStrip {
                 consequence: qsTr("%1 will be signed out and need to sign in again.").arg(item.modelData.title)
                 confirmLabel: qsTr("Sign out device")
-                busy: root.account.revoking === item.modelData.id
-                error: root.account.revokeErrorId === item.modelData.id ? root.account.revokeError : ""
-                onCancelled: root.armed = ""
-                onConfirmed: Extras.revokeSession(item.modelData.id)
+                busy: root.model.busy(item.modelData.id)
+                error: root.model.errorFor(item.modelData.id)
+                onCancelled: root.model.disarm()
+                onConfirmed: root.model.revoke(item.modelData.id)
             }
         }
     }
