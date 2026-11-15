@@ -45,6 +45,7 @@ fn main() {
         QmlFile::from("qml/components/Led.qml"),
         QmlFile::from("qml/components/LinkText.qml"),
         QmlFile::from("qml/components/ListEnter.qml"),
+        QmlFile::from("qml/components/ListenCore.qml"),
         QmlFile::from("qml/components/MentionPanel.qml"),
         QmlFile::from("qml/components/MessageActionModel.qml"),
         QmlFile::from("qml/components/MessageEditor.qml"),

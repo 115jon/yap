@@ -123,6 +123,13 @@ pub trait Platform: Send + Sync + 'static {
         let _ = volume;
     }
 
+    /// Saves this device's Listen Together volume (0 to 100), where the app
+    /// keeps it for its next call (`Apps.ltVolume`); the app hands the saved
+    /// one to the core itself (`apps_created`). The desktop keeps none.
+    fn set_listen_volume(&self, volume: u8) {
+        let _ = volume;
+    }
+
     /// Whether the system has a network, when the app can ask (`None`:
     /// it cannot). A phone app in the background can have its own network
     /// blocked while the device's is up: a host name that does not resolve

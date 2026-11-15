@@ -12,32 +12,15 @@ import Yap.Ui
 AppPopup {
     id: root
 
-    // The state is parsed afresh on every change, and a new object would
-    // rebuild every Repeater under it; this slice is replaced only when its
-    // content differs (as FriendsView and SearchPanel do).
-    readonly property var parsed: JSON.parse(Apps.state || "{}")
-    property var l: ({})
-    property string lKey: "{}"
-
-    function syncL() {
-        const next = parsed.listen ?? {}
-        const key = JSON.stringify(next)
-        if (key !== lKey) {
-            lKey = key
-            l = next
-        }
-    }
-    onParsedChanged: syncL()
-    Component.onCompleted: syncL()
+    // The room's state and its rules (Yap.Ui's ListenCore, shared with the
+    // phone's sheet); the panel has no clock.
+    readonly property ListenCore core: ListenCore { active: false }
+    readonly property var l: core.l
     property bool confirmClear: false
     // "queue" or "recent".
     property string tab: "queue"
-    readonly property bool preview: (l.collectionTitle ?? "").length > 0
-    readonly property bool collections: l.filter === "collection"
-
-    function played(ms) {
-        return Qt.formatTime(new Date(ms), Locale.ShortFormat)
-    }
+    readonly property bool preview: core.preview
+    readonly property bool collections: core.collections
 
     title: qsTr("Listen Together")
     width: 460
@@ -121,11 +104,9 @@ AppPopup {
                 onDismissed: Apps.ltClearError()
             }
             Text {
-                visible: root.l.searching === true || ((root.l.query ?? "").length > 0
-                    && (root.l.results ?? []).length === 0 && (root.l.collections ?? []).length === 0)
+                visible: root.core.searchShows
                 textFormat: Text.PlainText
-                text: root.l.resolving ? qsTr("Resolving link preview…")
-                    : root.l.searching ? qsTr("Searching…") : qsTr("No results")
+                text: root.core.searchStatus
                 color: Theme.ink3
                 font: Theme.type.caption
             }
@@ -283,8 +264,7 @@ AppPopup {
                     required property var modelData
                     width: column.width
                     title: modelData.title
-                    artist: [modelData.artist, modelData.requester.length > 0 ? qsTr("Added by %1").arg(modelData.requester) : "", modelData.batch]
-                        .filter(x => x.length > 0).join(" · ")
+                    artist: root.core.queueMeta(modelData)
                     artwork: modelData.artwork
                     durationMs: modelData.durationMs
                     tail: modelData.radio ? qsTr("Radio") : ""
@@ -302,7 +282,7 @@ AppPopup {
                     title: modelData.title
                     artist: modelData.meta
                     artwork: modelData.artwork
-                    tail: root.played(modelData.playedAt)
+                    tail: root.core.played(modelData.playedAt)
                     KitButton { size: "sm"; variant: "secondary"; iconName: "queueAdd"; text: qsTr("Requeue"); onClicked: Apps.ltRequeue(recent.modelData.historyId) }
                 }
             }

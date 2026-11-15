@@ -1150,6 +1150,50 @@ fn a_radio_entry_should_stream_live_from_the_station() {
 }
 
 #[test]
+fn stopping_here_should_stop_the_stream_until_listening_again() {
+    let mut client = Client::in_call();
+    let station = "https://stream.example.org/lofi.mp3";
+    client.event(radio_snapshot(station), NOW);
+    assert!(client.view.listen.listening);
+    // Stop here: the stream stops, the room is told nothing.
+    let fx = client.apps(AppsCommand::LtListen(false));
+    assert_eq!(Client::audio(&fx), vec![AudioCommand::StreamStop]);
+    assert!(Client::frames(&fx).is_empty());
+    assert!(!client.view.listen.listening);
+    assert!(client.view.listen.now.is_some(), "the room still plays");
+    // The room moving on does not load it here again.
+    let fx = client.event(radio_snapshot(station), NOW + 5_000);
+    assert!(!Client::audio(&fx)
+        .iter()
+        .any(|c| matches!(c, AudioCommand::StreamLoad { .. })));
+    // Listen: the station loads again, at the device's volume.
+    client.apps(AppsCommand::LtVolume(0.3));
+    let fx = client.apps(AppsCommand::LtListen(true));
+    let audio = Client::audio(&fx);
+    assert!(audio.contains(&AudioCommand::StreamLoad {
+        key: "e_r".into(),
+        path: station.into(),
+        position_ms: 0.0,
+        paused: false,
+        live: true,
+    }));
+    assert!(audio.iter().any(|c| matches!(
+        c,
+        AudioCommand::StreamAudio { volume, .. } if (*volume - 0.3).abs() < 1e-9
+    )));
+    assert!(client.view.listen.listening);
+}
+
+#[test]
+fn a_new_call_should_listen_again() {
+    let mut client = Client::in_call();
+    client.event(radio_snapshot("https://stream.example.org/lofi.mp3"), NOW);
+    client.apps(AppsCommand::LtListen(false));
+    client.voice(VoiceUpdate::Ended(None));
+    assert!(client.view.listen.listening);
+}
+
+#[test]
 fn a_radio_stream_on_a_private_host_should_not_load() {
     let mut client = Client::in_call();
     let fx = client.event(radio_snapshot("https://192.168.1.10/live.mp3"), NOW);

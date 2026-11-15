@@ -460,6 +460,10 @@ pub enum AppsCommand {
     LtRemove(String),
     LtClear,
     LtVolume(f64),
+    /// Hear the room's stream on this device (`true`, the default) or stop
+    /// it here only (`false`). The room plays on for everyone else; a new
+    /// call starts listening again.
+    LtListen(bool),
     LtLoudness {
         enabled: bool,
         preset: String,
@@ -1020,6 +1024,8 @@ pub struct ListenState {
     pub position: Option<(f64, i64)>,
     /// The entry whose stream failed for good (not loaded again).
     pub failed_entry: Option<String>,
+    /// This device hears the stream ([`AppsCommand::LtListen`]).
+    pub listening: bool,
     pub volume: f64,
     pub loudness: bool,
     pub preset: String,
@@ -1086,6 +1092,7 @@ impl AppsState {
                 ..SoundboardState::default()
             },
             listen: ListenState {
+                listening: true,
                 volume: 1.0,
                 loudness: true,
                 preset: "balanced".into(),
@@ -1476,6 +1483,8 @@ pub struct ListenView {
     pub skipped: usize,
     pub error: String,
     pub playback_error: String,
+    /// This device hears the stream (off: stopped here only).
+    pub listening: bool,
     pub volume: f64,
     pub loudness: bool,
     pub preset: String,
