@@ -19,6 +19,8 @@ Item {
     property bool menuKey: true
     property bool membersKey: false
     property bool membersOn: false
+    // The pager pans with the touch: the list holds still (Pager.held).
+    property bool held: false
 
     signal menuRequested()
     signal membersRequested()
@@ -463,7 +465,8 @@ Item {
         // lift and stays pressed; it then took the sheet's own drags from
         // under it, and the next tap on the sheet only ended that drag.
         // Not interactive clears that state and keeps it out of the way.
-        interactive: !actions.shown
+        // Nor while the pager pans with the touch (Pager.held).
+        interactive: !actions.shown && !root.held
         // No reuse, as on the desktop (ChatView): a pooled row handed to
         // another message keeps its old height until its columns lay out
         // again, a pass after the list has placed it. A row of pictures

@@ -23,6 +23,8 @@ Item {
     // Room under the last row for what floats over the pane's foot (the
     // drawer's account plate).
     property real bottomClear: 8
+    // The pager pans with the touch: the list holds still (Pager.held).
+    property bool held: false
 
     // A conversation picked in the drawer. The open one picked again is a
     // way back to it, not a reload: the desktop's reselect lays the list
@@ -40,6 +42,7 @@ Item {
         topMargin: 4
         bottomMargin: root.bottomClear
         clip: true
+        interactive: !root.held
         model: DmListModel
 
         header: Column {
