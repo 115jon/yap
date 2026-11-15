@@ -224,6 +224,34 @@ fn a_cleared_gateway_event_should_empty_the_inbox() {
     assert!(view(&fx).expect("view").inbox.rows.is_empty());
 }
 
+#[test]
+fn a_fresh_gateway_session_should_reload_a_loaded_inbox() {
+    let mut client = Client::online();
+    let fx = client.command(ExtrasCommand::OpenInbox);
+    client.reply(
+        extras_request(&fx),
+        json!({ "notifications": [notification("n1", true)] }),
+    );
+    // Events during the gap are lost: the list loads again with the badge.
+    let fx = client.gateway(GatewayEvent::Ready);
+    let (_, request) = extras_request(&fx);
+    assert_eq!(request.path(), "/api/notifications?limit=50");
+}
+
+#[test]
+fn signing_out_should_forget_the_inbox() {
+    let mut client = Client::online();
+    let fx = client.command(ExtrasCommand::OpenInbox);
+    client.reply(
+        extras_request(&fx),
+        json!({ "notifications": [notification("n1", false)] }),
+    );
+    let fx = client.input(Input::User(Command::SignOut));
+    let inbox = view(&fx).expect("view").inbox;
+    assert!(inbox.rows.is_empty());
+    assert!(!inbox.loaded && !inbox.loading);
+}
+
 // Who reacted
 
 #[test]

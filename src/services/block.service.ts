@@ -12,7 +12,8 @@
  * - neither side can join the DM's call room, and a block ends a ring or a
  *   call already running between them;
  * - a blocked user's friend requests are refused;
- * - a blocked user's mentions, replies and DMs never notify the blocker.
+ * - neither side's mentions, replies and DMs notify the other, and the
+ *   inbox hides what either wrote to the other before the block.
  *
  * Server channels are not refused: there the blocker's client collapses the
  * blocked user's messages instead.
@@ -119,18 +120,21 @@ export async function assertCanMessageInDm(
 }
 
 /**
- * The users who blocked `authorId`; the author's mentions, replies and DM
- * messages never notify them (inbox or push).
+ * The users on either side of a block with `authorId` (they blocked the
+ * author, or the author blocked them); the author's mentions, replies and
+ * DM messages never notify them (inbox or push).
  */
-export async function usersWhoBlocked(
+export async function usersBlockedEitherWay(
   db: D1Database,
   authorId: string,
 ): Promise<Set<string>> {
   const { results } = await db
     .prepare(
-      `SELECT user_id FROM relationships WHERE target_user_id = ? AND type = 1`,
+      `SELECT CASE WHEN user_id = ? THEN target_user_id ELSE user_id END AS other_id
+         FROM relationships
+        WHERE type = 1 AND (user_id = ? OR target_user_id = ?)`,
     )
-    .bind(authorId)
-    .all<{ user_id: string }>();
-  return new Set((results ?? []).map((row) => row.user_id));
+    .bind(authorId, authorId, authorId)
+    .all<{ other_id: string }>();
+  return new Set((results ?? []).map((row) => row.other_id));
 }
