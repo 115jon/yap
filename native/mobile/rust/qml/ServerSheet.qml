@@ -141,6 +141,18 @@ BottomSheet {
                 Native.copy(Admin.webOrigin + "/chat/" + sheet.serverId + "/" + sheet.channelId)
             }
         }
+        // Server settings (AdminHomePage), with a permission one of its
+        // pages needs.
+        SheetRow {
+            visible: !sheet.onChannel && !sheet.leaving && (Admin.isOwner || Admin.canManageServer || Admin.canManageRoles
+                || Admin.canManageChannels || Admin.canKick || Admin.canBan)
+            iconName: "settings"
+            text: qsTr("Server settings")
+            onTriggered: {
+                sheet.close()
+                Router.open("AdminHomePage", { serverId: sheet.serverId })
+            }
+        }
         SheetRow {
             visible: !sheet.onChannel && !sheet.leaving && Admin.canManageChannels
             iconName: "add"
