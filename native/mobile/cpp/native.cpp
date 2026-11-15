@@ -152,6 +152,7 @@ Native::Native(QObject* parent)
   installPush();
   installVoice();
   installCamera();
+  installScreen();
   installLinks();
   installCalls();
   // Text size, Remove animations and the wallpaper accent can change while

@@ -5,8 +5,8 @@ import Yap.Ui
 
 // You, floating at the drawer's foot (Drawer Plus; the desktop's
 // AccountRow and call strip in one plate): while in a call its segment on
-// top (Yap.Ui's CallStatusLine, the camera key and its flip, and a key to
-// the call page), then your
+// top (Yap.Ui's CallStatusLine, the camera key and its flip, the share key
+// while the screen is shared, and a key to the call page), then your
 // avatar with your presence LED, your name and what you play, your custom
 // status or your presence word, and the mic and deafen keys. A tap on the
 // row grows the account panel out of the plate (AccountPanel); the panel
@@ -66,13 +66,28 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 clockShown: root.clockShown
             }
-            // The call page's camera keys (CameraLink), at the plate's size.
+            // The call page's camera keys (CameraLink), at the plate's size,
+            // and its share key while sharing (ShareLink: a share starts
+            // from the call page).
             Row {
                 id: callKeys
                 anchors.right: callCaret.left
                 anchors.rightMargin: 6
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 2
+                IconKey {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: ShareLink.on
+                    size: 36
+                    iconName: "screenShare"
+                    tone: "live"
+                    tip: qsTr("Stop sharing")
+                    Accessible.name: tip
+                    onClicked: {
+                        Native.haptic(Native.Tick)
+                        ShellState.toggleShare()
+                    }
+                }
                 IconKey {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: CameraLink.on

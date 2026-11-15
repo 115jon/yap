@@ -10,9 +10,9 @@ import Yap.Ui
 // quality beside it, everyone in the call as rows (the desktop's occupant
 // leaf at phone size: square avatar with the 2 px talk ring, the name, the
 // state glyphs, the talk LED) under their cameras and shares and our own
-// self-view (CallVideo), and the one dock: mic, deafen, camera (and its
-// flip while it is on), where it plays, the soundboard (a sheet:
-// SoundboardSheet), leave. Opened by joining a voice channel in the drawer
+// self-view and our share's tile (CallVideo), and the one dock: mic,
+// deafen, camera (and its flip while it is on), screen share (ShareLink),
+// where it plays, the soundboard (a sheet: SoundboardSheet), leave. Opened by joining a voice channel in the drawer
 // and from the drawer's call bar; Back leaves the page, not the call. A DM
 // call is the same page under the other person's name; while ours rings
 // them (no room joined yet) it shows them ringing, with Cancel as its one
@@ -226,7 +226,8 @@ Rectangle {
     }
 
     // What is wrong, when something is (CallHealth, shared with the
-    // desktop): a failed call's reason or a camera that would not start,
+    // desktop): a failed call's reason, a camera or a screen share that
+    // would not start,
     // the call reconnecting, audio that stopped flowing one way, a poor
     // link.
     CallHealth {
@@ -238,7 +239,8 @@ Rectangle {
         leftInset: root.leftInset
         rightInset: root.rightInset
         alert: !root.inCall ? (root.failed ? (root.unreachable.length > 0 ? root.unreachable : Voice.error) : "")
-            : Voice.cameraError.length > 0 ? CameraLink.errorText(Voice.cameraError) : ""
+            : Voice.cameraError.length > 0 ? CameraLink.errorText(Voice.cameraError)
+            : ShareLink.error.length > 0 ? ShareLink.errorText(ShareLink.error) : ""
         alertDanger: !root.inCall
         reconnecting: root.inCall && Voice.status === "Reconnecting"
         micStalled: root.micStalled
@@ -459,13 +461,16 @@ Rectangle {
             id: keys
             anchors.horizontalCenter: parent.horizontalCenter
             y: 12
-            // Up to seven keys; closer together on a narrow phone.
-            readonly property int count: flipKey.visible ? 7 : 6
-            spacing: Math.max(4, Math.min(16, Math.floor((root.width - root.leftInset - root.rightInset - 32 - count * 48) / (count - 1))))
+            // Up to eight keys; closer together on a narrow phone, and a
+            // little smaller when eight would not fit at 48.
+            readonly property int count: flipKey.visible ? 8 : 7
+            readonly property real room: root.width - root.leftInset - root.rightInset - 32
+            readonly property int key: Math.max(40, Math.min(48, Math.floor((room - (count - 1) * 4) / count)))
+            spacing: Math.max(4, Math.min(16, Math.floor((room - count * key) / (count - 1))))
             visible: root.inCall
 
             IconKey {
-                size: 48
+                size: keys.key
                 iconName: "mic"
                 tone: Voice.muted ? "off" : "rest"
                 tip: Voice.muted ? qsTr("Unmute") : qsTr("Mute")
@@ -476,7 +481,7 @@ Rectangle {
                 }
             }
             IconKey {
-                size: 48
+                size: keys.key
                 iconName: "deafen"
                 tone: Voice.deafened ? "off" : "rest"
                 tip: Voice.deafened ? qsTr("Undeafen") : qsTr("Deafen")
@@ -487,7 +492,7 @@ Rectangle {
                 }
             }
             IconKey {
-                size: 48
+                size: keys.key
                 iconName: "camera"
                 tone: CameraLink.on ? "live" : "rest"
                 tip: CameraLink.on ? qsTr("Turn off camera") : qsTr("Turn on camera")
@@ -502,7 +507,7 @@ Rectangle {
             IconKey {
                 id: flipKey
                 visible: CameraLink.on
-                size: 48
+                size: keys.key
                 iconName: "refresh"
                 tone: "rest"
                 tip: Native.cameraFront ? qsTr("Switch to the back camera") : qsTr("Switch to the front camera")
@@ -513,7 +518,20 @@ Rectangle {
                 }
             }
             IconKey {
-                size: 48
+                size: keys.key
+                iconName: "screenShare"
+                tone: ShareLink.on ? "live" : "rest"
+                tip: ShareLink.on ? qsTr("Stop sharing") : qsTr("Share screen")
+                Accessible.name: tip
+                Accessible.checkable: true
+                Accessible.checked: ShareLink.on
+                onClicked: {
+                    Native.haptic(Native.Tick)
+                    ShellState.toggleShare()
+                }
+            }
+            IconKey {
+                size: keys.key
                 iconName: root.routeIcon(root.route ? root.route.id : "speaker")
                 tone: "rest"
                 enabled: Native.audioRoutes.length > 1
@@ -522,7 +540,7 @@ Rectangle {
                 onClicked: routes.open()
             }
             IconKey {
-                size: 48
+                size: keys.key
                 iconName: "soundboard"
                 tone: soundboard.item && soundboard.item.up ? "toggled" : "rest"
                 tip: qsTr("Soundboard")
@@ -535,7 +553,7 @@ Rectangle {
             }
             IconKey {
                 id: leaveKey
-                size: 48
+                size: keys.key
                 iconName: "disconnect"
                 tip: qsTr("Leave")
                 plateInk: Theme.dangerFillInk

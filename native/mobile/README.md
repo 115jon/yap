@@ -967,9 +967,10 @@ without libwebrtc. What is the phone's own:
   are the defaults: the phone has no page for the output and per-person
   volumes, sensitivity or processing yet. The soundboard's clips and
   Listen Together's stream play through `yap-audio` on the app's speaker
-  (`yap-speaker`, AAudio) as call audio. No
-  camera, screen share or remote video yet: the phone asks for no video,
-  so none is pulled.
+  (`yap-speaker`, AAudio) as call audio. Video: remote cameras and shares,
+  the phone's own camera and its screen share (MediaProjection after
+  Android's consent, with other apps' sound when asked), each described in
+  its module (`rust/src/video.rs`, `camera.rs`, `screen.rs`).
 - **Start-up.** libwebrtc needs the process's `JavaVM`, the application
   context and its Java side (`livekit.org.webrtc.*`, in the prebuilt's
   `libwebrtc.jar`). `VoiceShim.install` calls its `nativeInit` at start,

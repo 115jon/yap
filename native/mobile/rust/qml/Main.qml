@@ -850,6 +850,112 @@ Window {
         onConfirmed: Native.openAppSettings()
     }
 
+    // The share key (ShareLink): what goes with the screen, before
+    // Android's own dialog (the whole screen or one app).
+    Connections {
+        target: ShareLink
+        function onPickRequested() { shareSheet.open() }
+    }
+    BottomSheet {
+        id: shareSheet
+        anchors.fill: parent
+        anchors.bottomMargin: Native.clippedBottom
+        title: qsTr("Share your screen")
+        contentHeight: shareColumn.implicitHeight
+        // Sound from other apps needs API 29 and the microphone, which a
+        // call already has.
+        property bool audioOffered: false
+        onUpChanged: if (up) audioOffered = Native.shareAudioSupported()
+
+        Column {
+            id: shareColumn
+            width: parent.width
+            spacing: 12
+            bottomPadding: 16
+
+            Text {
+                x: 16
+                width: parent.width - 32
+                text: qsTr("Everyone in the call can watch what you share, notifications included. Android asks next whether to share your whole screen or one app.")
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+                color: Theme.ink2
+                font: Theme.type.dialogBody
+            }
+            // Sound from other apps (videos, games), never the call.
+            Item {
+                visible: shareSheet.audioOffered
+                width: parent.width
+                height: visible ? Math.max(Theme.controlLg, audioWords.implicitHeight + 16) : 0
+                Accessible.role: Accessible.CheckBox
+                Accessible.name: audioTitle.text
+                Accessible.description: audioHint.text
+                Accessible.checkable: true
+                Accessible.checked: Prefs.shareAudio
+                Accessible.onPressAction: audioSwitch.clicked()
+                Column {
+                    id: audioWords
+                    anchors.left: parent.left
+                    anchors.leftMargin: 16
+                    anchors.right: audioSwitch.left
+                    anchors.rightMargin: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 2
+                    Text {
+                        id: audioTitle
+                        width: parent.width
+                        textFormat: Text.PlainText
+                        text: qsTr("Share sound from other apps")
+                        color: Theme.ink1
+                        font: Theme.type.setting
+                    }
+                    Text {
+                        id: audioHint
+                        width: parent.width
+                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                        text: qsTr("Videos, music and games you play. The call itself is never shared back.")
+                        color: Theme.ink3
+                        font: Theme.type.description
+                    }
+                }
+                TapHandler { onTapped: audioSwitch.clicked() }
+                SettingSwitch {
+                    id: audioSwitch
+                    anchors.right: parent.right
+                    anchors.rightMargin: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    checked: Prefs.shareAudio
+                    Accessible.ignored: true
+                    onClicked: {
+                        Native.haptic(Native.Tick)
+                        Prefs.shareAudio = !Prefs.shareAudio
+                    }
+                }
+            }
+            KitButton {
+                x: 16
+                width: parent.width - 32
+                size: "lg"
+                variant: "primary"
+                ground: Theme.ply3
+                text: qsTr("Start sharing")
+                onClicked: {
+                    shareSheet.close()
+                    ShareLink.start(shareSheet.audioOffered && Prefs.shareAudio)
+                }
+            }
+            KitButton {
+                x: 16
+                width: parent.width - 32
+                size: "lg"
+                variant: "secondary"
+                text: qsTr("Cancel")
+                onClicked: shareSheet.close()
+            }
+        }
+    }
+
     // Ring them? (StartCallModal.tsx): a call rings at once, and leaves a
     // voice channel's call we are in.
     ConfirmSheet {

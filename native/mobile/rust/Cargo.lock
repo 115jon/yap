@@ -3391,6 +3391,7 @@ dependencies = [
  "cxx-qt",
  "cxx-qt-build",
  "cxx-qt-lib",
+ "image",
  "libc",
  "reqwest 0.13.5",
  "ring",

@@ -17,18 +17,28 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.app.ServiceCompat;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
 /**
- * The call's foreground service (type microphone, and camera while the
- * phone's camera captures): it keeps the process and its mic while the app
- * is in the background or the screen is off, and shows the ongoing call
- * notification with Mute and Leave. It holds no call state: VoiceShim
- * starts it when the core's call starts and stops it when the last one
- * ends, and the actions go through VoiceShim to the core.
+ * The call's foreground service (type microphone, camera while the phone's
+ * camera captures, mediaProjection while its screen is shared): it keeps
+ * the process and its mic while the app is in the background or the screen
+ * is off, and shows the ongoing call notification with Mute and Leave (and
+ * Stop sharing while the screen is shared). It holds no call state:
+ * VoiceShim starts it when the core's call starts and stops it when the
+ * last one ends, and the actions go through VoiceShim (ScreenShim) to the
+ * core.
  *
  * Started only while the app is in front (a join is a tap), which is what
  * lets a microphone service start and keep the mic afterwards. The camera
  * type is added the same way: the camera starts from a tap in front
- * (CameraShim), and goes again when it stops.
+ * (CameraShim), and goes again when it stops. The mediaProjection type is
+ * added after the user consented to a share and before the capture takes
+ * the projection (ScreenShim), which Android 14 requires, and goes when the
+ * capture stops.
  */
 public final class VoiceService extends Service {
     private static final String TAG = "yap-voice";
@@ -39,17 +49,22 @@ public final class VoiceService extends Service {
     static final String ACTION_MUTE = "dev.yap.voice.MUTE";
     static final String ACTION_LEAVE = "dev.yap.voice.LEAVE";
     static final String ACTION_TYPE = "dev.yap.voice.TYPE";
+    static final String ACTION_STOP_SHARE = "dev.yap.voice.STOP_SHARE";
 
     private static final String CHANNEL = "call";
     /** Clear of the message notifications' ids (conversation hashes). */
     private static final int NOTIFICATION_ID = 0x59A9;
 
-    /** The service is up and in the foreground (main thread). */
-    private static boolean running;
+    /** The service is up and in the foreground (written on the main thread). */
+    private static volatile boolean running;
     /** The phone's camera captures: the service carries the camera type. */
     private static volatile boolean camera;
-    /** The type the service runs with now (main thread). */
-    private static int runningType;
+    /** The screen is about to be or is shared: the mediaProjection type. */
+    private static volatile boolean projection;
+    /** The type the service runs with now (written on the main thread). */
+    private static volatile int runningType;
+    /** Waiting for the next type change to be applied (main thread). */
+    private static final List<Runnable> typeApplied = new ArrayList<>();
     private static final Handler main = new Handler(Looper.getMainLooper());
     /** The created service, for stopping it without a start command. */
     private static VoiceService instance;
@@ -86,6 +101,40 @@ public final class VoiceService extends Service {
             camera = on;
             if (running) deliver(context, ACTION_TYPE);
         });
+    }
+
+    /**
+     * The screen share's capture is about to start or has stopped (any
+     * thread but the main one when waiting): a running service takes the
+     * mediaProjection type, or drops it. With `waitMs`, waits that long for
+     * the type to be applied; returns whether the service then runs with it
+     * (always true for `on` false).
+     */
+    static boolean setProjection(Context context, boolean on, long waitMs) {
+        CountDownLatch done = new CountDownLatch(1);
+        main.post(() -> {
+            projection = on;
+            if (!running || type() == runningType) {
+                done.countDown();
+                return;
+            }
+            typeApplied.add(done::countDown);
+            deliver(context, ACTION_TYPE);
+        });
+        if (!on) return true;
+        try {
+            done.await(waitMs, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return projecting();
+    }
+
+    /** The service runs with the mediaProjection type (or needs none, before API 29). */
+    private static boolean projecting() {
+        if (!running) return false;
+        if (Build.VERSION.SDK_INT < 29) return true;
+        return (runningType & projectionType()) != 0;
     }
 
     /** The notification's text or actions changed. */
@@ -143,6 +192,10 @@ public final class VoiceService extends Service {
             if (running) post();
         } else if (ACTION_TYPE.equals(action)) {
             if (running && type() != runningType) foreground();
+            for (Runnable done : typeApplied) done.run();
+            typeApplied.clear();
+        } else if (ACTION_STOP_SHARE.equals(action)) {
+            ScreenShim.stopFromNotification();
         } else if (ACTION_STOP.equals(action)) {
             // A call that began since (a leave, then a join) keeps the
             // service: its own start is on its way.
@@ -185,11 +238,13 @@ public final class VoiceService extends Service {
             try {
                 ServiceCompat.startForeground(this, NOTIFICATION_ID, build(), type);
             } catch (SecurityException e) {
-                if ((type & cameraType()) == 0) throw e;
-                // The camera type was refused (the app went behind first):
-                // the call keeps its microphone service.
-                Log.w(TAG, "no camera type: " + e);
-                type &= ~cameraType();
+                int extra = cameraType() | projectionType();
+                if ((type & extra) == 0) throw e;
+                // The camera or projection type was refused (the app went
+                // behind first, no consent): the call keeps its microphone
+                // service, and the capture that wanted the type fails.
+                Log.w(TAG, "no camera or mediaProjection type: " + e);
+                type &= ~extra;
                 ServiceCompat.startForeground(this, NOTIFICATION_ID, build(), type);
             }
             running = true;
@@ -204,14 +259,22 @@ public final class VoiceService extends Service {
         }
     }
 
-    /** Microphone, and camera while it captures (API 30+; none before). */
+    /**
+     * Microphone, camera while it captures and mediaProjection while the
+     * screen is shared (API 30+; before, only API 29's mediaProjection).
+     */
     private static int type() {
-        if (Build.VERSION.SDK_INT < 30) return 0;
-        return ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE | (camera ? cameraType() : 0);
+        int share = projection ? projectionType() : 0;
+        if (Build.VERSION.SDK_INT < 30) return share;
+        return ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE | (camera ? cameraType() : 0) | share;
     }
 
     private static int cameraType() {
         return Build.VERSION.SDK_INT >= 30 ? ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA : 0;
+    }
+
+    private static int projectionType() {
+        return Build.VERSION.SDK_INT >= 29 ? ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION : 0;
     }
 
     /** Stops, unless a newer start is queued (it carries a later id). */
@@ -235,12 +298,14 @@ public final class VoiceService extends Service {
     private Notification build() {
         boolean deafened = VoiceShim.deafened();
         boolean muted = VoiceShim.muted() || deafened;
+        boolean sharing = ScreenShim.sharing();
         String title = VoiceShim.title();
+        String state = deafened ? "Deafened" : muted ? "Muted" : "Voice connected";
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL)
                 .setSmallIcon(drawable("yap_notify_small"))
                 .setColor(accent())
                 .setContentTitle(title.isEmpty() ? "Voice call" : title)
-                .setContentText(deafened ? "Deafened" : muted ? "Muted" : "Voice connected")
+                .setContentText(sharing ? state + " · Sharing your screen" : state)
                 .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
@@ -249,8 +314,9 @@ public final class VoiceService extends Service {
                 .setWhen(VoiceShim.startedAt())
                 .setUsesChronometer(true)
                 .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-                .addAction(0, muted ? "Unmute" : "Mute", action(ACTION_MUTE, 1))
-                .addAction(0, "Leave", action(ACTION_LEAVE, 2));
+                .addAction(0, muted ? "Unmute" : "Mute", action(ACTION_MUTE, 1));
+        if (sharing) builder.addAction(0, "Stop sharing", action(ACTION_STOP_SHARE, 3));
+        builder.addAction(0, "Leave", action(ACTION_LEAVE, 2));
         Intent open = getPackageManager().getLaunchIntentForPackage(getPackageName());
         if (open != null) {
             builder.setContentIntent(PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE));

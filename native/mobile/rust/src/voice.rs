@@ -6,8 +6,8 @@
 //! Leave, and an audio focus loss (a phone call).
 //!
 //! Remote cameras and shares are shown (video.rs), and the phone sends its
-//! own camera (camera.rs); no screen share from the phone yet, and no
-//! RNNoise or per-person panning: those need the desktop's own audio path.
+//! own camera (camera.rs) and its screen (screen.rs); no RNNoise or
+//! per-person panning: those need the desktop's own audio path.
 //! Per-person volume and local mute are heard (libwebrtc's own playout
 //! gain per remote track) and kept per signed-in user in the desktop's
 //! voice settings file ([`peer_audio`], [`set_peer_audio`]).
@@ -24,7 +24,9 @@ use yap_cache::voice::{self as saved_voice, PeerSettings, VoiceSettings};
 use yap_core::{Api, Command, VoiceCommand, VoiceEvents, VoiceTarget, VoiceUpdate};
 use yap_ui::client;
 use yap_voice::call::{self, CallAudio, Host};
-use yap_voice::{peer_gain, CameraEncoding, NoCapture, Playback, VideoIntent};
+use yap_voice::{peer_gain, CameraEncoding, Playback, VideoIntent};
+
+use crate::screen::PhoneScreen;
 
 extern "C" {
     /// cpp/voice.cpp: a call runs (or the last one ended), from any thread.
@@ -36,10 +38,10 @@ extern "C" {
 struct Phone;
 
 impl Host for Phone {
-    type Capturer = NoCapture;
+    type Capturer = PhoneScreen;
 
-    fn capturer(&self) -> NoCapture {
-        NoCapture
+    fn capturer(&self) -> PhoneScreen {
+        PhoneScreen
     }
 
     fn prepare(&self) {
@@ -55,6 +57,21 @@ impl Host for Phone {
 
     fn camera_encodings(&self) -> Option<watch::Receiver<Vec<CameraEncoding>>> {
         Some(crate::camera::subscribe())
+    }
+
+    /// Our share's still behind everyone else's Watch, as the desktop
+    /// encodes it.
+    fn still_jpeg(&self, still: &yap_voice::Still, quality: u8) -> Option<Vec<u8>> {
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, quality)
+            .encode(
+                &still.rgb,
+                still.width,
+                still.height,
+                image::ExtendedColorType::Rgb8,
+            )
+            .ok()?;
+        Some(jpeg)
     }
 }
 

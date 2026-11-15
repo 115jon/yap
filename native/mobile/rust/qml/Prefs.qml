@@ -11,4 +11,7 @@ QC.Settings {
     // Settings > Text size: a factor over the system's font scale
     // (Native.fontScale); Main.qml multiplies the two into Theme.textScale.
     property real textFactor: 1
+    // The screen share sheet's "Share sound from other apps" (ShareLink),
+    // as last chosen.
+    property bool shareAudio: false
 }

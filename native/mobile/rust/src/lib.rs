@@ -26,3 +26,6 @@ mod video;
 // The phone's camera into the call (cpp/camera.cpp).
 #[cfg(target_os = "android")]
 mod camera;
+// The phone's screen into the call (cpp/screen.cpp).
+#[cfg(target_os = "android")]
+mod screen;
