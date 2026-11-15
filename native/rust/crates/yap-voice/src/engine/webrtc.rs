@@ -265,6 +265,26 @@ pub struct LibwebrtcEngine;
 static CALL_OPEN: AtomicBool = AtomicBool::new(false);
 static MIC_LIVE: AtomicBool = AtomicBool::new(false);
 
+/// The share's audio track went quiet (disabled): on the ADM path WebRTC
+/// can take that for every send stream muted and stop recording (seen on
+/// Android: `MuteStream: ADM:1`, then the recorder stops), which leaves a
+/// live mic sending nothing until the stall check republishes it 30 s
+/// later. While the mic is live, recording is started again at once.
+/// Android only: the desktop records through its own path.
+fn keep_recording() {
+    if !cfg!(target_os = "android")
+        || pipeline::enabled()
+        || !CALL_OPEN.load(Ordering::Relaxed)
+        || !MIC_LIVE.load(Ordering::Relaxed)
+    {
+        return;
+    }
+    let f = &factory();
+    f.stop_recording();
+    let ok = f.init_recording() && f.start_recording();
+    eprintln!("[share] audio parked; mic recording restarted: {ok}");
+}
+
 /// The chosen devices (`None`: the system default) and the endpoints in
 /// use while the ADM is up.
 #[derive(Debug, Default)]
@@ -1708,6 +1728,7 @@ impl MediaSession for LibwebrtcSession {
             audio.keepalive.park(true);
             audio.parked = true;
         }
+        keep_recording();
     }
 
     fn resume_screen_audio(&self) -> bool {
@@ -1730,11 +1751,15 @@ impl MediaSession for LibwebrtcSession {
             old.track.set_enabled(false);
             lock(&self.retired).push(old.transceiver);
         }
+        keep_recording();
     }
 
     fn set_screen_audio_enabled(&self, enabled: bool) {
         if let Some(audio) = lock(&self.screen_audio).as_ref() {
             audio.track.set_enabled(enabled);
+        }
+        if !enabled {
+            keep_recording();
         }
     }
 

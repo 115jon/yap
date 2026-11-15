@@ -41,6 +41,10 @@
 //                  flip, and the device's heat that bounds it
 //                  (cpp/camera.cpp,
 //                  android/src/dev/yap/qtproto/voice/CameraShim.java)
+//   screen         the phone's screen share in a call: the system's
+//                  consent dialog, and the capture's frames and sound on
+//                  their way to the core (cpp/screen.cpp,
+//                  android/src/dev/yap/qtproto/voice/ScreenShim.java)
 //   calls          a DM call ringing this phone: the ring from a push or
 //                  the core, its ringtone or notification, Answer and
 //                  Decline outside the app (cpp/calls.cpp,
@@ -99,8 +103,12 @@ class Native : public QObject
   Q_PROPERTY(bool cameraCapture READ cameraCapture WRITE setCameraCapture NOTIFY cameraCaptureChanged)
   // The capture uses (or starts with) the front camera; flipCamera switches.
   Q_PROPERTY(bool cameraFront READ cameraFront NOTIFY cameraFrontChanged)
+  // Our screen share is live (ShareLink.qml binds it to Voice.sharing):
+  // the device's heat and network are read meanwhile, as for the camera.
+  Q_PROPERTY(bool screenCapture READ screenCapture WRITE setScreenCapture NOTIFY screenCaptureChanged)
   // Android's thermal status (PowerManager THERMAL_STATUS_*: 2 moderate,
-  // 3 severe; -1 unknown), read while video shows or the camera runs.
+  // 3 severe; -1 unknown), read while video shows, the camera runs or the
+  // screen is shared.
   Q_PROPERTY(int thermalStatus READ thermalStatus NOTIFY thermalStatusChanged)
   // The screen is on. In a call the app stays resumed behind the lock
   // screen with it off, so the app state alone does not say so.
@@ -241,6 +249,17 @@ public:
   // answer arrives as cameraAnswered, at once when already decided.
   Q_INVOKABLE void requestCamera();
 
+  bool screenCapture() const { return m_screenCapture; }
+  void setScreenCapture(bool on);
+  // The system's screen share consent (MediaProjection's dialog, every
+  // time: Android 14 lets a consent start one capture only). The answer
+  // arrives as screenShareAnswered; a yes is kept for the next capture
+  // the call starts.
+  Q_INVOKABLE void requestScreenShare();
+  // The device's sound can go with a share (AudioPlaybackCapture, API 29+,
+  // with the microphone permission).
+  Q_INVOKABLE bool shareAudioSupported() const;
+
   QVariantMap incomingCall() const { return m_incomingCall; }
   // The core's ring (CALL_RING; the keys of incomingCall): rings once per
   // call id with a push's, the ringtone in front, else the notification.
@@ -277,6 +296,7 @@ public:
   void onCameraStarted(bool front);
   void onCameraFailed(const QString& reason);
   void onScreen(bool on);
+  void onScreenShareAnswered(bool granted);
 
 signals:
   void handlesBackChanged();
@@ -316,6 +336,8 @@ signals:
   // The capture could not start or stopped on its own: `denied`,
   // `missing`, `busy` or `unknown` (the desktop's Camera reasons).
   void cameraFailed(const QString& reason);
+  void screenCaptureChanged();
+  void screenShareAnswered(bool granted);
 
 protected:
   bool eventFilter(QObject* watched, QEvent* event) override;
@@ -346,6 +368,8 @@ private:
   void installCalls();
   // cpp/camera.cpp.
   void installCamera();
+  // cpp/screen.cpp.
+  void installScreen();
 
   bool m_handlesBack = false;
   // Back reaches the app through the shim's OnBackInvokedCallback (API 33+).
@@ -375,6 +399,8 @@ private:
   bool m_cameraCapture = false;
   bool m_cameraFront = true;
   bool m_askingCamera = false;
+  bool m_screenCapture = false;
+  bool m_askingScreen = false;
   int m_thermalStatus = -1;
   bool m_screenOn = true;
   QVariantMap m_incomingCall;

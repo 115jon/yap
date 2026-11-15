@@ -514,6 +514,13 @@ Item {
             // A long press (the delegate's, under a finger) opens the sheet;
             // a swipe left replies.
             onMenuRequested: actions.openFor(message)
+            // TalkBack: the row reads as its author and text, and a double
+            // tap opens the sheet (Qt's Android bridge offers no long press).
+            Accessible.role: Accessible.ListItem
+            Accessible.name: message.hasText ? qsTr("%1: %2").arg(message.author).arg(message.body) : message.author
+            Accessible.description: actionable ? qsTr("Message actions") : ""
+            Accessible.onPressAction: if (actionable) actions.openFor(message)
+            readonly property bool actionable: !message.editing && !message.pending && !message.failed && !message.isCall
             SwipeReply {
                 row: message
                 view: view

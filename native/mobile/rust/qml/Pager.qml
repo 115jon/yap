@@ -299,6 +299,8 @@ Item {
         width: pager.drawerWidth
         height: parent.height
         enabled: pager.wide || pager.page === "drawer"
+        // Under the chat on a phone: out of TalkBack's reach (cpp/a11y.h).
+        A11y.hidden: !enabled
         reveal: pager.wide ? 1 : Math.max(0, Math.min(1, pager.offset / Math.max(1, pager.drawerWidth)))
         onConversationOpened: pager.show("chat")
         onProfileRequested: userId => pager.profileRequested(userId)
@@ -335,6 +337,8 @@ Item {
             anchors.fill: parent
             visible: pager.hasChat
             enabled: pager.chatShown
+            // Aside (the drawer or members over it): only the peek is read.
+            A11y.hidden: !enabled
             menuKey: !pager.wide
             membersKey: pager.hasMembers
             membersOn: pager.membersShown

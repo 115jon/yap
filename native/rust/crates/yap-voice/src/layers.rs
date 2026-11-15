@@ -75,6 +75,46 @@ pub fn phone_camera(thermal: i32, metered: bool) -> Option<CameraEncoding> {
     }
 }
 
+/// A phone's screen share preset (a quality id no picker offers): the
+/// screen at up to 1600 x 720 (long side x short side, either way up), 30
+/// fps, 2.5 Mbps, one VP8 layer.
+pub const PHONE_SHARE: &str = "phone";
+/// A phone's share on a metered network or warm: up to 1200 x 540, 15 fps,
+/// 1 Mbps.
+pub const PHONE_SHARE_LOW: &str = "phone-low";
+
+/// The numbers of [`PHONE_SHARE`] and [`PHONE_SHARE_LOW`]
+/// (`ShareQuality::of`); `None` for any other id. The box is long side x
+/// short side: the phone's capture sizes its frames to fit it whichever
+/// way up the screen is, and hands each frame with the box turned to match.
+pub(crate) fn phone_share_quality(id: &str) -> Option<crate::ShareQuality> {
+    let (width, height, bitrate, fps) = match id {
+        PHONE_SHARE => (1600, 720, 2_500_000, 30),
+        PHONE_SHARE_LOW => (1200, 540, 1_000_000, 15),
+        _ => return None,
+    };
+    Some(crate::ShareQuality {
+        width,
+        height,
+        bitrate,
+        fps,
+    })
+}
+
+/// What a phone may share its screen at, as [`phone_camera`] steps: the
+/// full preset, the low one on a metered network or from
+/// [`crate::demand::THERMAL_MODERATE`], and nothing (the share stops) from
+/// [`crate::demand::THERMAL_SEVERE`].
+pub fn phone_share(thermal: i32, metered: bool) -> Option<&'static str> {
+    if thermal >= crate::demand::THERMAL_SEVERE {
+        None
+    } else if thermal >= crate::demand::THERMAL_MODERATE || metered {
+        Some(PHONE_SHARE_LOW)
+    } else {
+        Some(PHONE_SHARE)
+    }
+}
+
 /// A simulcast layer, by quality.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Quality {
@@ -202,6 +242,18 @@ mod tests {
         );
         // One layer is not simulcast: no rid to announce.
         assert!(full.rid.is_empty() && low.rid.is_empty());
+    }
+
+    #[test]
+    fn a_phone_share_should_step_down_like_its_camera() {
+        assert_eq!(phone_share(0, false), Some(PHONE_SHARE));
+        assert_eq!(phone_share(-1, false), Some(PHONE_SHARE));
+        assert_eq!(phone_share(1, false), Some(PHONE_SHARE));
+        assert_eq!(phone_share(0, true), Some(PHONE_SHARE_LOW));
+        assert_eq!(phone_share(2, false), Some(PHONE_SHARE_LOW));
+        assert_eq!(phone_share(3, false), None);
+        assert_eq!(phone_share(6, true), None);
+        assert_eq!(phone_share_quality("720p30"), None);
     }
 
     #[test]

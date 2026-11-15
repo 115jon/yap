@@ -3,13 +3,14 @@
 //! way into the call.
 //!
 //! The app captures (Windows Graphics Capture and WASAPI loopback in
-//! `yap_native`) through a [`ShareCapturer`] the driver starts and releases
-//! as the call machine asks. Every captured frame goes to
-//! [`push_screen_frame`] on whatever thread it arrives: libyuv converts it
-//! once to I420, scaled to fit the quality's box, and it goes to the share's
-//! encoder while the share is live and to the local preview
-//! ([`LOCAL_SCREEN_KEY`]) through the installed video output. Source audio
-//! goes to [`push_screen_audio`] as 48 kHz 16-bit PCM.
+//! `yap_native`, MediaProjection on the phone) through a [`ShareCapturer`]
+//! the driver starts and releases as the call machine asks. Every captured
+//! frame goes to [`push_screen_frame`] (BGRA) or [`push_screen_i420`] on
+//! whatever thread it arrives: libyuv converts it once to I420, scaled to
+//! fit the quality's box, and it goes to the share's encoder while the
+//! share is live and to the local preview ([`LOCAL_SCREEN_KEY`]) through
+//! the installed video output. Source audio goes to [`push_screen_audio`]
+//! as 48 kHz 16-bit PCM.
 //!
 //! The share publishes through the SFU as the web's browser path does: a
 //! `screen-video-<pid>` track (one layer, the preset's bitrate and frame
@@ -70,8 +71,13 @@ pub struct ShareQuality {
 }
 
 impl ShareQuality {
-    /// `SCREEN_QUALITY_MAP` and the fps suffix; an unknown id is the default.
+    /// `SCREEN_QUALITY_MAP` and the fps suffix, or one of a phone's presets
+    /// ([`crate::layers::PHONE_SHARE`], [`crate::layers::PHONE_SHARE_LOW`]);
+    /// an unknown id is the default.
     pub fn of(id: &str) -> Self {
+        if let Some(phone) = crate::layers::phone_share_quality(id) {
+            return phone;
+        }
         let fps = if id.ends_with("60") { 60 } else { 30 };
         let (width, height, bitrate) = match id.trim_end_matches(char::is_numeric) {
             "1080p" => (1920, 1080, 8_000_000),
@@ -263,6 +269,48 @@ pub fn push_screen_frame(frame: &ScreenFrame<'_>) -> bool {
     }
 }
 
+/// One captured frame already in I420 (a phone's MediaProjection frames,
+/// read back from their texture), borrowed for the length of
+/// [`push_screen_i420`], with the box it is sent within.
+#[derive(Debug, Clone, Copy)]
+pub struct ScreenI420<'a> {
+    pub planes: [&'a [u8]; 3],
+    pub strides: [u32; 3],
+    pub width: u32,
+    pub height: u32,
+    pub quality: ShareQuality,
+}
+
+impl ScreenI420<'_> {
+    /// Each plane holds every row the size and its stride read.
+    pub fn is_valid(&self) -> bool {
+        let (w, h) = (self.width as usize, self.height as usize);
+        if !(1..=16_384).contains(&w) || !(1..=16_384).contains(&h) {
+            return false;
+        }
+        let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+        let fits = |plane: usize, row: usize, rows: usize| {
+            let stride = self.strides[plane] as usize;
+            stride >= row && self.planes[plane].len() >= (rows - 1) * stride + row
+        };
+        fits(0, w, h) && fits(1, cw, ch) && fits(2, cw, ch)
+    }
+}
+
+/// [`push_screen_frame`] for a frame already in I420: copied (or, when the
+/// box is smaller, box-filtered down) once into the share's buffer.
+pub fn push_screen_i420(frame: &ScreenI420<'_>) -> bool {
+    #[cfg(feature = "libwebrtc")]
+    {
+        live::push_i420(frame)
+    }
+    #[cfg(not(feature = "libwebrtc"))]
+    {
+        let _ = frame;
+        false
+    }
+}
+
 /// The share audio's format: 48 kHz stereo, 16-bit.
 pub const SHARE_AUDIO_RATE: u32 = 48_000;
 pub const SHARE_AUDIO_CHANNELS: u32 = 2;
@@ -299,7 +347,8 @@ pub(crate) mod live {
     use crate::engine::HwEncoder;
 
     use super::{
-        ScreenFrame, LOCAL_SCREEN_KEY, REPEAT_AFTER, SHARE_AUDIO_CHANNELS, SHARE_AUDIO_RATE,
+        ScreenFrame, ScreenI420, LOCAL_SCREEN_KEY, REPEAT_AFTER, SHARE_AUDIO_CHANNELS,
+        SHARE_AUDIO_RATE,
     };
     use crate::camera::{keepalive_luma, KEEPALIVE_EVERY, KEEPALIVE_SIZE, STALE_AFTER};
     use crate::engine::I420Frame;
@@ -316,6 +365,25 @@ pub(crate) mod live {
             stride_u: i32,
             dst_v: *mut u8,
             stride_v: i32,
+            dst_width: i32,
+            dst_height: i32,
+        ) -> i32;
+        // cpp/camera_i420.cpp.
+        fn yap_i420_scale(
+            src_y: *const u8,
+            src_stride_y: i32,
+            src_u: *const u8,
+            src_stride_u: i32,
+            src_v: *const u8,
+            src_stride_v: i32,
+            src_width: i32,
+            src_height: i32,
+            dst_y: *mut u8,
+            dst_stride_y: i32,
+            dst_u: *mut u8,
+            dst_stride_u: i32,
+            dst_v: *mut u8,
+            dst_stride_v: i32,
             dst_width: i32,
             dst_height: i32,
         ) -> i32;
@@ -429,6 +497,51 @@ pub(crate) mod live {
         if converted != 0 {
             return false;
         }
+        send(buffer)
+    }
+
+    pub(crate) fn push_i420(frame: &ScreenI420<'_>) -> bool {
+        if !frame.is_valid() {
+            return false;
+        }
+        let (w, h) = frame.quality.fit(frame.width, frame.height);
+        let mut buffer = I420Buffer::new(w, h);
+        let (sy, su, sv) = buffer.strides();
+        let (y, u, v) = buffer.data_mut();
+        let [py, pu, pv] = frame.planes;
+        let [ty, tu, tv] = frame.strides;
+        // SAFETY: `is_valid` checked each source plane against the size and
+        // its stride; the destination planes are the buffer's own, sized
+        // for `w` x `h`. libyuv reads and writes nothing else and keeps no
+        // pointer. Same size: a plain copy (libyuv's scaler copies then).
+        let converted = unsafe {
+            yap_i420_scale(
+                py.as_ptr(),
+                int(ty),
+                pu.as_ptr(),
+                int(tu),
+                pv.as_ptr(),
+                int(tv),
+                int(frame.width),
+                int(frame.height),
+                y.as_mut_ptr(),
+                int(sy),
+                u.as_mut_ptr(),
+                int(su),
+                v.as_mut_ptr(),
+                int(sv),
+                int(w),
+                int(h),
+            )
+        };
+        if converted != 0 {
+            return false;
+        }
+        send(buffer)
+    }
+
+    /// A converted frame to the preview and, while live, the encoder.
+    fn send(buffer: I420Buffer) -> bool {
         preview(&buffer);
         if !LIVE.load(Ordering::Acquire) {
             return false;
@@ -780,5 +893,38 @@ mod tests {
         };
         assert!(frame(32).is_valid());
         assert!(!frame(31).is_valid());
+    }
+
+    #[test]
+    fn an_i420_frame_should_need_every_row_of_each_plane() {
+        let y = [0u8; 8 * 4];
+        let c = [0u8; 4 * 2];
+        let frame = |y_len: usize, c_len: usize, stride_c: u32| ScreenI420 {
+            planes: [&y[..y_len], &c[..c_len], &c[..c_len]],
+            strides: [8, stride_c, stride_c],
+            width: 6,
+            height: 4,
+            quality: ShareQuality::of("720p30"),
+        };
+        assert!(frame(32, 8, 4).is_valid());
+        // The last row needs only its width, not the stride.
+        assert!(frame(30, 7, 4).is_valid());
+        assert!(!frame(29, 8, 4).is_valid());
+        assert!(!frame(32, 6, 4).is_valid());
+        // A chroma stride narrower than half the width.
+        assert!(!frame(32, 8, 2).is_valid());
+    }
+
+    #[test]
+    fn the_phone_presets_should_be_known_but_not_offered() {
+        use crate::layers::{PHONE_SHARE, PHONE_SHARE_LOW};
+        assert!(!SHARE_QUALITIES.contains(&PHONE_SHARE));
+        assert!(!SHARE_QUALITIES.contains(&PHONE_SHARE_LOW));
+        let full = ShareQuality::of(PHONE_SHARE);
+        let low = ShareQuality::of(PHONE_SHARE_LOW);
+        assert_eq!((full.width, full.height, full.fps), (1600, 720, 30));
+        assert_eq!((low.width, low.height, low.fps), (1200, 540, 15));
+        assert!(low.bitrate < full.bitrate);
+        assert!(full.bitrate < ShareQuality::of("720p30").bitrate);
     }
 }

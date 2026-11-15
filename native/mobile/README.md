@@ -180,7 +180,9 @@ once.
 | 840 to 1199dp | drawer (324dp) and chat side by side; members slide over the chat's right edge (320dp) |
 | 1200dp and up | members are a 280dp column of their own, shown until their key hides it                |
 
-Rotation is unlocked; a phone in landscape is the middle row.
+Rotation is unlocked; a phone in landscape is the middle row when it is
+840dp wide (an S22 Ultra in landscape is 823dp: the pager). Bottom sheets
+are at most 640dp wide, centred.
 
 Back steps through what is on top, in order: a sheet or stacked page
 (profile, settings), members, the chat, then the drawer, where the app
@@ -238,10 +240,13 @@ banner's jump (no unread backlog arrived while the app was closed).
 Not there yet:
 
 - The profile is a phone layout of the `Profile` fields, not the desktop's
-  `ProfileCard`: that card needs QtMultimedia and five desktop-only layers
-  (effects, frames, video banners, badges, platform icons). It rises as a
-  page of the stack; it moves into the shared bottom sheet (drag to
-  dismiss) when that lands.
+  `ProfileCard`, which needs QtMultimedia. A video banner shows its first
+  frame (the phone plays video only full screen). The profile board under
+  it is the desktop's (`Yap.Ui` `BoardCore`, `BoardRack` and the widgets in
+  `board/`), read-only: editing the board, and the desktop's widget picker
+  and options, stay on the desktop and web. It rises as a page of the
+  stack; it moves into the shared bottom sheet (drag to dismiss) when that
+  lands.
 - The rail has no unread-DM avatar keys under Home (the desktop's), no
   create-server tile and no shop row. Friends is the first row of Home's
   pane ("Settings and Friends").
@@ -521,12 +526,21 @@ video codecs an audio-only phone never runs.
   where it landed even when nothing moves (a conversation shorter than the
   screen), and the mentions counted as seen at the end start at the oldest
   row that stood at the top during the visit, not at the last screenful.
-- **Accessibility under sheets (open).** Rows behind an open sheet stay in
-  the accessibility tree. Qt Quick hides an item from accessibility only
-  when it is invisible (`Accessible.ignored` drops the item but keeps its
-  children), and the page under a sheet must stay drawn; hiding it needs
-  a change in Qt's Android accessibility bridge or a modal flag on
-  `QAccessibleQuickItem`, and a TalkBack pass on a device.
+- **Accessibility under sheets.** Qt Quick drops an item from the
+  accessibility tree only when it is invisible, and Qt's Android bridge
+  lists every child an interface has, so the page under a sheet (drawn
+  under the scrim) stayed in TalkBack's reach. `cpp/a11y.h` installs the
+  app's own accessibility interfaces (Qt Quick's, with the children
+  filtered) through `QAccessible::installFactory`; no Qt rebuild, since the
+  Android app uses Qt's stock packages. `A11y.modal: true` on a surface
+  (BottomSheet, the account panel, the image viewer, the incoming call)
+  leaves only it and its ancestors in the tree while it is up and moves
+  TalkBack's focus into it; `A11y.hidden: true` drops a subtree (the drawer
+  under the chat on a phone, the chat while the drawer or members cover
+  it). Qt's bridge offers no long press, so a message row's double tap
+  opens its sheet under TalkBack. Checked with TalkBack on an S22 (Android
+  16): the drawer reads only the drawer, the message sheet wraps within
+  itself, and its actions work.
 
 ## Licensing: owner decisions
 
@@ -967,9 +981,10 @@ without libwebrtc. What is the phone's own:
   are the defaults: the phone has no page for the output and per-person
   volumes, sensitivity or processing yet. The soundboard's clips and
   Listen Together's stream play through `yap-audio` on the app's speaker
-  (`yap-speaker`, AAudio) as call audio. No
-  camera, screen share or remote video yet: the phone asks for no video,
-  so none is pulled.
+  (`yap-speaker`, AAudio) as call audio. Video: remote cameras and shares,
+  the phone's own camera and its screen share (MediaProjection after
+  Android's consent, with other apps' sound when asked), each described in
+  its module (`rust/src/video.rs`, `camera.rs`, `screen.rs`).
 - **Start-up.** libwebrtc needs the process's `JavaVM`, the application
   context and its Java side (`livekit.org.webrtc.*`, in the prebuilt's
   `libwebrtc.jar`). `VoiceShim.install` calls its `nativeInit` at start,

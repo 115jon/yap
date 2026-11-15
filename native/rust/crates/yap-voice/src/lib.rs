@@ -166,10 +166,10 @@ pub use machine::{
 pub use roster::{Member, Roster};
 pub use sfu::{LayerUpdate, Pulled, Pushed, Sfu, SfuError};
 pub use share::{
-    push_screen_audio, push_screen_frame, CaptureEnded, NoCapture, ScreenFrame, ShareCaptured,
-    ShareCapturer, ShareEncoding, ShareEnd, ShareInfo, ShareNotice, SharePublished, ShareQuality,
-    ShareRequest, SourceKind, DEFAULT_SHARE_QUALITY, LOCAL_SCREEN_KEY, SHARE_AUDIO_CHANNELS,
-    SHARE_AUDIO_RATE, SHARE_QUALITIES,
+    push_screen_audio, push_screen_frame, push_screen_i420, CaptureEnded, NoCapture, ScreenFrame,
+    ScreenI420, ShareCaptured, ShareCapturer, ShareEncoding, ShareEnd, ShareInfo, ShareNotice,
+    SharePublished, ShareQuality, ShareRequest, SourceKind, DEFAULT_SHARE_QUALITY,
+    LOCAL_SCREEN_KEY, SHARE_AUDIO_CHANNELS, SHARE_AUDIO_RATE, SHARE_QUALITIES,
 };
 pub use spatial::{MapSeat, SpatialLocal, SpatialMap, SpatialState};
 pub use still::{share_still, Still};

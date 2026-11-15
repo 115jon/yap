@@ -5,13 +5,14 @@ import Yap.Platform
 import Yap.Ui
 
 // The call's video at phone size (the desktop's stage and grid,
-// VoiceGrid.tsx): everyone else's camera that is on, every share, and our
-// own camera's self-view (from the tap that turns it on, mirrored for the
-// front camera), as tiles from the shared VoiceTileModel. Two to a row at 16:9; a tap puts a
+// VoiceGrid.tsx): everyone else's camera that is on, every share, our own
+// camera's self-view (from the tap that turns it on, mirrored for the
+// front camera) and our own share as it is sent, as tiles from the shared
+// VoiceTileModel. Two to a row at 16:9; a tap puts a
 // tile on stage, full width above the rest, and a second tap takes it off.
 // A camera is cropped to its tile, a share letterboxed on black. A share
 // nobody here watches yet shows its owner's still under a scrim with
-// Watch; a watched one has a key to stop. The roster below still lists
+// Watch; a watched one has a key to stop, and ours a key to stop sharing. The roster below still lists
 // everyone; nothing shows here until a video does. What is pulled, at which
 // layer, follows each tile's size (seams/VideoSurface.qml).
 Item {
@@ -28,11 +29,11 @@ Item {
     // Tiles with something to show (the model's rows change in place).
     property int count: 0
 
-    // Ours: the camera only (the phone shares no screen yet), shown while
-    // it is wanted, before the call has pushed it.
+    // Ours: the camera, shown while it is wanted, before the call has
+    // pushed it; the share while it is live (the model lists it then).
     function shows(kind, me, video) {
-        if (me)
-            return kind === "person" && (video || Voice.cameraWanted)
+        if (me && kind === "person")
+            return video || Voice.cameraWanted
         return kind === "screen" || video
     }
     function recount() {
@@ -106,8 +107,9 @@ Item {
                     readonly property bool screen: kind === "screen"
                     readonly property bool shown: root.shows(kind, me, video)
                     readonly property bool onStage: root.staged === tileId
-                    readonly property bool watchPrompt: screen && !watching
-                    readonly property bool showsVideo: shown && videoKey.length > 0 && (!screen || watching)
+                    // Ours shows as it is sent; anyone else's once watched.
+                    readonly property bool watchPrompt: screen && !me && !watching
+                    readonly property bool showsVideo: shown && videoKey.length > 0 && (!screen || me || watching)
                     readonly property bool playing: showsVideo && surface.item !== null && surface.item.hasFrame
                     readonly property bool talking: speaking && !muted
 
@@ -130,7 +132,7 @@ Item {
                         border.color: tile.onStage ? Theme.accentInk : Theme.line
                         clip: true
                         Accessible.role: Accessible.Button
-                        Accessible.name: tile.screen ? qsTr("%1's screen").arg(tile.name)
+                        Accessible.name: tile.screen ? (tile.me ? qsTr("Your screen") : qsTr("%1's screen").arg(tile.name))
                             : tile.me ? qsTr("Your camera") : qsTr("%1's camera").arg(tile.name)
 
                         // Before the first frame, and for a share not watched:
@@ -171,7 +173,7 @@ Item {
                                 crop: !tile.screen
                                 // As a mirror shows us; everyone else sees
                                 // it the right way round.
-                                mirror: tile.me && Native.cameraFront
+                                mirror: tile.me && !tile.screen && Native.cameraFront
                             }
                         }
                         Spinner {
@@ -217,9 +219,27 @@ Item {
                             }
                         }
 
+                        // Our share: stop sharing.
+                        IconKey {
+                            visible: tile.screen && tile.me
+                            anchors.top: parent.top
+                            anchors.right: parent.right
+                            anchors.margins: 4
+                            size: 32
+                            iconName: "close"
+                            tone: "rest"
+                            tip: qsTr("Stop sharing")
+                            onClicked: {
+                                Native.haptic(Native.Tick)
+                                if (tile.onStage)
+                                    root.stage("", "")
+                                Voice.stopShare()
+                            }
+                        }
+
                         // A watched share: stop watching.
                         IconKey {
-                            visible: tile.screen && tile.watching
+                            visible: tile.screen && !tile.me && tile.watching
                             anchors.top: parent.top
                             anchors.right: parent.right
                             anchors.margins: 4

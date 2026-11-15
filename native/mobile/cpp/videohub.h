@@ -16,8 +16,9 @@
 // yap_voice::demand Limits::phone): the device's thermal status and whether
 // its network is metered, checked every 10 s while a view exists, and
 // whether the app is in the background, as it changes. The poll also runs
-// while the phone's camera captures (its encoding follows the same two),
-// and the heat goes to Native.thermalStatus for the shell.
+// while the phone's camera captures or its screen is shared (their
+// encodings follow the same two), and the heat goes to Native.thermalStatus
+// for the shell.
 
 #include <QtCore/QHash>
 #include <QtCore/QList>
@@ -87,8 +88,11 @@ public:
   // Any thread: the feed for `key` if something shows it.
   VideoFeed* wantedFeed(const QString& key);
 
-  // GUI thread: the phone's camera captures (Native.cameraCapture).
-  void setCapturing(bool on);
+  // What captures into the call.
+  enum Capture { Camera = 1, Screen = 2 };
+  // GUI thread: the phone's camera captures (Native.cameraCapture), or its
+  // screen is shared (Native.screenCapture).
+  void setCapturing(Capture source, bool on);
 
 private:
   explicit VideoHub(QObject* parent = nullptr);
@@ -101,7 +105,7 @@ private:
   // sees one deleted.
   QHash<QString, VideoFeed*> m_feeds;
   int m_views = 0;
-  bool m_capturing = false;
+  int m_capturing = 0; // Capture bits
   QTimer m_poll;
   int m_reported[3] = { -2, -2, -2 };
 };

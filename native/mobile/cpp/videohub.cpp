@@ -123,7 +123,7 @@ void VideoHub::attach(const QString& key, VideoView* view)
     }
   }
   feed->attach(view);
-  if (m_views++ == 0 && !m_capturing) {
+  if (m_views++ == 0 && m_capturing == 0) {
     reportLimits();
     m_poll.start();
   }
@@ -141,18 +141,17 @@ void VideoHub::detach(const QString& key, VideoView* view)
   if (!feed)
     return;
   feed->detach(view);
-  if (--m_views == 0 && !m_capturing)
+  if (--m_views == 0 && m_capturing == 0)
     m_poll.stop();
 }
 
-void VideoHub::setCapturing(bool on)
+void VideoHub::setCapturing(Capture source, bool on)
 {
-  if (on == m_capturing)
+  const int before = m_capturing;
+  m_capturing = on ? (m_capturing | source) : (m_capturing & ~source);
+  if ((before != 0) == (m_capturing != 0) || m_views > 0)
     return;
-  m_capturing = on;
-  if (m_views > 0)
-    return;
-  if (on) {
+  if (m_capturing != 0) {
     reportLimits();
     m_poll.start();
   } else {
@@ -176,9 +175,9 @@ void VideoHub::reportLimits()
   const bool background = state == Qt::ApplicationSuspended || state == Qt::ApplicationHidden;
   int thermal = -1;
   bool metered = false;
-  // Only asked while something shows video or the camera runs (the poll
+  // Only asked while something shows video or a capture runs (the poll
   // runs then); the app state is reported whenever it changes.
-  if (m_views > 0 || m_capturing) {
+  if (m_views > 0 || m_capturing != 0) {
     const QJniObject context = QNativeInterface::QAndroidApplication::context();
     // PowerManager.getCurrentThermalStatus is API 29.
     if (QNativeInterface::QAndroidApplication::sdkVersion() >= 29) {

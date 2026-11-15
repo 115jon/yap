@@ -69,12 +69,15 @@ include(${DESKTOP}/rust/crates/yap-ui/cpp/yap_ui.cmake)
 
 qt_add_executable(yapqt
   cpp/main.cpp
+  # TalkBack under sheets (a11y.h).
+  cpp/a11y.cpp cpp/a11y.h
   cpp/native.cpp cpp/native.h
   cpp/push.cpp
   cpp/links.cpp
   cpp/keystore.cpp
   cpp/voice.cpp
   cpp/camera.cpp
+  cpp/screen.cpp
   cpp/calls.cpp
   # Remote call video: the newest frame per key and the item that draws it.
   cpp/videohub.cpp cpp/videohub.h
