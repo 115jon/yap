@@ -410,16 +410,18 @@ Column {
             rowId: "delete-account"
             layout: "inline"
             property bool armed: false
-            readonly property var deletion: JSON.parse(Session.deletion.length > 0 ? Session.deletion : "{}")
+            // The open strip's state (DeleteAccountState), or null.
+            readonly property var deletion: deleteStrip.item ? deleteStrip.item.deletion : null
 
             function close() {
+                if (deletion)
+                    deletion.dismiss()
                 armed = false
-                Session.dismissDeleteAccount()
                 root.host.popEscape(deleteRow)
                 deleteKey.forceActiveFocus()
             }
             function dismiss() {
-                if (!deletion.deleting)
+                if (!deletion || !deletion.busy)
                     close()
             }
             Component.onDestruction: root.host.popEscape(deleteRow)
@@ -436,11 +438,10 @@ Column {
                 }
             }
             footer: Loader {
+                id: deleteStrip
                 width: deleteRow.width
                 active: deleteRow.armed
                 sourceComponent: DeleteStrip {
-                    busy: deleteRow.deletion.deleting === true
-                    error: deleteRow.deletion.deleteError ?? ""
                     onCancelled: deleteRow.close()
                 }
             }
@@ -449,21 +450,20 @@ Column {
 
     // The delete confirm: ConfirmStrip's look (danger edge, Cancel and the
     // solid danger key) with the username field between the warning and
-    // the keys. The key works only once the field names this account.
+    // the keys. The key works only once the field names this account
+    // (DeleteAccountState, shared with the phone).
     component DeleteStrip: Item {
         id: strip
 
-        property bool busy: false
-        property string error
-        // Fixed as the strip opens, as the web's warning does.
-        readonly property string deleteOn: Session.deletionDateFromNow()
-        readonly property bool matches: Session.confirmsUsername(confirmField.text)
+        readonly property DeleteAccountState deletion: DeleteAccountState {
+            typed: confirmField.text
+        }
+        readonly property bool busy: deletion.busy
 
         signal cancelled()
 
         function confirm() {
-            if (!strip.busy && strip.matches)
-                Session.deleteAccount(confirmField.text)
+            strip.deletion.submit()
         }
 
         width: parent ? parent.width : 0
@@ -491,7 +491,7 @@ Column {
                 Text {
                     width: parent.width
                     textFormat: Text.PlainText
-                    text: qsTr("Delete your account on %1?").arg(strip.deleteOn)
+                    text: strip.deletion.title
                     wrapMode: Text.Wrap
                     color: Theme.ink1
                     font: Theme.type.setting
@@ -500,7 +500,7 @@ Column {
                 Text {
                     width: parent.width
                     textFormat: Text.PlainText
-                    text: qsTr("You leave every server, are shown to others as “Deleted user” and are signed out everywhere now. On that date your profile, board, friends, settings and uploaded files are deleted. Messages you sent stay, from “Deleted user”. Sign in before then to restore your account. Your Kova sign-in is not deleted.")
+                    text: strip.deletion.warning
                     wrapMode: Text.Wrap
                     color: Theme.ink1
                     font: Theme.type.description
@@ -509,7 +509,7 @@ Column {
                 Text {
                     width: parent.width
                     textFormat: Text.PlainText
-                    text: qsTr("Type @%1 to confirm.").arg(Session.meUsername)
+                    text: strip.deletion.prompt
                     wrapMode: Text.Wrap
                     color: Theme.ink2
                     font: Theme.type.description
@@ -522,7 +522,7 @@ Column {
                     enabled: !strip.busy
                     placeholderText: Session.meUsername
                     inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData
-                    Accessible.name: qsTr("Type %1 to confirm").arg(Session.meUsername)
+                    Accessible.name: strip.deletion.fieldName
                     Keys.onReturnPressed: strip.confirm()
                     Keys.onEnterPressed: strip.confirm()
                     Text {
@@ -545,14 +545,14 @@ Column {
                     KitButton {
                         variant: "danger"
                         text: qsTr("Delete account")
-                        enabled: strip.matches
+                        enabled: strip.deletion.matches
                         loading: strip.busy
                         onClicked: strip.confirm()
                     }
                 }
                 RowError {
                     above: 0
-                    text: strip.error
+                    text: strip.deletion.error
                 }
             }
         }

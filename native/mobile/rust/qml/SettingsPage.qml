@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Templates as T
 import Yap.Mobile
 import com.yap.mobile
 import Yap.Ui
@@ -11,10 +12,15 @@ import Yap.Ui
 // Appearance (the core's themes, kept on this device in appearance.json
 // and synced to the account when asked); Text size (a factor over the
 // system's, this phone's own); Notifications (the push shim's permission
-// state); Devices (the account's sessions, others signed out after a
-// confirm); About (and the open source licences, LicensesPage); Sign out,
-// confirmed in place; Delete account, behind the username typed to confirm
-// it. Opened from the account row at the drawer's foot.
+// state, then the UI sounds: the master switch, the volume, each category
+// and Test, kept on this phone as the desktop keeps its own); Soundboard
+// (this phone's playback volume); Privacy and safety (Share my activity
+// and the media filter, saved to the account); Plan (the three plans,
+// read-only until billing ships); Devices (the account's sessions, others
+// signed out after a confirm, SessionsModel); About (and the open source
+// licences, LicensesPage); Sign out, confirmed in place; Delete account,
+// behind the username typed to confirm it (DeleteAccountState). Opened
+// from the account row at the drawer's foot.
 Rectangle {
     id: root
 
@@ -43,22 +49,49 @@ Rectangle {
         { factor: 1.3, label: qsTr("Larger") }
     ]
 
-    readonly property var sessions: {
+    // Devices: the list, its states and the revoke (shared with the
+    // desktop's SessionsPanel).
+    readonly property SessionsModel devices: SessionsModel {}
+
+    // This phone's UI sound settings (sound.rs), read again after each
+    // change; empty where the app keeps none (a host build).
+    property var sounds: readSounds()
+    function readSounds() {
+        const json = Settings.soundSettings()
         try {
-            return JSON.parse(Settings.sessions)
+            return json.length > 0 ? JSON.parse(json) : null
         } catch (e) {
-            return []
+            return null
         }
     }
-    readonly property var revoke: {
+    function setSound(key, value) {
+        Settings.setSoundSetting(key, value)
+        sounds = readSounds()
+    }
+    // The soundboard's playback volume (0..100), -1 where the app keeps
+    // none here.
+    property int boardVolume: Apps.soundboardVolume()
+
+    // The media filter's levels (the desktop's PrivacyPanel).
+    readonly property var mediaLevels: [
+        { value: "high", label: qsTr("High"), badge: qsTr("G only"), desc: qsTr("Shows the strictest results for general audiences.") },
+        { value: "medium", label: qsTr("Medium"), badge: qsTr("G + PG"), desc: qsTr("Allows a little more expressiveness while staying broadly safe.") },
+        { value: "low", label: qsTr("Low"), badge: qsTr("Up to PG-13"), desc: qsTr("Includes more mature jokes and reactions without going fully open.") },
+        { value: "off", label: qsTr("Off"), badge: qsTr("Up to R"), desc: qsTr("Shows the widest provider-approved range. Explicit nudity is still excluded.") }
+    ]
+    // The level shown: the one being saved, else the account's.
+    readonly property string mediaFilter: Settings.mediaFilterSaving.length > 0 ? Settings.mediaFilterSaving
+        : Settings.mediaFilter.length > 0 ? Settings.mediaFilter : "high"
+
+    // The plan in force and the three plans (the core's plan_json).
+    readonly property var plan: {
         try {
-            return JSON.parse(Extras.account)
+            return Settings.plan.length > 0 ? JSON.parse(Settings.plan) : null
         } catch (e) {
-            return {}
+            return null
         }
     }
-    // The other device whose Sign out is asking first, or empty.
-    property string armedSession: ""
+
     property bool signOutArmed: false
     property bool deleteArmed: false
 
@@ -73,7 +106,10 @@ Rectangle {
         Translate { x: root.backProgress * root.width * 0.1 }
     ]
 
-    Component.onCompleted: Settings.loadSessions()
+    Component.onCompleted: {
+        devices.load()
+        Settings.loadBilling()
+    }
 
     PageHeader {
         id: header
@@ -336,14 +372,163 @@ Rectangle {
                     // else the app's notification settings (the shim).
                     onToggled: Native.requestNotifications()
                 }
+                // The UI sounds, on this phone only (the desktop keeps its
+                // own); the categories rest while Sound effects is off.
+                Column {
+                    width: parent.width
+                    visible: root.sounds !== null
+                    SwitchItem {
+                        text: qsTr("Sound effects")
+                        description: qsTr("Turns every in-app sound on or off.")
+                        checked: root.sounds?.sounds ?? true
+                        onToggled: root.setSound("sounds", checked ? 0 : 1)
+                    }
+                    VolumeRow {
+                        text: qsTr("Sound volume")
+                        disabled: !(root.sounds?.sounds ?? true)
+                        value: root.sounds?.soundVolume ?? 100
+                        onCommitted: value => root.setSound("soundVolume", value)
+                    }
+                    Repeater {
+                        model: [
+                            { key: "soundNotifications", text: qsTr("Notification sounds"), description: qsTr("A chime for mentions, replies and DMs.") },
+                            { key: "soundVoiceJoinLeave", text: qsTr("Voice join and leave"), description: qsTr("A tone when someone joins or leaves your voice channel.") },
+                            { key: "soundConnect", text: qsTr("Connect and disconnect"), description: qsTr("A chime when you join or leave a voice channel.") },
+                            { key: "soundMute", text: qsTr("Mute and deafen"), description: qsTr("A click when you mute or deafen.") },
+                            { key: "soundCalls", text: qsTr("Calls"), description: qsTr("The ringback, connect and end tones of a DM call. Incoming calls ring with your phone's ringtone.") },
+                            { key: "soundScreenShare", text: qsTr("Screen share"), description: qsTr("A tone when a screen share starts or stops.") }
+                        ]
+                        delegate: SwitchItem {
+                            required property var modelData
+                            readonly property bool on: root.sounds?.[modelData.key] ?? true
+                            text: modelData.text
+                            description: modelData.description
+                            checked: on
+                            disabled: !(root.sounds?.sounds ?? true)
+                            onToggled: root.setSound(modelData.key, on ? 0 : 1)
+                        }
+                    }
+                    PageRow {
+                        text: qsTr("Test notification sound")
+                        iconName: "play"
+                        onOpened: Settings.playTestSound()
+                    }
+                }
             }
 
             Section {
                 number: 5
+                title: qsTr("Soundboard")
+                visible: root.boardVolume >= 0
+                VolumeRow {
+                    text: qsTr("Soundboard volume")
+                    description: qsTr("How loud sounds from the soundboard play on this phone.")
+                    value: Math.max(0, root.boardVolume)
+                    onCommitted: value => {
+                        Apps.setSoundboardVolume(value)
+                        root.boardVolume = value
+                    }
+                }
+            }
+
+            // Privacy and safety (the desktop's PrivacyPanel), both saved
+            // to the account at once and rolled back with the reason if it
+            // does not take them.
+            Section {
+                number: 6
+                title: qsTr("Privacy and safety")
+                SwitchItem {
+                    text: qsTr("Share my activity")
+                    description: qsTr("Show what you're playing to people who share a server, a DM or a friendship with you. Invisible always hides it.")
+                    checked: Settings.shareActivity
+                    locked: Settings.shareActivitySaving
+                    onToggled: Settings.shareMyActivity(!Settings.shareActivity)
+                }
+                ErrorText { text: Settings.shareActivityError }
+                Item { width: 1; height: 12 }
+                Column {
+                    width: parent.width
+                    bottomPadding: 12
+                    spacing: 2
+                    Text {
+                        width: parent.width
+                        textFormat: Text.PlainText
+                        text: qsTr("Media filter")
+                        color: Theme.ink1
+                        font: Theme.type.setting
+                    }
+                    Text {
+                        width: parent.width
+                        textFormat: Text.PlainText
+                        text: qsTr("Applies to GIF, sticker, clip and meme search and trending. Where a provider supports it, Yap sends your account ID so results match your choice.")
+                        wrapMode: Text.Wrap
+                        color: Theme.ink3
+                        font: Theme.type.caption
+                    }
+                }
+                Segmented {
+                    width: parent.width
+                    accessibleName: qsTr("Media filter")
+                    options: root.mediaLevels.map(level => level.label)
+                    current: Math.max(0, root.mediaLevels.findIndex(level => level.value === root.mediaFilter))
+                    onPicked: index => Settings.changeMediaFilter(root.mediaLevels[index].value)
+                }
+                Item { width: 1; height: 8 }
+                Text {
+                    readonly property var level: root.mediaLevels.find(l => l.value === root.mediaFilter) ?? root.mediaLevels[0]
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    text: level.badge + " · " + level.desc
+                        + (root.mediaFilter === "high" ? " " + qsTr("Media marked sensitive stays hidden until you show it.") : "")
+                    wrapMode: Text.Wrap
+                    color: Theme.ink3
+                    font: Theme.type.caption
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: text
+                }
+                ErrorText { text: Settings.mediaFilterError }
+            }
+
+            // The plan in force and the three plans (the desktop's Yap
+            // Loud page): no payments yet, so Upgrade stays off with
+            // "Coming soon" until billing answers.
+            Section {
+                number: 7
+                title: qsTr("Plan")
+                Column {
+                    width: parent.width
+                    bottomPadding: 16
+                    spacing: 2
+                    Text {
+                        width: parent.width
+                        textFormat: Text.PlainText
+                        text: root.plan ? root.plan.label : qsTr("Loading…")
+                        wrapMode: Text.Wrap
+                        color: Theme.ink1
+                        font: Theme.type.setting
+                    }
+                    Text {
+                        width: parent.width
+                        visible: text.length > 0
+                        textFormat: Text.PlainText
+                        text: root.plan ? root.plan.description : ""
+                        wrapMode: Text.Wrap
+                        color: Theme.ink3
+                        font: Theme.type.caption
+                    }
+                }
+                TierCards {
+                    width: parent.width
+                    plan: root.plan
+                }
+            }
+
+            Section {
+                number: 8
                 title: qsTr("Devices")
                 Loader {
                     width: parent.width
-                    active: Settings.sessionsState === "loading" && root.sessions.length === 0
+                    active: root.devices.loadingFirst
                     visible: active
                     sourceComponent: Item {
                         height: 64
@@ -355,12 +540,12 @@ Rectangle {
                 }
                 Column {
                     width: parent.width
-                    visible: Settings.sessionsState === "error"
+                    visible: root.devices.failed
                     spacing: 8
                     Text {
                         width: parent.width
                         textFormat: Text.PlainText
-                        text: Settings.sessionsError
+                        text: root.devices.error
                         wrapMode: Text.Wrap
                         color: Theme.dangerInk
                         font: Theme.type.description
@@ -368,20 +553,19 @@ Rectangle {
                     KitButton {
                         iconName: "refresh"
                         text: qsTr("Try again")
-                        loading: Settings.sessionsState === "loading"
-                        onClicked: Settings.loadSessions()
+                        loading: root.devices.loading
+                        onClicked: root.devices.load()
                     }
                 }
                 Repeater {
                     // This phone first.
-                    model: Settings.sessionsState === "error" ? []
-                        : root.sessions.filter(s => s.current).concat(root.sessions.filter(s => !s.current))
+                    model: root.devices.failed ? [] : root.devices.ordered
                     delegate: SessionItem {}
                 }
             }
 
             Section {
-                number: 6
+                number: 9
                 title: qsTr("About")
                 InfoRow {
                     text: qsTr("Version")
@@ -438,7 +622,7 @@ Rectangle {
             // confirm it, then the request; once scheduled this phone signs
             // out as Sign out does. A refusal stays under the keys.
             Section {
-                number: 7
+                number: 10
                 title: qsTr("Delete account")
                 Text {
                     width: parent.width
@@ -469,7 +653,6 @@ Rectangle {
                         onCancelled: {
                             scroll.revealEnd = false
                             root.deleteArmed = false
-                            Session.dismissDeleteAccount()
                         }
                     }
                 }
@@ -479,30 +662,25 @@ Rectangle {
 
     // The delete confirm: InlineConfirm's look with the username field
     // between the warning and the keys; Delete account works only once the
-    // field names this account (any case, an optional @).
+    // field names this account (DeleteAccountState, shared with the
+    // desktop).
     component DeleteConfirm: Item {
         id: confirm
 
-        readonly property var deletion: {
-            try {
-                return JSON.parse(Session.deletion.length > 0 ? Session.deletion : "{}")
-            } catch (e) {
-                return {}
-            }
+        readonly property DeleteAccountState deletion: DeleteAccountState {
+            typed: nameField.text
         }
-        readonly property bool busy: deletion.deleting === true
-        readonly property string error: deletion.deleteError ?? ""
-        // Fixed as it opens, as the web's warning does.
-        readonly property string deleteOn: Session.deletionDateFromNow()
-        readonly property bool matches: Session.confirmsUsername(nameField.text)
+        readonly property bool busy: deletion.busy
 
         signal cancelled()
 
         function submit() {
-            if (confirm.busy || !confirm.matches)
-                return
-            Native.haptic(Native.Confirm)
-            Session.deleteAccount(nameField.text)
+            if (confirm.deletion.submit())
+                Native.haptic(Native.Confirm)
+        }
+        function cancel() {
+            confirm.deletion.dismiss()
+            confirm.cancelled()
         }
 
         width: parent ? parent.width : 0
@@ -528,7 +706,7 @@ Rectangle {
                 Text {
                     width: parent.width
                     textFormat: Text.PlainText
-                    text: qsTr("Delete your account on %1?").arg(confirm.deleteOn)
+                    text: confirm.deletion.title
                     wrapMode: Text.Wrap
                     color: Theme.ink1
                     font: Theme.type.setting
@@ -538,7 +716,7 @@ Rectangle {
                 Text {
                     width: parent.width
                     textFormat: Text.PlainText
-                    text: qsTr("You leave every server, are shown to others as “Deleted user” and are signed out everywhere now. On that date your profile, board, friends, settings and uploaded files are deleted. Messages you sent stay, from “Deleted user”. Sign in before then to restore your account. Your Kova sign-in is not deleted.")
+                    text: confirm.deletion.warning
                     wrapMode: Text.Wrap
                     color: Theme.ink1
                     font: Theme.type.description
@@ -548,7 +726,7 @@ Rectangle {
                 Text {
                     width: parent.width
                     textFormat: Text.PlainText
-                    text: qsTr("Type @%1 to confirm.").arg(Session.meUsername)
+                    text: confirm.deletion.prompt
                     wrapMode: Text.Wrap
                     color: Theme.ink2
                     font: Theme.type.description
@@ -560,7 +738,7 @@ Rectangle {
                     enabled: !confirm.busy
                     placeholderText: "@" + Session.meUsername
                     inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData
-                    Accessible.name: qsTr("Type %1 to confirm").arg(Session.meUsername)
+                    Accessible.name: confirm.deletion.fieldName
                     onAccepted: confirm.submit()
                 }
                 Row {
@@ -572,23 +750,23 @@ Rectangle {
                         variant: "secondary"
                         text: qsTr("Cancel")
                         enabled: !confirm.busy
-                        onClicked: confirm.cancelled()
+                        onClicked: confirm.cancel()
                     }
                     KitButton {
                         width: (parent.width - parent.spacing) / 2
                         size: "lg"
                         variant: "danger"
                         text: qsTr("Delete account")
-                        enabled: confirm.matches
+                        enabled: confirm.deletion.matches
                         loading: confirm.busy
                         onClicked: confirm.submit()
                     }
                 }
                 Text {
                     width: parent.width
-                    visible: confirm.error.length > 0
+                    visible: confirm.deletion.error.length > 0
                     textFormat: Text.PlainText
-                    text: confirm.error
+                    text: confirm.deletion.error
                     wrapMode: Text.Wrap
                     color: Theme.dangerInk
                     font: Theme.type.caption
@@ -738,21 +916,25 @@ Rectangle {
         property bool checked: false
         // Shown, but a tap changes nothing.
         property bool locked: false
+        // Off for now (its master switch is off): dimmed and locked.
+        property bool disabled: false
+        readonly property bool inert: locked || disabled
         signal toggled()
         width: parent ? parent.width : 0
         height: Math.max(56, itemLabels.implicitHeight + 16)
+        opacity: disabled ? 0.45 : 1
         Accessible.role: Accessible.CheckBox
         Accessible.name: text
         Accessible.description: description
         Accessible.checkable: true
         Accessible.checked: checked
-        Accessible.onPressAction: if (!item.locked) item.toggled()
+        Accessible.onPressAction: if (!item.inert) item.toggled()
         Rectangle {
             anchors.fill: parent
             anchors.leftMargin: -8
             anchors.rightMargin: -8
             radius: Theme.radius
-            color: itemTap.pressed && !item.locked ? Theme.tint2 : "transparent"
+            color: itemTap.pressed && !item.inert ? Theme.tint2 : "transparent"
             Behavior on color { ColorAnimation { duration: Theme.dur1 } }
         }
         Column {
@@ -793,7 +975,7 @@ Rectangle {
         TapHandler {
             id: itemTap
             onTapped: {
-                if (item.locked)
+                if (item.inert)
                     return
                 Native.haptic(Native.Tick)
                 item.toggled()
@@ -985,7 +1167,7 @@ Rectangle {
     component SessionItem: Column {
         id: device
         required property var modelData
-        readonly property bool armed: root.armedSession === modelData.id
+        readonly property bool armed: root.devices.armed === modelData.id
         width: parent ? parent.width : 0
         bottomPadding: armed ? 12 : 0
         Item {
@@ -1052,7 +1234,7 @@ Rectangle {
                 variant: "secondary"
                 text: qsTr("Sign out")
                 Accessible.name: qsTr("Sign out %1").arg(device.modelData.title)
-                onClicked: root.armedSession = device.modelData.id
+                onClicked: root.devices.arm(device.modelData.id)
             }
         }
         Loader {
@@ -1062,12 +1244,129 @@ Rectangle {
             sourceComponent: InlineConfirm {
                 consequence: qsTr("%1 will be signed out and need to sign in again.").arg(device.modelData.title)
                 confirmLabel: qsTr("Sign out device")
-                busy: root.revoke.revoking === device.modelData.id
-                error: root.revoke.revokeErrorId === device.modelData.id ? (root.revoke.revokeError ?? "") : ""
-                onCancelled: root.armedSession = ""
-                onConfirmed: Extras.revokeSession(device.modelData.id)
+                busy: root.devices.busy(device.modelData.id)
+                error: root.devices.errorFor(device.modelData.id)
+                onCancelled: root.devices.disarm()
+                onConfirmed: root.devices.revoke(device.modelData.id)
             }
         }
+    }
+
+    // A volume, 0 to 100: the label (and an optional description) over the
+    // range and its number. Saved once the finger rests (250 ms) or lifts.
+    component VolumeRow: Column {
+        id: vol
+        property string text
+        property string description
+        property int value: 0
+        property bool disabled: false
+        signal committed(int value)
+        width: parent ? parent.width : 0
+        topPadding: 8
+        bottomPadding: 4
+        opacity: disabled ? 0.45 : 1
+        Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            text: vol.text
+            wrapMode: Text.Wrap
+            color: Theme.ink1
+            font: Theme.type.setting
+        }
+        Text {
+            width: parent.width
+            visible: vol.description.length > 0
+            topPadding: 2
+            textFormat: Text.PlainText
+            text: vol.description
+            wrapMode: Text.Wrap
+            color: Theme.ink3
+            font: Theme.type.caption
+        }
+        Item {
+            width: parent.width
+            height: 48
+            T.Slider {
+                id: range
+                anchors.left: parent.left
+                anchors.right: volNum.left
+                anchors.rightMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                height: 48
+                from: 0
+                to: 100
+                stepSize: 1
+                snapMode: T.Slider.SnapAlways
+                enabled: !vol.disabled
+                Accessible.role: Accessible.Slider
+                Accessible.name: vol.text
+                Accessible.description: Math.round(value) + "%"
+                onMoved: rest.restart()
+                onPressedChanged: if (!pressed && rest.running) {
+                    rest.stop()
+                    vol.committed(Math.round(value))
+                }
+                Binding on value {
+                    when: !range.pressed && !rest.running
+                    value: vol.value
+                    restoreMode: Binding.RestoreNone
+                }
+                background: Rectangle {
+                    x: range.leftPadding
+                    y: (range.height - height) / 2
+                    width: range.availableWidth
+                    height: 6
+                    radius: 1
+                    color: Theme.tint3
+                    Rectangle {
+                        width: range.visualPosition * parent.width
+                        height: parent.height
+                        radius: 1
+                        color: Theme.accentInk
+                    }
+                }
+                handle: Rectangle {
+                    x: range.leftPadding + range.visualPosition * (range.availableWidth - width)
+                    y: (range.height - height) / 2
+                    width: 14
+                    height: 30
+                    radius: Theme.radius
+                    color: Theme.ink1
+                }
+                Timer {
+                    id: rest
+                    interval: 250
+                    onTriggered: vol.committed(Math.round(range.value))
+                }
+                // The page closed inside the wait: keep the last value.
+                Component.onDestruction: if (rest.running) vol.committed(Math.round(range.value))
+            }
+            Text {
+                id: volNum
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: 36
+                horizontalAlignment: Text.AlignRight
+                textFormat: Text.PlainText
+                text: Math.round(range.value)
+                color: Theme.ink2
+                font: Theme.type.num
+                Accessible.ignored: true
+            }
+        }
+    }
+
+    // A refusal under the row it belongs to, while there is one.
+    component ErrorText: Text {
+        width: parent ? parent.width : 0
+        visible: text.length > 0
+        topPadding: 4
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: Theme.dangerInk
+        font: Theme.type.caption
+        Accessible.role: Accessible.AlertMessage
+        Accessible.name: text
     }
 
     // A fact: the label, the value in the number face.
@@ -1100,6 +1399,8 @@ Rectangle {
     component PageRow: Item {
         id: pageRow
         property string text
+        // The glyph at the end: a page opens by default.
+        property string iconName: "chevronRight"
         signal opened()
         width: parent ? parent.width : 0
         height: 48
@@ -1124,7 +1425,7 @@ Rectangle {
         Icon {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            name: "chevronRight"
+            name: pageRow.iconName
             size: Theme.iconMd
             color: Theme.ink3
         }

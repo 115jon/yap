@@ -294,6 +294,22 @@ impl Platform for Mobile {
         crate::voice::set_peer_audio(user_id, volume, muted, save);
     }
 
+    /// Settings > Notifications' sound rows (`sound.rs`).
+    #[cfg(target_os = "android")]
+    fn sound_settings_json(&self) -> Option<String> {
+        Some(crate::sound::settings_json())
+    }
+
+    #[cfg(target_os = "android")]
+    fn set_sound_setting(&self, key: &str, value: i32) {
+        crate::sound::set_setting(key, value);
+    }
+
+    #[cfg(target_os = "android")]
+    fn play_test_sound(&self) {
+        crate::sound::play_test();
+    }
+
     fn on_update(&self, update: ViewUpdate) -> bool {
         // The session for private media (attachments, custom emoji).
         if let ViewUpdate::MediaAuth(token) = update {
