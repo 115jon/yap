@@ -162,12 +162,15 @@ FocusScope {
     }
 
     property real dragFrom: 0
-    function dragBegan() {
+    // `dy`: how far the finger has come (down) when the drag takes it, its
+    // threshold's worth: the sheet is under the finger from that step on.
+    function dragBegan(dy) {
         settle.stop()
         dragFrom = extent
-        trackAt = 0
+        trackAt = dy
         trackTime = Date.now()
         trackSpeed = 0
+        extent = Math.max(0, Math.min(full, dragFrom - dy))
     }
     function dragMoved(dy) {
         track(dy)
@@ -277,7 +280,7 @@ FocusScope {
             target: null
             xAxis.enabled: false
             enabled: !sheet.closing && (sheet.flickable === null || !sheet.atTop)
-            onActiveChanged: active ? sheet.dragBegan() : sheet.dragEnded()
+            onActiveChanged: active ? sheet.dragBegan(centroid.scenePosition.y - centroid.scenePressPosition.y) : sheet.dragEnded()
             onActiveTranslationChanged: if (active) sheet.dragMoved(activeTranslation.y)
         }
         Item {
@@ -288,7 +291,7 @@ FocusScope {
                 target: null
                 enabled: !sheet.closing
                 xAxis.enabled: false
-                onActiveChanged: active ? sheet.dragBegan() : sheet.dragEnded()
+                onActiveChanged: active ? sheet.dragBegan(centroid.scenePosition.y - centroid.scenePressPosition.y) : sheet.dragEnded()
                 onActiveTranslationChanged: if (active) sheet.dragMoved(activeTranslation.y)
             }
         }
@@ -334,7 +337,10 @@ FocusScope {
     // ---------- The inner list ----------
     // It scrolls at the top detent only. A drag past its top edge there is
     // reported as overshoot with the content held in place (StopAtBounds),
-    // and moves the sheet by that much; letting go settles the sheet.
+    // and moves the sheet with the finger; letting go settles the sheet.
+    // A Flickable drags past its bounds at half the finger's speed
+    // (QQuickFlickable's handleMoveEvent), so the pull is twice the
+    // overshoot: the sheet stays under the finger.
     Binding {
         target: sheet.flickable
         when: sheet.flickable !== null
@@ -368,7 +374,7 @@ FocusScope {
             const list = sheet.flickable
             if (!list.dragging)
                 return
-            const at = Math.max(0, -list.verticalOvershoot)
+            const at = Math.max(0, -list.verticalOvershoot) * 2
             sheet.track(at)
             sheet.pull = at
         }
