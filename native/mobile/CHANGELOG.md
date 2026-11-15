@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.12.0](https://github.com/115jon/yap/compare/qt-android-v0.11.1...qt-android-v0.12.0) (2026-11-15)
+
+
+### Features
+
+* **native:** ✨ add call health and per-person volume to the phone call ([f946f54](https://github.com/115jon/yap/commit/f946f5416840d4511cc6e69b08a1c72233110cf1))
+* **native:** ✨ add listen together to the phone call ([1477235](https://github.com/115jon/yap/commit/1477235cdc53b9a366cc27e1d1eeaa2072dce7e8))
+* **native:** ✨ add pins and a channel's thread list to the phone ([97528a9](https://github.com/115jon/yap/commit/97528a9c2d40b49b32724bcdeb9a9e700ffe4946))
+* **native:** ✨ add sound, privacy and plan settings to the phone ([27c0c95](https://github.com/115jon/yap/commit/27c0c952fcbe503f561253e4a83eda5e294d4419))
+* **native:** ✨ add the shop, name styles and collectibles on the phone ([05a05ab](https://github.com/115jon/yap/commit/05a05ab9a7ddb941ec04e73bdd45367952d4a8f1))
+* **native:** ✨ add the soundboard to calls on the phone ([e9b335c](https://github.com/115jon/yap/commit/e9b335c552c2684fbed22557e0a96070064da435))
+* **native:** ✨ add, join and leave servers and make channels on phones ([88053d6](https://github.com/115jon/yap/commit/88053d659a374c6c5af44503e11199e3c5dd2c02))
+* **native:** ✨ cap bottom sheets at 640dp on wide screens ([cf52fa9](https://github.com/115jon/yap/commit/cf52fa938f88b979c489ce6295a8ea4e95f4dd61))
+* **native:** ✨ keep talkback inside open sheets ([60e3111](https://github.com/115jon/yap/commit/60e311177472653734ef6d47d39207ee28bdacc5))
+* **native:** ✨ offer a redacted crash report after a crash ([cc94a0e](https://github.com/115jon/yap/commit/cc94a0ec2ee43d369ae053182c396e1bb91f5058))
+* **native:** ✨ play soundboard clips and ui sounds on android ([f1d865a](https://github.com/115jon/yap/commit/f1d865a6dca9cadab9506e64901f4573d09cb5a7))
+* **native:** ✨ play videos and sound previews on android's player ([f05919c](https://github.com/115jon/yap/commit/f05919c73e9372099b422600b3c87a9c8434867c))
+* **native:** ✨ put the phone's thread reply on the composer core ([831f0a5](https://github.com/115jon/yap/commit/831f0a507b1539d8a250ef67484abf9c2ecd757a))
+* **native:** ✨ search messages on the phone ([4bf2f6e](https://github.com/115jon/yap/commit/4bf2f6e45b954bd4f078e9dd20e8ec75f444fbbf))
+* **native:** ✨ send the phone's camera in calls ([69e7b87](https://github.com/115jon/yap/commit/69e7b87f25181cc27194e32293b41b781109446e))
+* **native:** ✨ share pictures, files and links into yap ([e280629](https://github.com/115jon/yap/commit/e2806295a3cf2a5598a3afe77aaa55325cbc241e))
+* **native:** ✨ share the phone's screen in calls ([cbb68cb](https://github.com/115jon/yap/commit/cbb68cb8c7aa39930367aa7d90dd3f4b9a868e9a))
+* **native:** ✨ show a video banner's first frame on the phone ([70a02a4](https://github.com/115jon/yap/commit/70a02a4a225ca37e6198da331ce65695669bcce7))
+* **native:** ✨ show badges, collectibles and friend actions on profiles ([6cf562d](https://github.com/115jon/yap/commit/6cf562d2537c5c34bafae1442ad64cf0ddf9f6e6))
+* **native:** ✨ show the profile board on the phone's profile ([df2212d](https://github.com/115jon/yap/commit/df2212d2d9552c561b1bc889492d36d3564ccee1))
+* **native:** ✨ verify the web's links on android ([26c6686](https://github.com/115jon/yap/commit/26c6686d6c15dd9f6951d677cbe2238e2e19c11f))
+* **native:** keep talkback inside open sheets and fit sheets on tablets ([c0ffb88](https://github.com/115jon/yap/commit/c0ffb88d81601ca47ef6ed70b2602e2ae9ff019f))
+* **native:** play videos and sound previews on android's player ([fc0d678](https://github.com/115jon/yap/commit/fc0d67855b7372e6966af620738c1e95856f3116))
+* **native:** share pictures, files and links into yap ([40456e1](https://github.com/115jon/yap/commit/40456e1c31a3a7e7f6bbec7d6fae19ca2c51098d))
+
+
+### Bug Fixes
+
+* **native:** 🐛 draw the yap name effects on the phone ([108042b](https://github.com/115jon/yap/commit/108042b99f6c4f119db29f2ad257455460a98e00))
+* **native:** 🐛 keep one crash report per crashed process ([f43f3e4](https://github.com/115jon/yap/commit/f43f3e417b9cae5c06b3b463dd507f09a63e92c6))
+* **native:** 🐛 keep the shop's sheet and picker usable on short screens ([9238f03](https://github.com/115jon/yap/commit/9238f03dada49c785b65a5039bf2071126572c27))
+* **native:** 🐛 open the privacy policy on the site ([fdf589a](https://github.com/115jon/yap/commit/fdf589ad952b06006094f057e5b7a6bb11d67302))
+
 ## [0.11.1](https://github.com/115jon/yap/compare/qt-android-v0.11.0...qt-android-v0.11.1) (2026-11-14)
 
 
