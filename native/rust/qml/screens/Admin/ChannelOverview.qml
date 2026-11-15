@@ -36,12 +36,13 @@ Column {
             label: qsTr("Channel name")
             description: root.draft.nameHint
             KitField {
+                id: nameField
                 width: parent.width
                 text: root.draft.name
                 maximumLength: 100
                 invalid: root.nameError.length > 0
                 Accessible.name: qsTr("Channel name")
-                onTextEdited: root.draft.nameEdited(text)
+                onTextEdited: root.draft.nameEdited(nameField.text)
                 Keys.onReturnPressed: root.save()
             }
             footer: RowError { text: root.nameError }
