@@ -149,6 +149,15 @@ impl Client {
         )
     }
 
+    /// The server set to "All messages" (another device's change).
+    fn all_messages(&mut self) -> Vec<Effect> {
+        self.dispatch(
+            "NOTIFICATION_SETTINGS_UPDATE",
+            json!({ "target_type": "server", "target_id": SERVER, "level": "all",
+                    "muted": false, "muted_until": null }),
+        )
+    }
+
     fn notification(&mut self, kind: &str, channel: &str, message: &str) -> Vec<Effect> {
         self.dispatch(
             "NOTIFICATION_CREATE",
@@ -199,6 +208,7 @@ fn member_diffs(fx: &[Effect]) -> Vec<&ViewDiff<MemberListRow>> {
 #[test]
 fn a_message_in_another_channel_should_toast_with_channel_and_server() {
     let mut client = Client::online();
+    client.all_messages();
     let fx = client.message("m1", VOICE, ALICE, "lunch?");
     let toast = toasts(&fx);
     assert_eq!(
@@ -224,6 +234,7 @@ fn a_message_in_the_focused_open_channel_should_not_toast() {
 #[test]
 fn a_message_in_the_open_channel_should_toast_when_the_window_is_away() {
     let mut client = Client::online();
+    client.all_messages();
     client.command(Command::SetFocused(false));
     let fx = client.message("m1", TEXT, ALICE, "hi");
     assert_eq!(toasts(&fx).len(), 1);
@@ -259,6 +270,7 @@ fn a_mention_should_toast_once_through_its_notification() {
 #[test]
 fn a_notification_for_a_toasted_message_should_not_toast_again() {
     let mut client = Client::online();
+    client.all_messages();
     client.message("m1", VOICE, ALICE, "no mention here");
     let fx = client.notification("reply", VOICE, "m1");
     assert!(toasts(&fx).is_empty());

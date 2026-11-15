@@ -74,6 +74,13 @@ impl Fixture {
             | ApiRequest::Embeds(_)
             | ApiRequest::RemoveEmbeds { .. } => ApiResponse::Done,
             ApiRequest::Favorites(_) => ApiResponse::Favorites(Vec::new()),
+            ApiRequest::Notify(request) => ApiResponse::Notify(match request {
+                crate::store::notify::NotifyRequest::List => {
+                    crate::store::notify::NotifyResponse::List(Vec::new())
+                }
+                // Offline, a change stands as asked (the store applied it).
+                crate::store::notify::NotifyRequest::Update { .. } => return ApiResponse::Done,
+            }),
             ApiRequest::Backgrounds(_) => ApiResponse::Backgrounds(
                 crate::store::backgrounds::BackgroundsResponse::List(Vec::new()),
             ),

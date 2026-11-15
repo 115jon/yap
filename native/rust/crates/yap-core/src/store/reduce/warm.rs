@@ -631,7 +631,7 @@ impl State {
 
     /// A channel or DM the unread keys stop on.
     fn nav_unread(&self, id: &str) -> bool {
-        self.is_unread(id) || self.channel_mentions(id) > 0 || self.dm_mentions(id) > 0
+        self.shows_unread(id) || self.channel_mentions(id) > 0 || self.dm_mentions(id) > 0
     }
 
     /// Alt+Up/Down: the previous or next text channel in the sidebar's

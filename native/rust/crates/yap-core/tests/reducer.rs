@@ -369,6 +369,7 @@ fn channels_result_should_open_the_first_text_channel_and_request_its_page() {
         lit: 0,
         unread: false,
         mentions: 0,
+        notify_muted: false,
         manage: false,
         category: String::new(),
         status: String::new(),
@@ -2390,6 +2391,7 @@ fn cached_boot_should_revalidate_everything_in_one_batch() {
             ApiRequest::Notifications,
             ApiRequest::Dms,
             ApiRequest::Friends(yap_core::store::FriendsRequest::List),
+            ApiRequest::Notify(yap_core::store::notify::NotifyRequest::List),
         ]
     );
 }

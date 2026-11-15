@@ -319,6 +319,8 @@ pub enum Command {
     Embeds(super::embeds::EmbedsCommand),
     /// The GIF and clip favourites' stars.
     Favorites(super::favorites::FavoritesCommand),
+    /// Notification levels and mutes (a server's, channel's or DM's menu).
+    Notify(super::notify::NotifyCommand),
     /// The account's camera backgrounds.
     Backgrounds(super::backgrounds::BackgroundsCommand),
     /// Clear one of our messages' link previews (the embed's x).
@@ -531,6 +533,9 @@ pub enum Dispatch {
     CallRingStop(CallRingStop),
     /// A profile board was saved (`PROFILE_BOARD_UPDATE`).
     BoardUpdate(yap_protocol::profile_board::BoardUpdate),
+    /// A notification level or mute changed, on any of the user's devices
+    /// (`NOTIFICATION_SETTINGS_UPDATE`): the setting as stored now.
+    NotifySettings(crate::notification_levels::NotificationSetting),
 }
 
 impl Dispatch {
@@ -588,6 +593,9 @@ impl Dispatch {
             "CALL_RINGING" => Self::CallRinging(serde_json::from_value(data).ok()?),
             "CALL_RING_STOP" => Self::CallRingStop(serde_json::from_value(data).ok()?),
             "PROFILE_BOARD_UPDATE" => Self::BoardUpdate(serde_json::from_value(data).ok()?),
+            "NOTIFICATION_SETTINGS_UPDATE" => {
+                Self::NotifySettings(serde_json::from_value(data).ok()?)
+            }
             _ => return None,
         })
     }

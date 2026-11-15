@@ -54,13 +54,16 @@ impl State {
     // Projections
 
     pub(super) fn sync_dms(&mut self, fx: &mut Effects) {
-        let (rows, unread) =
-            view::dm_rows(&self.dms, &self.api_base, &self.presence, |id| DmBadge {
-                unread: self.is_unread(id),
-                has_unread: self.has_unread(id),
+        let (rows, unread) = view::dm_rows(&self.dms, &self.api_base, &self.presence, |id| {
+            let muted = self.channel_notify_muted(id);
+            DmBadge {
+                unread: self.is_unread(id) && !muted,
+                has_unread: self.has_unread(id) && !muted,
                 mentions: self.dm_mentions(id),
                 notifications: self.dm_notifications(id),
-            });
+                muted,
+            }
+        });
         for diff in view::ordered_diff(&self.view.dms, &rows) {
             fx.view(ViewUpdate::Dms(diff));
         }

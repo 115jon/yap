@@ -14,6 +14,7 @@ mod friends;
 mod games;
 mod invites;
 mod media;
+mod notify;
 mod push;
 mod search;
 mod settings;
@@ -47,6 +48,7 @@ use super::{
 };
 use crate::api::{ApiError, Token};
 use crate::command_menu::RecentTarget;
+use crate::notification_levels;
 use crate::shell::{self, Sound};
 use crate::store::calls::{CallsCommand, RingStatus};
 pub use push::SUSPEND_GRACE;
@@ -98,6 +100,8 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
         Input::UserAt { command, now_ms } => {
             state.now_ms = Some(now_ms);
             state.clock_ms = state.clock_ms.max(now_ms);
+            // A timed mute that ran out by now ends before the command.
+            state.notify_check_expiry(&mut fx);
             state.on_command(&mut fx, command);
             state.now_ms = None;
         }
@@ -394,7 +398,13 @@ impl State {
         let rows = view::server_rows(
             &self.servers,
             &self.api_base,
-            |id| (self.server_unread(id), self.server_mentions(id)),
+            |id| {
+                (
+                    self.server_unread(id),
+                    self.server_mentions(id),
+                    self.server_notify_muted(id),
+                )
+            },
             |id| self.server_voice(id, here == Some(id)),
         );
         for diff in view::ordered_diff(&self.view.servers, &rows) {
@@ -447,7 +457,16 @@ impl State {
         let mut rows = view::tree_rows(
             list,
             |id| self.seats(id),
-            |id| (self.is_unread(id), self.channel_mentions(id)),
+            |id| {
+                let muted = self
+                    .notify_effective_in(self.tree_server.as_deref(), id)
+                    .muted;
+                (
+                    self.is_unread(id) && !muted,
+                    self.channel_mentions(id),
+                    muted,
+                )
+            },
             self.tree_manage_all(),
         );
         self.add_voice_status(&mut rows);
@@ -612,7 +631,10 @@ impl State {
     /// else a dot while any DM or server channel has unread messages.
     fn sync_tray_badge(&mut self, fx: &mut Effects) {
         let notifications = self.notifications.iter().filter(|n| !n.is_read).count();
-        let any_unread = self.last_message_at.keys().any(|id| self.has_unread(id));
+        let any_unread = self
+            .last_message_at
+            .keys()
+            .any(|id| self.has_unread(id) && !self.channel_notify_muted(id));
         let badge = shell::badge(notifications, any_unread);
         if badge != self.view.badge {
             self.view.badge = badge.clone();
@@ -1393,6 +1415,7 @@ impl State {
         self.pending.notifications = self.http(fx, ApiRequest::Notifications);
         self.pending.dms = self.http(fx, ApiRequest::Dms);
         self.load_friends(fx, false);
+        self.load_notify(fx);
     }
 
     fn mention_query(&mut self, fx: &mut Effects, query: Option<String>) {
@@ -1817,6 +1840,7 @@ impl State {
             Command::Board(command) => self.on_board(fx, command),
             Command::Embeds(command) => self.on_embeds(fx, command),
             Command::Favorites(command) => self.on_favorites(fx, command),
+            Command::Notify(command) => self.on_notify(fx, command),
             Command::Backgrounds(command) => self.on_backgrounds(fx, command),
             Command::RemoveEmbeds(id) => self.remove_embeds(fx, &id),
             Command::Extras(command) => self.on_extras(fx, command),
@@ -2071,6 +2095,7 @@ impl State {
         self.clear_friends();
         self.clear_invites();
         self.clear_shop();
+        self.clear_notify(fx);
         self.board = Default::default();
         self.leave_voice(fx);
         self.calls = Default::default();
@@ -2247,6 +2272,7 @@ impl State {
             || self.route_board_http(fx, id, &mut answer)
             || self.route_embeds_http(fx, id, &mut answer)
             || self.route_favorites_http(fx, id, &mut answer)
+            || self.route_notify_http(fx, id, &mut answer)
             || self.route_backgrounds_http(fx, id, &mut answer)
             || self.route_extras_http(fx, id, &mut answer)
         {
@@ -4050,6 +4076,7 @@ impl State {
                     data: update.data,
                 },
             ),
+            Dispatch::NotifySettings(setting) => self.on_notify_setting(fx, setting),
         }
     }
 
@@ -4090,9 +4117,12 @@ impl State {
         let targets_me = self
             .me()
             .is_some_and(|me| shell::targets_user(&message, me));
+        // A plain message notifies only where the level is all and it is
+        // not muted (notification-levels.ts `shouldNotify`).
         if self.dm(&channel).is_none()
             && !mine
             && !targets_me
+            && notification_levels::should_notify(self.notify_effective(&channel), false)
             && shell::should_notify(&channel, self.active_channel.as_deref(), self.focused)
         {
             let (name, server) = self
