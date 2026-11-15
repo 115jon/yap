@@ -17,108 +17,31 @@ Item {
 
     readonly property var channel: model.channel
     readonly property var overrides: model.overrides
-    readonly property var stored: overrides.items ?? []
-    readonly property var schema: JSON.parse(Admin.schema())
-    readonly property var permissionDefs: channel.voice ? schema.voicePermissions : schema.textPermissions
-    readonly property var act: model.acts["overrides"] ?? { busy: false, error: "", done: 0 }
-
-    // Drafts: target id → {allow, deny}; overrides added and not saved yet.
-    property var drafts: ({})
-    property var added: []
-    property string selectedId: ""
+    // The drafts (Yap.Ui OverrideDrafts, the phone's too).
+    readonly property OverrideDrafts core: OverrideDrafts { model: root.model }
+    readonly property var permissionDefs: core.permissionDefs
+    readonly property var rows: core.rows
+    readonly property var selected: core.selected
+    readonly property var availableRoles: core.availableRoles
+    readonly property var availableMembers: core.availableMembers
     property bool adding: false
-    property int savedCount: 0
-
-    readonly property var rows: {
-        const all = stored.concat(added.filter(extra => !stored.some(row => row.targetId === extra.targetId)))
-        return all.map(row => {
-            const draft = drafts[row.targetId]
-            const allow = draft ? draft.allow : row.allow
-            const deny = draft ? draft.deny : row.deny
-            const isNew = !row.saved && !row.isDefault
-            return Object.assign({}, row, {
-                allow: allow,
-                deny: deny,
-                dirty: isNew || allow !== row.allow || deny !== row.deny,
-            })
-        })
-    }
-    readonly property var dirtyRows: rows.filter(row => row.dirty)
-    readonly property var selected: rows.find(row => row.targetId === selectedId) ?? null
-    readonly property var availableRoles: (model.roles.items ?? []).filter(role => !role.isDefault && !rows.some(row => row.targetId === role.id))
-    readonly property var availableMembers: model.members.filter(member => !rows.some(row => row.targetId === member.id))
 
     // The workbench reads these.
     readonly property bool wide: true
-    readonly property bool dirty: dirtyRows.length > 0
-    readonly property bool saving: act.busy
-    readonly property string saveError: act.error
+    readonly property bool dirty: core.dirty
+    readonly property bool saving: core.saving
+    readonly property string saveError: core.saveError
 
-    function setBits(targetId, mask, value) {
-        const row = rows.find(r => r.targetId === targetId)
-        if (!row)
-            return
-        let allow = row.allow & ~mask
-        let deny = row.deny & ~mask
-        if (value === "allow")
-            allow |= mask
-        else if (value === "deny")
-            deny |= mask
-        const next = Object.assign({}, drafts)
-        next[targetId] = { allow: allow, deny: deny }
-        drafts = next
-        Admin.clear("overrides")
-    }
-    function stateOf(row, mask) {
-        return (row.allow & mask) === mask ? "allow" : (row.deny & mask) === mask ? "deny" : "inherit"
-    }
-    function add(entry) {
-        added = added.concat([entry])
-        adding = false
-        selectedId = entry.targetId
-    }
-    function reset() {
-        drafts = ({})
-        added = []
-        if (!stored.some(row => row.targetId === selectedId))
-            selectedId = ""
-        Admin.clear("overrides")
-    }
-    function save() {
-        if (!dirty || saving)
-            return
-        Admin.saveOverrides(JSON.stringify(dirtyRows.map(row => ({
-            targetId: row.targetId,
-            targetType: row.targetType,
-            allow: row.allow,
-            deny: row.deny,
-        }))))
-    }
-    function dropAdded(targetId) {
-        added = added.filter(row => row.targetId !== targetId)
-        const next = Object.assign({}, drafts)
-        delete next[targetId]
-        drafts = next
-        selectedId = ""
-    }
+    function setBits(targetId, mask, value) { core.setBits(targetId, mask, value) }
+    function stateOf(row, mask) { return core.stateOf(row, mask) }
+    function reset() { core.reset() }
+    function save() { core.save() }
+    function dropAdded(targetId) { core.dropAdded(targetId) }
 
     width: parent ? parent.width : 0
     height: overrides.state === "ready" ? Math.max(listCard.height, editorColumn.height)
         : failed.visible ? failed.height : loading.height
-    Component.onCompleted: {
-        savedCount = act.done
-        Admin.loadOverrides()
-    }
-    // Saved: what the server has now is the list; the drafts are spent.
-    onActChanged: {
-        if (act.done < savedCount)
-            savedCount = act.done
-        else if (act.done > savedCount) {
-            savedCount = act.done
-            drafts = ({})
-            added = []
-        }
-    }
+    Component.onCompleted: core.load()
 
     PageState {
         id: failed
@@ -126,7 +49,7 @@ Item {
         title: qsTr("Permissions didn't load")
         message: root.overrides.error
         failed: true
-        onRetry: Admin.loadOverrides()
+        onRetry: root.core.load()
     }
     LoadingRows {
         id: loading
@@ -169,9 +92,9 @@ Item {
                     required property var modelData
                     width: listCard.width - 16
                     tall: true
-                    current: root.selectedId === modelData.targetId
+                    current: root.core.selectedId === modelData.targetId
                     Accessible.name: modelData.name
-                    onClicked: root.selectedId = modelData.targetId
+                    onClicked: root.core.selectedId = modelData.targetId
                     OverrideMark {
                         id: mark
                         x: 8
@@ -229,11 +152,10 @@ Item {
                         required property var modelData
                         width: listCard.width
                         Accessible.name: modelData.name
-                        onClicked: root.add({
-                            targetId: modelData.id, targetType: "role", name: modelData.name,
-                            color: modelData.color, avatar: "", initials: "", isDefault: false,
-                            allow: 0, deny: 0, saved: false,
-                        })
+                        onClicked: {
+                            root.core.addRole(modelData)
+                            root.adding = false
+                        }
                         Rectangle {
                             x: 14
                             anchors.verticalCenter: parent.verticalCenter
@@ -274,11 +196,10 @@ Item {
                         required property var modelData
                         width: listCard.width
                         Accessible.name: modelData.name
-                        onClicked: root.add({
-                            targetId: modelData.id, targetType: "user", name: modelData.name,
-                            color: "", avatar: modelData.avatar, initials: modelData.initials,
-                            isDefault: false, allow: 0, deny: 0, saved: false,
-                        })
+                        onClicked: {
+                            root.core.addMember(modelData)
+                            root.adding = false
+                        }
                         Avatar {
                             x: 8
                             anchors.verticalCenter: parent.verticalCenter
@@ -327,7 +248,7 @@ Item {
                 row: root.selected
                 channel: root.channel
                 permissions: root.permissionDefs
-                removing: root.model.acts["override-remove:" + root.selected.targetId] ?? { busy: false, error: "", done: 0 }
+                removing: root.core.removing(root.selected.targetId)
             }
         }
         PageState {
