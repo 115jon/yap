@@ -163,6 +163,7 @@ fn main() {
         QmlFile::from("qml/components/ClipboardText.qml"),
         QmlFile::from("qml/components/GifFavoriteStar.qml"),
         QmlFile::from("qml/components/LedLabel.qml"),
+        QmlFile::from("qml/components/MediaMosaic.qml"),
         QmlFile::from("qml/components/MediaTile.qml"),
         QmlFile::from("qml/components/PlayDisc.qml"),
         QmlFile::from("qml/components/SensitiveMediaFrame.qml"),
