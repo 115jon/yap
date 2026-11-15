@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.4.0](https://github.com/115jon/yap/compare/v4.3.2...v4.4.0) (2026-11-15)
+
+
+### Features
+
+* **notifications:** message pushes carry ids only; android fetches the text ([#345](https://github.com/115jon/yap/issues/345)) ([ae092be](https://github.com/115jon/yap/commit/ae092beac335cfe67dbfdb1714c9344f9bf430c3))
+
 ## [4.3.2](https://github.com/115jon/yap/compare/v4.3.1...v4.3.2) (2026-11-15)
 
 
