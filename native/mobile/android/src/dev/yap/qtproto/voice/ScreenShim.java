@@ -98,6 +98,10 @@ public final class ScreenShim {
     /** The minimum gap between frames sent, for the preset's rate. */
     private static volatile long frameGapNs;
     private static long lastFrameNs;
+    // Frames the display gave and frames sent, logged every 10 s.
+    private static int framesIn;
+    private static int framesSent;
+    private static long countedSinceNs;
     private static AudioLoop audio;
     /** A capture runs (the call notification says so). */
     private static volatile boolean sharing;
@@ -358,9 +362,14 @@ public final class ScreenShim {
             @Override
             public void onFrameCaptured(VideoFrame frame) {
                 if (mine != generation) return;
+                count(false);
                 long at = frame.getTimestampNs();
-                if (lastFrameNs != 0 && at - lastFrameNs < frameGapNs) return;
+                // A timestamp that went back (the captured content changed
+                // source) starts the pacing afresh rather than holding every
+                // frame until the clock catches up.
+                if (lastFrameNs != 0 && at >= lastFrameNs && at - lastFrameNs < frameGapNs) return;
                 lastFrameNs = at;
+                count(true);
                 VideoFrame.I420Buffer i420 = frame.getBuffer().toI420();
                 if (i420 == null) return;
                 try {
@@ -371,6 +380,22 @@ public final class ScreenShim {
                 }
             }
         };
+    }
+
+    /** The capture thread's frame counts, logged every 10 s. */
+    private static void count(boolean sent) {
+        if (sent) {
+            ++framesSent;
+            return;
+        }
+        ++framesIn;
+        long now = System.nanoTime();
+        if (countedSinceNs == 0) countedSinceNs = now;
+        if (now - countedSinceNs < 10_000_000_000L) return;
+        Log.d(TAG, "frames in 10 s: " + framesIn + " from the display, " + framesSent + " sent");
+        framesIn = 0;
+        framesSent = 0;
+        countedSinceNs = now;
     }
 
     // The device's sound.

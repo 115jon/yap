@@ -132,8 +132,15 @@ impl ShareCapturer for PhoneScreen {
             quality,
             ended,
         });
-        if preset != request.quality {
-            client::command(Command::SetVoiceShareQuality(preset.to_owned()));
+        // Read again now that the capture is known: a report that came
+        // while it started found nothing running to step down.
+        let target = if request.quality == PHONE_SHARE {
+            allowed()
+        } else {
+            preset
+        };
+        if target != request.quality {
+            client::command(Command::SetVoiceShareQuality(target.to_owned()));
         }
         Ok((Capture(capture), ShareCaptured { has_audio }))
     }
