@@ -1416,6 +1416,7 @@ impl State {
         self.pending.dms = self.http(fx, ApiRequest::Dms);
         self.load_friends(fx, false);
         self.load_notify(fx);
+        self.refresh_inbox(fx);
     }
 
     fn mention_query(&mut self, fx: &mut Effects, query: Option<String>) {
@@ -2148,6 +2149,7 @@ impl State {
         self.read_states.clear();
         self.last_message_at.clear();
         self.notifications.clear();
+        self.reset_inbox(fx);
         self.members.clear();
         self.clear_social(fx);
         self.wanted_channel = None;

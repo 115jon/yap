@@ -10,14 +10,16 @@ import Yap.Ui
 // sender's 32 px avatar, "Name mentioned you" with the time and the
 // unread dot, the channel and server (not for a DM) and two lines of the
 // message; unread ones sit on the mention tint. A row reads it and jumps
-// to its message. The list loads the first time it opens.
+// to its message. The list loads the first time it opens. What it shows
+// and does is the shared InboxModel's (the phone's InboxPage has the same).
 Popup {
     id: root
 
-    readonly property var inbox: JSON.parse(Extras.inbox)
+    readonly property InboxModel inbox: InboxModel {
+        active: root.opened
+        onJumped: root.close()
+    }
     property bool confirmClear: false
-    // Ticks the "5m" stamps over while it is open.
-    property int tick: 0
 
     width: 380
     height: Math.min(560, header.height + Math.max(body.contentHeight, empty.implicitHeight + 40) + 8)
@@ -25,7 +27,6 @@ Popup {
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
     onOpened: {
-        Extras.openInbox()
         confirmClear = false
         closeKey.forceActiveFocus()
     }
@@ -45,21 +46,6 @@ Popup {
 
     enter: PresenceIn { duration: Theme.reducedMotion ? 100 : 180 }
     exit: PresenceOut { duration: Theme.reducedMotion ? 100 : 120; toScale: Theme.scaleIn }
-
-    Timer {
-        interval: 30000
-        repeat: true
-        running: root.opened
-        onTriggered: root.tick++
-    }
-
-    function openRow(row) {
-        if (row.unread)
-            Extras.readNotification(row.id)
-        if (row.channelId.length > 0 && row.messageId.length > 0)
-            Chat.jumpToMessage(row.channelId, row.messageId)
-        root.close()
-    }
 
     contentItem: Item {
         Item {
@@ -85,7 +71,7 @@ Popup {
                 InboxLink {
                     visible: root.inbox.unread > 0
                     text: qsTr("Mark all read")
-                    onClicked: Extras.readAll()
+                    onClicked: root.inbox.readAll()
                 }
                 IconKey {
                     id: closeKey
@@ -134,7 +120,7 @@ Popup {
                         variant: "danger"
                         text: qsTr("Clear all")
                         onClicked: {
-                            Extras.clearNotifications()
+                            root.inbox.clearAll()
                             root.confirmClear = false
                         }
                     }
@@ -163,7 +149,7 @@ Popup {
         // EmptyState sm, or the load's own state.
         Column {
             id: empty
-            visible: root.inbox.rows.length === 0
+            visible: root.inbox.empty
             anchors.top: header.bottom
             anchors.topMargin: 40
             x: 24
@@ -173,18 +159,16 @@ Popup {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 textFormat: Text.PlainText
-                text: root.inbox.loading && !root.inbox.loaded ? qsTr("Loading notifications…")
-                    : root.inbox.error.length > 0 ? root.inbox.error
-                    : qsTr("No notifications yet")
+                text: root.inbox.emptyTitle
                 wrapMode: Text.Wrap
-                color: root.inbox.error.length > 0 ? Theme.dangerInk : Theme.ink1
+                color: root.inbox.emptyFailed ? Theme.dangerInk : Theme.ink1
                 font: Theme.type.panelTitle
             }
             Text {
-                visible: !root.inbox.loading && root.inbox.error.length === 0
+                visible: root.inbox.emptyHintShown
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
-                text: qsTr("Mentions and replies show up here.")
+                text: root.inbox.emptyHint
                 color: Theme.ink3
                 font: Theme.type.description
             }
@@ -231,8 +215,8 @@ Popup {
         implicitHeight: content.implicitHeight + topPadding + bottomPadding
         hoverEnabled: true
         Accessible.role: Accessible.Button
-        Accessible.name: qsTr("%1 %2. %3").arg(n.name).arg(n.action).arg(n.content)
-        onClicked: root.openRow(n)
+        Accessible.name: root.inbox.spoken(n)
+        onClicked: root.inbox.open(n)
 
         background: Rectangle {
             color: row.n.unread ? Theme.accentTint : "transparent"
@@ -311,7 +295,7 @@ Popup {
                         anchors.rightMargin: dot.visible ? 6 : 0
                         anchors.verticalCenter: parent.verticalCenter
                         textFormat: Text.PlainText
-                        text: root.tick >= 0 && row.n.createdMs > 0 ? Extras.timeAgo(row.n.createdMs) : ""
+                        text: root.inbox.when(row.n)
                         color: Theme.ink3
                         font: Theme.type.numSm
                     }
