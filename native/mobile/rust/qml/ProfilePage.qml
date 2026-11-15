@@ -105,8 +105,26 @@ Rectangle {
         // The relationship for the actions (UserProfilePopover.tsx).
         if (userId !== Session.meId)
             Friends.refresh()
+        Board.open(userId)
     }
-    Component.onDestruction: Profile.close(userId)
+    // Back on top of the stack after a profile opened from this one: the
+    // board is theirs again.
+    StackView.onActivated: if (board.shownId !== userId) Board.open(userId)
+    Component.onDestruction: {
+        Profile.close(userId)
+        if (board.shownId === userId)
+            Board.close()
+    }
+
+    // The board's state and tab (shared with the desktop's BoardPanel).
+    BoardCore {
+        id: board
+        readonly property string shownId: st.userId ?? ""
+        readonly property bool shown: shownId === root.userId
+        ownerName: root.loaded ? Profile.name : ""
+        ownerAvatar: root.loaded ? Profile.avatar : ""
+        ownerInitials: root.loaded ? Profile.initials : ""
+    }
 
     Flickable {
         id: scroll
@@ -536,6 +554,170 @@ Rectangle {
                         text: root.since?.value ?? ""
                         color: Theme.ink1
                         font: Theme.type.description
+                    }
+                }
+                // The board (ProfilePanel.tsx) on the desktop column's
+                // ply-3, which the widgets' legends are cut from.
+                Rectangle {
+                    id: boardBand
+                    readonly property int gutter: 16
+                    width: parent.width
+                    height: boardColumn.y + boardColumn.height + 24
+                    visible: root.loaded && Profile.loadError.length === 0
+                    color: Theme.ply3
+
+                    Rectangle {
+                        width: parent.width
+                        height: 1
+                        color: Theme.line
+                    }
+
+                    // Board · Activity · Wishlist.
+                    Item {
+                        id: boardHeader
+                        width: parent.width
+                        height: 48
+                        Row {
+                            id: boardTabs
+                            // Each tab's 12 px padding sits outside the
+                            // gutter, so its label lines up with the board.
+                            x: boardBand.gutter - 12 + root.leftInset
+                            height: parent.height
+                            spacing: 4
+                            Accessible.role: Accessible.PageTabList
+                            Repeater {
+                                model: board.tabs
+                                delegate: Item {
+                                    id: boardTab
+                                    required property var modelData
+                                    readonly property bool on: board.tab === modelData.id
+                                    readonly property int count: modelData.id === "board" ? board.count : 0
+                                    width: boardTabRow.implicitWidth + 24
+                                    height: boardTabs.height
+                                    Accessible.role: Accessible.PageTab
+                                    Accessible.name: modelData.label + (count > 0 ? " " + count : "")
+                                    Accessible.checked: on
+                                    Accessible.onPressAction: board.chooseTab(modelData.id)
+                                    Row {
+                                        id: boardTabRow
+                                        anchors.centerIn: parent
+                                        spacing: 6
+                                        Text {
+                                            id: boardTabLabel
+                                            textFormat: Text.PlainText
+                                            text: boardTab.modelData.label
+                                            color: boardTab.on ? Theme.ink1 : Theme.ink2
+                                            font: Qt.font({ family: "Yap Bricolage Key Bold", pixelSize: 15, weight: Font.Bold })
+                                        }
+                                        Text {
+                                            textFormat: Text.PlainText
+                                            visible: boardTab.count > 0
+                                            anchors.baseline: boardTabLabel.baseline
+                                            text: String(boardTab.count)
+                                            color: Theme.ink3
+                                            font: Theme.type.num
+                                        }
+                                    }
+                                    TapHandler {
+                                        onTapped: {
+                                            Native.haptic(Native.Tick)
+                                            board.chooseTab(boardTab.modelData.id)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        TabRule { row: boardTabs }
+                        Rectangle {
+                            anchors.bottom: parent.bottom
+                            width: parent.width
+                            height: 1
+                            color: Theme.line
+                        }
+                    }
+
+                    Column {
+                        id: boardColumn
+                        x: boardBand.gutter + root.leftInset
+                        y: boardHeader.height + 16
+                        width: parent.width - 2 * boardBand.gutter - root.leftInset - root.rightInset
+                        spacing: 16
+
+                        // Loading: static plates in the Rack's shape.
+                        Item {
+                            visible: board.tab === "board" && (!board.shown || board.loading) && board.error.length === 0
+                            width: parent.width
+                            height: 8 + 2 * 151 + 20
+                            Accessible.role: Accessible.StaticText
+                            Accessible.name: qsTr("Loading board")
+                            Repeater {
+                                model: [[0, 0, 2], [0, 1, 1], [1, 1, 1]]
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    readonly property real colW: (boardColumn.width - 10) / 2
+                                    x: modelData[0] * (colW + 10)
+                                    y: 8 + modelData[1] * 171
+                                    width: modelData[2] * colW + (modelData[2] - 1) * 10
+                                    height: 151
+                                    radius: Theme.radius
+                                    color: Theme.tint1
+                                    border.width: 1
+                                    border.color: Theme.line
+                                }
+                            }
+                        }
+                        Column {
+                            visible: board.shown && board.tab === "board" && board.error.length > 0
+                            width: parent.width
+                            spacing: 12
+                            Text {
+                                width: parent.width
+                                textFormat: Text.PlainText
+                                text: board.error
+                                wrapMode: Text.Wrap
+                                color: Theme.ink2
+                                font: Theme.type.description
+                            }
+                            KitButton {
+                                variant: "secondary"
+                                iconName: "refresh"
+                                text: qsTr("Try again")
+                                onClicked: Board.retry()
+                            }
+                        }
+                        Text {
+                            visible: board.shown && board.tab === "board" && !board.loading && board.empty
+                            width: parent.width
+                            textFormat: Text.PlainText
+                            text: board.isOwner
+                                ? qsTr("Your board is empty. Add what you're playing, your mood, photos or a countdown from Yap on your computer or the web.")
+                                : qsTr("%1 hasn't added anything to their board yet.").arg(Profile.name)
+                            wrapMode: Text.Wrap
+                            color: Theme.ink3
+                            font: Theme.type.description
+                        }
+
+                        BoardRack {
+                            visible: board.shown && board.tab === "board" && !board.loading && !board.empty
+                            width: parent.width
+                            rackJson: board.rack
+                            boardData: board.boardData
+                            ctx: board.ctx
+                            boardState: board.st
+                            editing: false
+                        }
+                        BoardActivity {
+                            visible: board.shown && board.tab === "activity"
+                            width: parent.width
+                            view: board.activity
+                            ownerName: Profile.name
+                        }
+                        BoardWishlist {
+                            visible: board.shown && board.tab === "wishlist"
+                            width: parent.width
+                            view: board.wishlist
+                            ownerName: Profile.name
+                        }
                     }
                 }
             }
