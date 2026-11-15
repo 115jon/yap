@@ -14,6 +14,9 @@ Rectangle {
     required property string attachmentId
     property bool hidden: false
     property int cornerRadius: 0
+    // A frame too narrow for the card and its title (a phone's mosaic tile):
+    // the key alone, "Show", on the scrim.
+    readonly property bool compact: width < 160
 
     anchors.fill: parent
     visible: hidden
@@ -22,19 +25,20 @@ Rectangle {
 
     Rectangle {
         anchors.centerIn: parent
-        width: Math.min(parent.width - 24, 240)
-        height: card.implicitHeight + 24
+        width: root.compact ? show.width : Math.min(parent.width - 24, 240)
+        height: card.implicitHeight + (root.compact ? 0 : 24)
         radius: Theme.radiusSheet
-        color: Theme.ply3
-        border.width: 1
+        color: root.compact ? "transparent" : Theme.ply3
+        border.width: root.compact ? 0 : 1
         border.color: Theme.line
         Column {
             id: card
             anchors.centerIn: parent
-            width: parent.width - 32
+            width: root.compact ? show.width : parent.width - 32
             spacing: 8
             Column {
                 width: parent.width
+                visible: !root.compact
                 spacing: 2
                 Text {
                     width: parent.width
@@ -60,18 +64,21 @@ Rectangle {
                 width: showText.implicitWidth + 20
                 height: 28
                 radius: Theme.radius
-                color: showHover.containsMouse ? Theme.tint3 : Theme.tint2
+                // Alone on the scrim, the key is a ply-3 float of its own.
+                color: root.compact ? Theme.ply3 : showHover.containsMouse ? Theme.tint3 : Theme.tint2
+                border.width: root.compact ? 1 : 0
+                border.color: Theme.line
                 EaseColor on color {}
                 scale: showHover.pressed ? Theme.scalePress : 1
                 activeFocusOnTab: root.hidden
                 Accessible.role: Accessible.Button
-                Accessible.name: showText.text
+                Accessible.name: qsTr("Show media")
                 Keys.onReturnPressed: ShellState.reveal(root.attachmentId)
                 Keys.onSpacePressed: ShellState.reveal(root.attachmentId)
                 Text {
                     id: showText
                     anchors.centerIn: parent
-                    text: qsTr("Show media")
+                    text: root.compact ? qsTr("Show") : qsTr("Show media")
                     color: Theme.ink1
                     font: Theme.type.captionStrong
                 }

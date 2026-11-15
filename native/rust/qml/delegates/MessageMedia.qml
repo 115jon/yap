@@ -30,39 +30,6 @@ Column {
     spacing: 8
     topPadding: 8
 
-    // ImageGrid.tsx layouts as rectangles in a `w`-wide box.
-    function gridRects(count, w) {
-        const g = 4
-        const half = (w - g) / 2
-        const third = (w - 2 * g) / 3
-        if (count === 2)
-            return [{ x: 0, y: 0, w: half, h: w * 9 / 16 }, { x: half + g, y: 0, w: half, h: w * 9 / 16 }]
-        if (count === 3) {
-            const h = w * 2 / 3
-            const cell = (h - g) / 2
-            return [{ x: 0, y: 0, w: half, h: h }, { x: half + g, y: 0, w: half, h: cell },
-                    { x: half + g, y: cell + g, w: half, h: cell }]
-        }
-        if (count === 4) {
-            const cell = (w * 3 / 4 - g) / 2
-            return [0, 1, 2, 3].map(i => ({ x: (i % 2) * (half + g), y: Math.floor(i / 2) * (cell + g), w: half, h: cell }))
-        }
-        if (count === 5) {
-            const top = half * 9 / 16
-            const out = [{ x: 0, y: 0, w: half, h: top }, { x: half + g, y: 0, w: half, h: top }]
-            for (let i = 0; i < 3; ++i)
-                out.push({ x: i * (third + g), y: top + g, w: third, h: third })
-            return out
-        }
-        const shown = Math.min(count, 10)
-        const out = [{ x: 0, y: 0, w: w, h: w / 2 }]
-        for (let i = 1; i < shown; ++i) {
-            const k = i - 1
-            out.push({ x: (k % 3) * (third + g), y: w / 2 + g + Math.floor(k / 3) * (third + g), w: third, h: third })
-        }
-        return out
-    }
-
     // One image at its own size inside the 640 x 400 box.
     Loader {
         active: root.images.length === 1
@@ -81,30 +48,27 @@ Column {
         }
     }
 
-    // Two or more: the grid, at most ten tiles, "+N" on the tenth.
+    // Two or more: the grid (MediaMosaic), at most ten tiles, "+N" on the
+    // tenth.
     Loader {
         active: root.images.length > 1
         visible: active
-        sourceComponent: Item {
+        sourceComponent: MediaMosaic {
             id: grid
-            readonly property real gridW: Math.min(root.maxWidth, 520)
-            readonly property var rects: root.gridRects(root.images.length, gridW)
-            width: gridW
-            height: rects.reduce((m, r) => Math.max(m, r.y + r.h), 0)
-            Repeater {
-                model: grid.rects.length
-                MediaTile {
-                    required property int index
-                    readonly property var rect: grid.rects[index]
-                    item: root.images[index]
-                    fill: true
-                    x: rect.x
-                    y: rect.y
-                    width: rect.w
-                    height: rect.h
-                    more: index === 9 && root.images.length > 10 ? root.images.length - 10 : 0
-                    onActivated: root.openImage(root.images, index)
-                }
+            count: root.images.length
+            gridWidth: Math.min(root.maxWidth, 520)
+            delegate: MediaTile {
+                required property int index
+                readonly property var rect: grid.rects[index]
+                item: root.images[index]
+                fill: true
+                x: rect.x
+                y: rect.y
+                width: rect.w
+                height: rect.h
+                more: grid.more(index)
+                label: grid.tileName(root.images[index].name, index)
+                onActivated: root.openImage(root.images, index)
             }
         }
     }

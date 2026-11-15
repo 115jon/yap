@@ -13,6 +13,8 @@ Rectangle {
     required property var item
     property bool fill: true
     property int more: 0
+    // The spoken name, when the grid gives one (MediaMosaic.tileName).
+    property string label: ""
 
     signal activated()
 
@@ -42,7 +44,8 @@ Rectangle {
     border.color: Theme.line
     clip: true
     Accessible.role: Accessible.Button
-    Accessible.name: item.name.length > 0 ? qsTr("Open %1").arg(item.name) : qsTr("Open image")
+    Accessible.name: label.length > 0 ? label
+        : item.name.length > 0 ? qsTr("Open %1").arg(item.name) : qsTr("Open image")
 
     function learn(img) {
         // Only a decode at its own size tells the real size (a grid tile
