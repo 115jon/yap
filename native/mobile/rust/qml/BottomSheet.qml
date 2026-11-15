@@ -114,6 +114,13 @@ FocusScope {
     // ---------- Geometry ----------
     readonly property real topGap: SafeArea.margins.top + 8
     readonly property real bottomPad: Math.max(SafeArea.margins.bottom, Native.gestureInset, Native.imeHeight)
+    // On a tablet or in landscape the ply is at most 640 wide (Material's
+    // bottom sheet), centred; the window's side insets count only where
+    // it reaches them.
+    readonly property real plyWidth: Math.min(width, 640)
+    readonly property real plyX: Math.round((width - plyWidth) / 2)
+    readonly property real insetLeft: Math.max(0, SafeArea.margins.left - plyX)
+    readonly property real insetRight: Math.max(0, SafeArea.margins.right - plyX)
     readonly property real chrome: 20 + (title.length > 0 ? titleText.height + 12 : 0)
     readonly property real natural: chrome + contentHeight + bottomPad
     // The top detent: everything, or the window under the status bar.
@@ -245,9 +252,10 @@ FocusScope {
     // ---------- The ply ----------
     Rectangle {
         id: panel
-        // One px wider each side: only the top edge of the seam shows.
-        x: -1
-        width: parent.width + 2
+        // One px wider each side: at full width only the top edge of the
+        // seam shows.
+        x: sheet.plyX - 1
+        width: sheet.plyWidth + 2
         y: parent.height - sheet.shown + sheet.back * 48
         // Past the window's foot, so a pull up never shows under it.
         height: sheet.full + 64
@@ -298,9 +306,9 @@ FocusScope {
         Text {
             id: titleText
             visible: sheet.title.length > 0
-            x: 1 + 16 + sheet.SafeArea.margins.left
+            x: 1 + 16 + sheet.insetLeft
             y: 24
-            width: sheet.width - 32 - sheet.SafeArea.margins.left - sheet.SafeArea.margins.right
+            width: sheet.plyWidth - 32 - sheet.insetLeft - sheet.insetRight
             text: sheet.title
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
@@ -315,9 +323,9 @@ FocusScope {
 
         Item {
             id: body
-            x: 1 + sheet.SafeArea.margins.left
+            x: 1 + sheet.insetLeft
             y: sheet.chrome
-            width: sheet.width - sheet.SafeArea.margins.left - sheet.SafeArea.margins.right
+            width: sheet.plyWidth - sheet.insetLeft - sheet.insetRight
             height: Math.max(0, sheet.full - sheet.chrome - sheet.bottomPad)
             clip: true
         }
