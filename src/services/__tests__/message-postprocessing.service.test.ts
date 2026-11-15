@@ -13,6 +13,34 @@ vi.mock("../embed-fetcher", () => ({
   extractAndProcessEmbedsWithStatus: extractionStatusMock,
 }));
 
+/** The mentioned user can read the channel (a member whose @everyone role
+ * grants VIEW_CHANNELS), so their mention is delivered. */
+function canReadChannel(db: ReturnType<typeof createMockD1>) {
+  db.mockQuery(
+    "SELECT id, server_id, channel_type FROM channels WHERE id = ?",
+    {
+      id: "channel-1",
+      server_id: "server-1",
+      channel_type: "text",
+    },
+  );
+  db.mockQuery("FROM server_members AS sm", {
+    results: [
+      {
+        user_id: "mentioned-1",
+        role_id: "everyone",
+        role_permissions: 256,
+        role_position: 0,
+        role_is_default: 1,
+        override_target_id: null,
+        override_target_type: null,
+        override_allow: null,
+        override_deny: null,
+      },
+    ],
+  });
+}
+
 describe("message postprocessing", () => {
   beforeEach(() => {
     embedMock.mockReset();
@@ -371,6 +399,7 @@ describe("message postprocessing", () => {
     db.mockQuery("SELECT id, username", {
       results: [{ id: "mentioned-1", username: "mentioned" }],
     });
+    canReadChannel(db);
     db.mockQuery("SELECT content_revision FROM messages", {
       content_revision: 1,
     });
@@ -471,6 +500,7 @@ describe("message postprocessing", () => {
     db.mockQuery("SELECT id, username", {
       results: [{ id: "mentioned-1", username: "mentioned" }],
     });
+    canReadChannel(db);
     db.mockQuery("SELECT content_revision FROM messages", {
       content_revision: 1,
     });
@@ -539,6 +569,7 @@ describe("message postprocessing", () => {
     db.mockQuery("SELECT id, username", {
       results: [{ id: "mentioned-1", username: "mentioned" }],
     });
+    canReadChannel(db);
     db.mockQuery("SELECT content_revision FROM messages", {
       content_revision: 1,
     });
@@ -612,6 +643,7 @@ describe("message postprocessing", () => {
     db.mockQuery("SELECT id, username", {
       results: [{ id: "mentioned-1", username: "mentioned" }],
     });
+    canReadChannel(db);
     db.mockQuery("INSERT OR IGNORE INTO notification_delivery_markers", {
       meta: { changes: 1 },
     });
@@ -685,6 +717,7 @@ describe("message postprocessing", () => {
     db.mockQuery("SELECT id, username", {
       results: [{ id: "mentioned-1", username: "mentioned" }],
     });
+    canReadChannel(db);
     db.mockQuery("INSERT OR IGNORE INTO notification_delivery_markers", {
       meta: { changes: 0 },
     });
@@ -729,6 +762,7 @@ describe("message postprocessing", () => {
     db.mockQuery("SELECT id, username", {
       results: [{ id: "mentioned-1", username: "mentioned" }],
     });
+    canReadChannel(db);
     db.mockQuery("INSERT OR IGNORE INTO notification_delivery_markers", {
       meta: { changes: 1 },
     });

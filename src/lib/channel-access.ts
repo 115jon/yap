@@ -3,6 +3,11 @@ import {
   hasPermission,
   PERMISSIONS,
 } from "@/lib/permissions";
+import {
+  resolveVisibleChannelPermissions,
+  type ChannelVisibilityOverride,
+  type ChannelVisibilityRole,
+} from "@/lib/channel-visibility";
 import { getUserChannelPermissionsForDb } from "@/lib/require-permission";
 import type { D1Database } from "@cloudflare/workers-types";
 
@@ -354,6 +359,107 @@ export async function resolveChannelAccess(
   } catch {
     return null;
   }
+}
+
+/**
+ * Which of `channelIds` one user can read now: a DM they are in, or a
+ * server channel of a server they are a member of whose permissions give
+ * them VIEW_CHANNELS. One batch of four statements whatever the count (the
+ * ids go in as one JSON array). A D1 error is thrown, not read as "none".
+ */
+export async function visibleChannelIds(
+  db: D1Database,
+  userId: string,
+  channelIds: readonly string[],
+): Promise<Set<string>> {
+  const visible = new Set<string>();
+  const ids = [...new Set(channelIds.filter(Boolean))];
+  if (ids.length === 0) return visible;
+  const json = JSON.stringify(ids);
+  const IDS = "(SELECT value FROM json_each(?))";
+
+  const [channels, dms, roles, overrides] = await db.batch([
+    db
+      .prepare(
+        `SELECT id, server_id, channel_type FROM channels WHERE id IN ${IDS}`,
+      )
+      .bind(json),
+    db
+      .prepare(
+        `SELECT channel_id FROM dm_recipients
+          WHERE user_id = ? AND channel_id IN ${IDS}`,
+      )
+      .bind(userId, json),
+    // Roles through server_members: no membership, no roles, nothing.
+    db
+      .prepare(
+        `SELECT sm.server_id AS server_id, r.id AS id,
+                r.permissions AS permissions, r.is_default AS is_default
+           FROM server_members sm
+           JOIN member_roles mr ON mr.server_id = sm.server_id AND mr.user_id = sm.user_id
+           JOIN roles r ON r.id = mr.role_id
+          WHERE sm.user_id = ?
+            AND sm.server_id IN (SELECT server_id FROM channels WHERE id IN ${IDS})`,
+      )
+      .bind(userId, json),
+    db
+      .prepare(
+        `SELECT channel_id, target_id, target_type, allow, deny
+           FROM channel_permission_overrides
+          WHERE channel_id IN ${IDS}`,
+      )
+      .bind(json),
+  ]);
+
+  const dmMember = new Set(
+    ((dms?.results ?? []) as { channel_id: string }[]).map(
+      (row) => row.channel_id,
+    ),
+  );
+  const rolesByServer = new Map<string, ChannelVisibilityRole[]>();
+  for (const role of (roles?.results ?? []) as (ChannelVisibilityRole & {
+    server_id: string;
+  })[]) {
+    const list = rolesByServer.get(role.server_id) ?? [];
+    list.push({
+      id: role.id,
+      permissions: Number(role.permissions ?? 0),
+      is_default: role.is_default,
+    });
+    rolesByServer.set(role.server_id, list);
+  }
+  const allOverrides = (
+    (overrides?.results ?? []) as ChannelVisibilityOverride[]
+  ).map((o) => ({
+    ...o,
+    allow: Number(o.allow ?? 0),
+    deny: Number(o.deny ?? 0),
+  }));
+
+  const byServer = new Map<string, { id: string }[]>();
+  for (const channel of (channels?.results ?? []) as BatchChannel[]) {
+    if (channel.channel_type === "dm" || channel.server_id === null) {
+      if (dmMember.has(channel.id)) visible.add(channel.id);
+      continue;
+    }
+    const list = byServer.get(channel.server_id) ?? [];
+    list.push({ id: channel.id });
+    byServer.set(channel.server_id, list);
+  }
+  for (const [serverId, serverChannels] of byServer) {
+    const memberRoles = rolesByServer.get(serverId);
+    if (!memberRoles || memberRoles.length === 0) continue;
+    const inServer = new Set(serverChannels.map((c) => c.id));
+    const permitted = resolveVisibleChannelPermissions(
+      serverChannels,
+      userId,
+      memberRoles,
+      allOverrides.filter((o) => inServer.has(o.channel_id)),
+    );
+    for (const id of Object.keys(permitted)) visible.add(id);
+  }
+
+  return visible;
 }
 
 export function hasChannelPermission(

@@ -25,7 +25,7 @@ import {
   lookupCachedEmbeds,
 } from "./embed-fetcher";
 import type { MessagePush } from "./push.service";
-import { usersWhoBlocked } from "./block.service";
+import { usersBlockedEitherWay } from "./block.service";
 import { shouldNotify } from "@/lib/notification-levels";
 import { resolveChannelAccessForUsers } from "@/lib/channel-access";
 import {
@@ -1484,7 +1484,7 @@ export async function generateAllMessagePushes(
   ).filter((userId) => userId !== opts.authorId && !opts.skip.has(userId));
   if (listeners.length === 0) return [];
 
-  const blockers = new Set(await usersWhoBlocked(db, opts.authorId));
+  const blockers = await usersBlockedEitherWay(db, opts.authorId);
   const access = await resolveChannelAccessForUsers(
     db,
     opts.channelId,
@@ -1715,10 +1715,10 @@ export async function generateMessageNotifications(
   } | null;
 
   const serverId = channelInfo?.server_id ?? null;
-  // Someone who blocked the author hears nothing from them: no mention,
-  // reply or DM notification, so no inbox entry and no push either.
-  const blockers = await usersWhoBlocked(db, opts.authorId);
-  for (const blockerId of blockers) notifiedUserIds.add(blockerId);
+  // Nobody on either side of a block with the author hears from them: no
+  // mention, reply or DM notification, so no inbox entry and no push either.
+  const blocked = await usersBlockedEitherWay(db, opts.authorId);
+  for (const blockedId of blocked) notifiedUserIds.add(blockedId);
   // Each recipient's level and mute for this channel (or DM) decide whether
   // the message notifies them at all (src/lib/notification-levels.ts).
   const isDm = channelInfo?.channel_type === "dm";
@@ -1763,31 +1763,57 @@ export async function generateMessageNotifications(
     mentionedUsernames.add(match[1].toLowerCase());
   }
 
-  if (mentionedUsernames.size > 0) {
-    const mentionedUsers: Record<string, unknown>[] = [];
-    const usernames = [...mentionedUsernames];
-    for (let offset = 0; offset < usernames.length; offset += 90) {
-      const { results } = await db
-        .prepare(
-          `SELECT id, username FROM users WHERE LOWER(username) IN (${usernames
-            .slice(offset, offset + 90)
-            .map(() => "LOWER(?)")
-            .join(",")})`,
-        )
-        .bind(...usernames.slice(offset, offset + 90))
-        .all();
-      mentionedUsers.push(...(results ?? []));
-    }
+  const mentionedUsers: Record<string, unknown>[] = [];
+  const usernames = [...mentionedUsernames];
+  for (let offset = 0; offset < usernames.length; offset += 90) {
+    const { results } = await db
+      .prepare(
+        `SELECT id, username FROM users WHERE LOWER(username) IN (${usernames
+          .slice(offset, offset + 90)
+          .map(() => "LOWER(?)")
+          .join(",")})`,
+      )
+      .bind(...usernames.slice(offset, offset + 90))
+      .all();
+    mentionedUsers.push(...(results ?? []));
+  }
+  const candidates = mentionedUsers.flatMap((mu) => {
+    const id = mu.id as string;
+    return id !== opts.authorId && !notifiedUserIds.has(id) ? [id] : [];
+  });
 
-    const mentionable = await notifiable(
-      mentionedUsers.map((mu) => mu.id as string),
-      true,
-    );
-    for (const mu of mentionedUsers ?? []) {
-      const mentionedId = mu.id as string;
-      if (mentionedId === opts.authorId || notifiedUserIds.has(mentionedId))
-        continue;
-      if (!mentionable.has(mentionedId)) continue;
+  const parentMsg = opts.replyToId
+    ? ((await db
+        .prepare(`SELECT author_id FROM messages WHERE id = ?`)
+        .bind(opts.replyToId)
+        .first()) as { author_id: string } | null)
+    : null;
+
+  // Only people who can read the channel hear about it: a mention of
+  // someone outside the server, or kept out of the channel, or a reply to
+  // someone who has left it since, stores no snippet and pushes nothing.
+  // One access check covers the mentions and the reply.
+  const access = await resolveChannelAccessForUsers(db, opts.channelId, [
+    ...candidates,
+    ...(parentMsg ? [parentMsg.author_id] : []),
+  ]);
+  for (const [userId, decision] of access) {
+    // Thrown so the postprocessing task is retried, not read as "denied".
+    if (decision.kind === "error") {
+      throw new Error(
+        `channel access check failed for ${userId} in ${opts.channelId}`,
+      );
+    }
+  }
+  const canRead = (userId: string) => access.get(userId)?.kind === "allowed";
+
+  // Each one's level and mute for the channel decide next.
+  const mentionable = await notifiable(candidates.filter(canRead), true);
+
+  if (candidates.length > 0) {
+    for (const mentionedId of candidates) {
+      if (notifiedUserIds.has(mentionedId)) continue;
+      if (!canRead(mentionedId) || !mentionable.has(mentionedId)) continue;
       notifiedUserIds.add(mentionedId);
 
       const notifId = opts.notificationId?.("mention", mentionedId) ?? genId();
@@ -1833,16 +1859,11 @@ export async function generateMessageNotifications(
   }
 
   // 2. Reply notification
-  if (opts.replyToId) {
-    const parentMsg = (await db
-      .prepare(`SELECT author_id FROM messages WHERE id = ?`)
-      .bind(opts.replyToId)
-      .first()) as { author_id: string } | null;
-
+  if (parentMsg) {
     if (
-      parentMsg &&
       parentMsg.author_id !== opts.authorId &&
       !notifiedUserIds.has(parentMsg.author_id) &&
+      canRead(parentMsg.author_id) &&
       (await notifiable([parentMsg.author_id], true)).has(parentMsg.author_id)
     ) {
       const notifId =

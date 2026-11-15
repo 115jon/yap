@@ -7,6 +7,7 @@
 
 import { ServiceError } from "@/lib/service-error";
 import type { AvatarDisplay } from "@/lib/avatar-display";
+import { visibleChannelIds } from "@/lib/channel-access";
 import type { D1Database } from "@cloudflare/workers-types";
 
 // ─── listNotifications ───────────────────────────────────────────────────────
@@ -36,16 +37,63 @@ export interface Notification {
   server_name: unknown;
 }
 
+// A stored notification keeps its snippet after a block between the two
+// users (either way) or after the recipient loses the channel (left the
+// server, a role or override took it away). The list leaves those out, and
+// so does the unread count. The other side of every block the user is in
+// is read once per query (two binds of the user id), not once per row.
+const NOT_BLOCKED = `(n.from_user_id IS NULL OR n.from_user_id NOT IN (
+  SELECT target_user_id FROM relationships WHERE type = 1 AND user_id = ?
+  UNION
+  SELECT user_id FROM relationships WHERE type = 1 AND target_user_id = ?
+))`;
+
+// No channel (or an empty one) has nothing to check; otherwise the channel
+// must be in the JSON array of channels the user can read.
+const IN_VISIBLE_CHANNEL = `(n.channel_id IS NULL OR n.channel_id = ''
+  OR n.channel_id IN (SELECT value FROM json_each(?)))`;
+
 export async function listNotifications(
   db: D1Database,
   userId: string,
   opts: ListNotificationsOptions,
 ): Promise<{ notifications: Notification[]; unread_count: number }> {
-  const cappedLimit = Math.min(opts.limit, 100);
+  const cappedLimit = Math.max(1, Math.min(opts.limit || 50, 100));
 
-  const whereClause = opts.unreadOnly
-    ? "WHERE n.user_id = ? AND n.is_read = 0"
-    : "WHERE n.user_id = ?";
+  const unreadClause = opts.unreadOnly ? "AND n.is_read = 0" : "";
+
+  // Every channel the user has a notification in (an unread one, for the
+  // unread list, which is all the count needs too), with its unread count;
+  // the access check runs once over these, so the page below can filter in
+  // SQL and its LIMIT counts only rows the user may see.
+  const { results: byChannel } = await db
+    .prepare(
+      `SELECT n.channel_id AS channel_id,
+              SUM(CASE WHEN n.is_read = 0 THEN 1 ELSE 0 END) AS unread
+         FROM notifications n
+        WHERE n.user_id = ? ${unreadClause} AND ${NOT_BLOCKED}
+        GROUP BY n.channel_id`,
+    )
+    .bind(userId, userId, userId)
+    .all<{ channel_id: string | null; unread: number | null }>();
+
+  const channelOf = (value: unknown) =>
+    typeof value === "string" && value.length > 0 ? value : null;
+  const visible = await visibleChannelIds(
+    db,
+    userId,
+    (byChannel ?? [])
+      .map((r) => channelOf(r.channel_id))
+      .filter((id): id is string => id !== null),
+  );
+  const shown = (channelId: unknown) => {
+    const id = channelOf(channelId);
+    return id === null || visible.has(id);
+  };
+  const unreadCount = (byChannel ?? []).reduce(
+    (sum, r) => (shown(r.channel_id) ? sum + Number(r.unread ?? 0) : sum),
+    0,
+  );
 
   const { results } = await db
     .prepare(
@@ -60,19 +108,14 @@ export async function listNotifications(
        LEFT JOIN users u ON u.id = n.from_user_id
        LEFT JOIN channels c ON c.id = n.channel_id
        LEFT JOIN servers s ON s.id = n.server_id
-       ${whereClause}
+       WHERE n.user_id = ? ${unreadClause}
+         AND ${NOT_BLOCKED}
+         AND ${IN_VISIBLE_CHANNEL}
        ORDER BY n.created_at DESC
        LIMIT ?`,
     )
-    .bind(userId, cappedLimit)
+    .bind(userId, userId, userId, JSON.stringify([...visible]), cappedLimit)
     .all();
-
-  const countRow = (await db
-    .prepare(
-      `SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND is_read = 0`,
-    )
-    .bind(userId)
-    .first()) as { count: number } | null;
 
   const notifications: Notification[] = (results ?? []).map(
     (r: Record<string, unknown>) => ({
@@ -99,7 +142,7 @@ export async function listNotifications(
 
   return {
     notifications,
-    unread_count: countRow?.count ?? 0,
+    unread_count: unreadCount,
   };
 }
 
