@@ -127,7 +127,7 @@ void Native::setCameraCapture(bool on)
     return;
   m_cameraCapture = on;
   // The heat is read while the camera runs, a self-view or not.
-  VideoHub::instance()->setCapturing(on);
+  VideoHub::instance()->setCapturing(VideoHub::Camera, on);
 #ifdef Q_OS_ANDROID
   if (on) {
     QJniObject::callStaticMethod<void>(kCamera, "start", "(Landroid/content/Context;Z)V",

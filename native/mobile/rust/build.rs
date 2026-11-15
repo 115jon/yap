@@ -77,11 +77,12 @@ fn main() {
         .iter()
         .map(|path| QmlFile::from(*path))
         // This phone's own settings (QSettings), the page router and the
-        // camera's link to the call.
+        // camera's and the screen share's links to the call.
         .chain([
             QmlFile::from("qml/Prefs.qml").singleton(true),
             QmlFile::from("qml/Router.qml").singleton(true),
             QmlFile::from("qml/CameraLink.qml").singleton(true),
+            QmlFile::from("qml/ShareLink.qml").singleton(true),
         ]);
     CxxQtBuilder::new_qml_module(QmlModule::new("com.yap.mobile").qml_files(files)).build();
 }

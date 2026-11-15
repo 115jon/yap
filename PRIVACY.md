@@ -64,6 +64,13 @@ notifications included. In the desktop application, sharing a whole screen with 
 sends everything the computer plays, other people's voices in the call
 included; sharing a window sends only that application's sound.
 
+The Android app shares the phone's screen only after Android's own consent
+dialog, every time, where the user picks the whole screen or one app; while
+it is shared, the call's notification and Android's own indicator say so,
+and either can stop it. With "Share sound from other apps" turned on it also
+sends what other apps play (videos, music, games), never Yap's own sounds
+or the call, so the other people in the call do not hear themselves back.
+
 The Android app's composer can take a photo with the phone's camera app; the
 photo leaves the phone only if the user sends it.
 

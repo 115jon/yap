@@ -53,6 +53,9 @@ yap-voice = { path = "../../rust/crates/yap-voice", default-features = false, fe
 # libwebrtc, which voice links.
 yap-audio = { path = "../../rust/crates/yap-audio", default-features = false, features = ["rustls", "store", "libopus"] }
 yap-speaker = { path = "../../rust/crates/yap-speaker" }
+# Our screen share's stills for everyone's roster (voice.rs), with the
+# encoder yap-ui's image already builds.
+image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
 
 [features]
 # The debug crash trigger (src/crash.rs; CMake turns it on for

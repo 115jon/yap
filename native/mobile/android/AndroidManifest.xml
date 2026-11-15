@@ -11,7 +11,7 @@
      until main.cpp hides it at the first frame; push notifications
      (the FCM service, the Reply and Mark as read receiver, the permission);
      and voice calls (the mic, the audio route, the call's service, the
-     phone's camera in a call);
+     phone's camera and screen share in a call);
      and links into the app (LinkActivity's filters); shares into it
      (ShareActivity's); the composer's Camera
      (CaptureProvider, where the camera app writes the photo: the system
@@ -45,6 +45,12 @@
          camera type too. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <!-- The phone's screen share in a call (voice/ScreenShim): the system
+         asks for consent at every share; while the capture runs the call's
+         service carries the mediaProjection type too. The device's sound
+         goes with it only when asked, through the microphone permission
+         above (AudioPlaybackCapture). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <!-- The image viewer's Save image into Pictures/Yap (NativeShim
          saveToGallery): MediaStore needs no permission for the app's own
          pictures from API 29; API 28 (the minimum) needs this one. -->
@@ -218,13 +224,14 @@
             </intent-filter>
         </service>
         <!-- The call in progress: the ongoing notification with Mute and
-             Leave. Not restarted by the system: the call lives in the
-             process, and ends with it. Microphone, and camera only while
-             the phone's camera captures (VoiceService.type). -->
+             Leave (and Stop sharing). Not restarted by the system: the call
+             lives in the process, and ends with it. Microphone, camera only
+             while the phone's camera captures, and mediaProjection only
+             while its screen is shared (VoiceService.type). -->
         <service
             android:name="dev.yap.qtproto.voice.VoiceService"
             android:exported="false"
-            android:foregroundServiceType="microphone|camera"
+            android:foregroundServiceType="microphone|camera|mediaProjection"
             android:stopWithTask="false" />
         <!-- A notification's Reply and Mark as read. -->
         <receiver

@@ -77,6 +77,7 @@ qt_add_executable(yapqt
   cpp/keystore.cpp
   cpp/voice.cpp
   cpp/camera.cpp
+  cpp/screen.cpp
   cpp/calls.cpp
   # Remote call video: the newest frame per key and the item that draws it.
   cpp/videohub.cpp cpp/videohub.h
