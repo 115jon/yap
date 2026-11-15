@@ -59,7 +59,11 @@ describe("ServerList notification mutes", () => {
       />,
     );
     expect(pillFor("Loud")).toBe("unread");
-    expect(pillFor("Quiet")).toBe("none");
+    // Named and dimmed as muted.
+    expect(pillFor("Quiet, muted")).toBe("none");
+    expect(screen.getByRole("button", { name: "Quiet, muted" })).toHaveClass(
+      "opacity-60",
+    );
   });
 
   it("skips muted channels when it adds up a server's unread", () => {
@@ -95,7 +99,7 @@ describe("ServerList notification mutes", () => {
         onSelect={() => {}}
       />,
     );
-    fireEvent.contextMenu(screen.getByRole("button", { name: "Quiet" }));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Quiet, muted" }));
     expect(await screen.findByText("Notifications")).toBeInTheDocument();
     expect(screen.getByText("Muted")).toBeInTheDocument();
   });

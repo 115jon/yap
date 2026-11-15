@@ -371,6 +371,7 @@ export default function ServerList({
               mutes.isChannelMuted,
             );
           const mentionCount = serverMentionCounts[server.id] ?? 0;
+          const isNotifyMuted = mutes.isServerMuted(server.id);
           const voiceSummary = serverVoiceSummaries[server.id];
           const isInLocalVoiceServer =
             !!voiceSummary && localVoiceServerId === server.id;
@@ -385,9 +386,12 @@ export default function ServerList({
           const visibleVoiceChannelNames = visibleVoiceChannels
             .map((channel) => channel.channelName)
             .join(", ");
-          const buttonLabel = voiceSummary
-            ? `${server.name}, ${formatVoiceSummary(voiceSummary.totalMembers, voiceSummary.activeChannels.length)}, active voice: ${visibleVoiceChannelNames}${hiddenVoiceChannelCount > 0 ? `, and ${hiddenVoiceChannelCount} more` : ""}`
+          const serverLabel = isNotifyMuted
+            ? `${server.name}, muted`
             : server.name;
+          const buttonLabel = voiceSummary
+            ? `${serverLabel}, ${formatVoiceSummary(voiceSummary.totalMembers, voiceSummary.activeChannels.length)}, active voice: ${visibleVoiceChannelNames}${hiddenVoiceChannelCount > 0 ? `, and ${hiddenVoiceChannelCount} more` : ""}`
+            : serverLabel;
 
           return (
             <RailSlot
@@ -402,6 +406,8 @@ export default function ServerList({
                       RAIL_TILE,
                       isActive && RAIL_TILE_SELECTED,
                       hasUnread && !isActive && "text-ink-1",
+                      // Notifications muted: the tile recedes.
+                      isNotifyMuted && !isActive && "opacity-60",
                       // You are here: your call's server wears the path.
                       isInLocalVoiceServer && "ring-1 ring-path ring-inset",
                     )}
