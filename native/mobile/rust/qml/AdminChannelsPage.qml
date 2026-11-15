@@ -73,7 +73,7 @@ AdminPage {
         visible: Admin.canManageChannels
         iconName: "add"
         text: qsTr("Create channel")
-        onOpened: Router.open("CreateChannelPage", { categoryId: "" })
+        onOpened: Router.open("CreateChannelPage", { categoryId: "", closeOnCreate: true })
     }
     AdminNote {
         text: root.deleting.error
