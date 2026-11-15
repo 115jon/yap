@@ -21,6 +21,11 @@ import { toast } from "@/components/ui/toast";
 import { blockErrorMessage, blockStateFromError } from "@/lib/blocks";
 import { useDmBlockStore } from "./useDmBlockStore";
 import { useMediaSafetySettingsStore } from "./useMediaSafetySettingsStore";
+import { mutedChannelPredicate } from "@/lib/notification-settings-client";
+import {
+  createNotificationSettingsActions,
+  type NotificationSettingsActions,
+} from "./notification-settings-actions";
 import { useSoundSettingsStore } from "./useSoundSettingsStore";
 
 function isAuthRequiredError(error: unknown): boolean {
@@ -45,7 +50,7 @@ async function withAuthRequiredRetry<T>(
   }
 }
 
-export interface ChatRestActions {
+export interface ChatRestActions extends NotificationSettingsActions {
   sendMessage: (
     channelId: string,
     content: string,
@@ -310,6 +315,7 @@ export function createChatActions(
         lastMessageAt: state.lastMessageAt,
         readStates: state.readStates,
         dmChannelIds: state.dmChannels.map((dm) => dm.id),
+        isMuted: mutedChannelPredicate(state),
       });
 
     await syncDesktopNotificationState({
@@ -318,6 +324,15 @@ export function createChatActions(
       unreadServerChannelIds,
     });
   };
+
+  const notificationSettingsActions = createNotificationSettingsActions(
+    get,
+    dispatch,
+    {
+      onChange: () => void syncDesktopNotifications(),
+      onSaveError: () => toast.error("Couldn't save notification settings"),
+    },
+  );
 
   const sendMessage = async (
     channelId: string,
@@ -1346,7 +1361,11 @@ export function createChatActions(
     const bootstrapPromise = (async () => {
       await loadCurrentUser(options?.expectedUserId);
       if (deferNonCritical) {
-        await Promise.all([loadServers(bootstrapGeneration), loadReadStates()]);
+        await Promise.all([
+          loadServers(bootstrapGeneration),
+          loadReadStates(),
+          notificationSettingsActions.loadNotificationSettings(),
+        ]);
         setTimeout(() => {
           void Promise.allSettled(runNonCritical());
         }, 0);
@@ -1354,6 +1373,7 @@ export function createChatActions(
         await Promise.all([
           loadServers(bootstrapGeneration),
           loadReadStates(),
+          notificationSettingsActions.loadNotificationSettings(),
           ...runNonCritical(),
         ]);
       }
@@ -1452,5 +1472,6 @@ export function createChatActions(
     markNotificationsRead,
     clearNotifications,
     reorderChannels,
+    ...notificationSettingsActions,
   };
 }

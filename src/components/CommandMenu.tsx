@@ -13,6 +13,11 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { MENU_PANEL } from "@/components/ui/menu";
 import { cn } from "@/lib/utils";
 import type { Server } from "@/lib/types";
+import {
+  createNotificationMuteLookup,
+  NO_MUTES,
+  type NotificationMuteLookup,
+} from "@/lib/notification-settings-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { openMessageSearch } from "./chat/search/open-message-search";
@@ -48,6 +53,8 @@ type OpenSnapshot = {
   readStates: Record<string, string>;
   lastMessageAt: Record<string, string>;
   mentions: Record<string, number>;
+  /** Muted channels and DMs leave Unread unless they hold a mention. */
+  mutes: NotificationMuteLookup;
 };
 
 const EMPTY_SNAPSHOT: OpenSnapshot = {
@@ -55,6 +62,7 @@ const EMPTY_SNAPSHOT: OpenSnapshot = {
   readStates: {},
   lastMessageAt: {},
   mentions: {},
+  mutes: NO_MUTES,
 };
 
 function takeSnapshot(): OpenSnapshot {
@@ -64,7 +72,18 @@ function takeSnapshot(): OpenSnapshot {
     readStates: s.readStates,
     lastMessageAt: s.lastMessageAt,
     mentions: s.channelMentionCounts,
+    mutes: createNotificationMuteLookup(
+      s.notificationSettings,
+      Math.max(Date.now(), s.notificationSettingsNow),
+    ),
   };
+}
+
+function isMutedPlace(serverId: string, id: string, snap: OpenSnapshot) {
+  if ((snap.mentions[id] ?? 0) > 0) return false;
+  return serverId === "@me"
+    ? snap.mutes.isDmMuted(id)
+    : snap.mutes.isChannelMuted(id, serverId);
 }
 
 function isUnread(id: string, snap: OpenSnapshot): boolean {
@@ -232,7 +251,12 @@ export default function CommandMenu() {
     const ids = [
       ...dmChannels.map((d) => ["@me", d.id] as const),
       ...textChannels.map((c) => [c.server_id!, c.id] as const),
-    ].filter(([, id]) => id !== activeChannelId && isUnread(id, snapshot));
+    ].filter(
+      ([serverId, id]) =>
+        id !== activeChannelId &&
+        isUnread(id, snapshot) &&
+        !isMutedPlace(serverId, id, snapshot),
+    );
     // Mentions first, then the most recent activity.
     ids.sort(([, a], [, b]) => {
       const m = (snapshot.mentions[b] ?? 0) - (snapshot.mentions[a] ?? 0);

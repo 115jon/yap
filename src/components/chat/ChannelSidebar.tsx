@@ -116,6 +116,8 @@ import VoiceChannelMediaStatusModal from "./VoiceChannelMediaStatusModal";
 import VoiceChannelTextStatusModal from "./VoiceChannelTextStatusModal";
 import InlineEmojiText from "./InlineEmojiText";
 import { ListenTogetherSidebarStatus } from "./ListenTogetherSidebarStatus";
+import { notificationsMenuItem } from "./NotificationSettingsMenu";
+import { useNotificationMutes } from "@/hooks/useNotificationMutes";
 
 const StreamContextMenu = lazy(() =>
   import("../StreamContextMenu").then((mod) => ({
@@ -304,6 +306,8 @@ interface SortableChannelItemProps {
   channel: Channel;
   isActive: boolean;
   unread: boolean;
+  /** Notifications muted here or on the server: dimmed, no unread. */
+  muted: boolean;
   mentionCount: number;
   isVoice: boolean;
   vcMembers: VoiceChannelMember[];
@@ -594,6 +598,7 @@ const SortableChannelItem = memo(function SortableChannelItem({
   channel,
   isActive,
   unread,
+  muted,
   mentionCount,
   isVoice,
   vcMembers,
@@ -760,6 +765,7 @@ const SortableChannelItem = memo(function SortableChannelItem({
         tree: true,
         selected: isActive,
         unread,
+        muted,
         className: cn(
           "cursor-pointer",
           isActive && "font-semibold",
@@ -1708,27 +1714,15 @@ function useSidebarContextMenus({
           },
           divider: true,
         },
-        // ── Notifications (placeholders — need backend) ────────────────
-        {
-          label: "Mute channel",
-          icon: <Icon name="speakerOff" size="sm" />,
-          rightIcon: <Icon name="chevronRight" size="xs" />,
-          onClick: () => {
-            /* needs backend: per-user per-channel mute */
+        // ── Notifications: level and mute ──────────────────────────────
+        notificationsMenuItem(
+          {
+            kind: "channel",
+            channelId: channel.id,
+            serverId: channel.server_id ?? serverId ?? null,
           },
-          disabled: true,
-        },
-        {
-          label: "Notification settings",
-          subtitle: "All messages",
-          icon: <Icon name="bell" size="sm" />,
-          rightIcon: <Icon name="chevronRight" size="xs" />,
-          onClick: () => {
-            /* needs backend: per-user per-channel notification prefs */
-          },
-          disabled: true,
-          divider: true,
-        },
+          { divider: true },
+        ),
         // ── Channel management ─────────────────────────────────────────
         ...(channelCanManage
           ? [
@@ -1943,11 +1937,9 @@ function useSidebarContextMenus({
               },
             ]
           : []),
-        {
-          label: "Notification settings",
-          icon: <Icon name="bell" size="sm" />,
-          onClick: () => {},
-        },
+        ...(serverId
+          ? [notificationsMenuItem({ kind: "server", serverId })]
+          : []),
         {
           label: "Privacy settings",
           icon: <Icon name="shield" size="sm" />,
@@ -1982,6 +1974,7 @@ function useSidebarContextMenus({
       onRequestLeave,
       onSettingsClick,
       openMenu,
+      serverId,
       uiDispatch,
     ],
   );
@@ -2413,6 +2406,7 @@ const ChannelCategoryGroup = memo(function ChannelCategoryGroup({
   const categoryLongPress = useLongPressMenu((e) =>
     handleCategoryContextMenu(e, group),
   );
+  const mutes = useNotificationMutes();
 
   return (
     <div
@@ -2483,8 +2477,14 @@ const ChannelCategoryGroup = memo(function ChannelCategoryGroup({
             voiceChannelStates[channel.id] ?? EMPTY_VOICE_MEMBERS;
           const isConnectedVoice =
             isVoice && vcMembers.some((m) => m.user_id === currentUserId);
+          const muted = mutes.isChannelMuted(
+            channel.id,
+            channel.server_id ?? null,
+          );
           const unread =
-            !isActive && isUnread(channel.id, readStates, lastMessageAt);
+            !isActive &&
+            !muted &&
+            isUnread(channel.id, readStates, lastMessageAt);
 
           return (
             <SortableChannelItem
@@ -2492,6 +2492,7 @@ const ChannelCategoryGroup = memo(function ChannelCategoryGroup({
               channel={channel}
               isActive={isActive}
               unread={unread}
+              muted={muted}
               hidden={isCollapsed && !isActive && !isConnectedVoice}
               mentionCount={channelMentionCounts[channel.id] ?? 0}
               isVoice={isVoice}

@@ -231,10 +231,12 @@ describe("chat actions read-state writes", () => {
       deferNonCritical: true,
     });
 
+    // Mutes are critical: they decide which unread badges show.
     expect(requestedUrls).toEqual([
       "/api/users/me",
       "/api/servers",
       "/api/read-states",
+      "/api/notification-settings",
     ]);
 
     await new Promise<void>((resolve) => setTimeout(resolve, 0));

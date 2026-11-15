@@ -16,7 +16,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useNotificationMutes } from "@/hooks/useNotificationMutes";
 import ContextMenu from "./ContextMenu";
+import { notificationsMenuItem } from "./NotificationSettingsMenu";
 import { AvatarImage } from "./AvatarImage";
 import { avatarShape } from "@/components/ui/avatar-shape";
 import CreateServerModal from "./CreateServerModal";
@@ -80,11 +82,14 @@ function serverHasUnread(
   channels: Channel[],
   readStates: Record<string, string>,
   lastMessageAt: Record<string, string>,
+  /** Muted channels (or a muted server) light no unread pill. */
+  isChannelMuted?: (channelId: string, serverId: string) => boolean,
 ): boolean {
   const serverChannels = channels.filter(
     (channel) => channel.server_id === serverId,
   );
   return serverChannels.some((channel) => {
+    if (isChannelMuted?.(channel.id, serverId)) return false;
     const lastMessage = lastMessageAt[channel.id];
     if (!lastMessage) return false;
     const lastRead = readStates[channel.id];
@@ -133,6 +138,7 @@ export default function ServerList({
   const [dmExpanded, setDmExpanded] = useState(false);
   const { menu, openMenu, closeMenu, shouldRender, isClosing } =
     useContextMenu();
+  const mutes = useNotificationMutes();
 
   const handleServerContextMenu = (event: React.MouseEvent, server: Server) => {
     const hasUnread = serverHasUnread(
@@ -147,7 +153,12 @@ export default function ServerList({
         icon: <Icon name="check" size="sm" />,
         onClick: () => onMarkServerRead?.(server.id),
         disabled: !hasUnread,
+        divider: true,
       },
+      notificationsMenuItem(
+        { kind: "server", serverId: server.id },
+        { divider: true },
+      ),
       {
         label: "Copy ID",
         icon: <Icon name="copy" size="sm" />,
@@ -352,7 +363,13 @@ export default function ServerList({
           const isActive = activeServerId === server.id;
           const hasUnread =
             !isActive &&
-            serverHasUnread(server.id, channels, readStates, lastMessageAt);
+            serverHasUnread(
+              server.id,
+              channels,
+              readStates,
+              lastMessageAt,
+              mutes.isChannelMuted,
+            );
           const mentionCount = serverMentionCounts[server.id] ?? 0;
           const voiceSummary = serverVoiceSummaries[server.id];
           const isInLocalVoiceServer =

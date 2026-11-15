@@ -25,6 +25,10 @@ import {
 import { useBackButton } from "@/hooks/useBackButton";
 import { getUnreadChannelState } from "@/lib/desktop-notifications";
 import {
+  createNotificationMuteLookup,
+  mutedChannelPredicate,
+} from "@/lib/notification-settings-client";
+import {
   MOBILE_ACTION_TYPE_ID as _MOBILE_ACTION_TYPE_ID,
   syncDesktopNotificationState,
 } from "@/lib/desktop-native-sync";
@@ -169,8 +173,12 @@ export default function ChatPage() {
     channelMentionCounts,
     relationships,
     notifications,
+    notificationSettings,
+    notificationSettingsNow,
   } = useChatStore(
     useShallow((s) => ({
+      notificationSettings: s.notificationSettings,
+      notificationSettingsNow: s.notificationSettingsNow,
       servers: s.servers,
       activeServerId: s.activeServerId,
       activeChannelId: s.activeChannelId,
@@ -914,7 +922,13 @@ export default function ChatPage() {
       };
       unreadCount: number;
     }> = [];
+    const mutes = createNotificationMuteLookup(
+      notificationSettings,
+      notificationSettingsNow,
+    );
     for (const dm of dmChannels) {
+      // A muted DM shows no unread, so it stays off the rail.
+      if (mutes.isDmMuted(dm.id)) continue;
       const lastMsg = lastMessageAt[dm.id];
       if (!lastMsg) continue;
       const lastRead = readStates[dm.id];
@@ -927,7 +941,14 @@ export default function ChatPage() {
       }
     }
     return dms;
-  }, [dmChannels, readStates, lastMessageAt, notifications]);
+  }, [
+    dmChannels,
+    readStates,
+    lastMessageAt,
+    notifications,
+    notificationSettings,
+    notificationSettingsNow,
+  ]);
 
   const pendingFriendCount = useMemo(
     () => relationships.filter((r) => r.type === 2).length,
@@ -949,6 +970,12 @@ export default function ChatPage() {
         lastMessageAt,
         readStates,
         dmChannelIds: dmChannels.map((dm) => dm.id),
+        isMuted: mutedChannelPredicate({
+          notificationSettings,
+          notificationSettingsNow,
+          channelsByServerId,
+          channels,
+        }),
       });
 
     void syncDesktopNotificationState({
@@ -956,7 +983,16 @@ export default function ChatPage() {
       unreadDmChannelIds,
       unreadServerChannelIds,
     });
-  }, [dmChannels, lastMessageAt, notifications, readStates]);
+  }, [
+    channels,
+    channelsByServerId,
+    dmChannels,
+    lastMessageAt,
+    notifications,
+    notificationSettings,
+    notificationSettingsNow,
+    readStates,
+  ]);
 
   useEffect(() => {
     const handleMarkRead = (event: Event) => {

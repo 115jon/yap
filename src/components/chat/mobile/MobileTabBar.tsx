@@ -2,6 +2,7 @@ import { CountBadge } from "@/components/ui/badge";
 import { Icon, type StatefulIconName } from "@/components/ui/icon";
 import { PRESS } from "@/components/ui/interaction";
 import { useSoftKeyboardOpen } from "@/hooks/useSoftKeyboardOpen";
+import { createNotificationMuteLookup } from "@/lib/notification-settings-client";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/stores/chat-store";
 import { type MobileTab, useMobileTabStore } from "@/stores/useMobileTabStore";
@@ -22,7 +23,13 @@ function useUnreadDmCount() {
   return useChatStore(
     useShallow((s) => {
       let count = 0;
+      const mutes = createNotificationMuteLookup(
+        s.notificationSettings,
+        s.notificationSettingsNow,
+      );
       for (const dm of s.dmChannels) {
+        // Muted DMs show no unread, so they leave the count too.
+        if (mutes.isDmMuted(dm.id)) continue;
         const last = s.lastMessageAt[dm.id];
         if (!last) continue;
         const read = s.readStates[dm.id];

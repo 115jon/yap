@@ -7,6 +7,10 @@
  */
 
 import ChannelSidebar from "@/components/chat/ChannelSidebar";
+import {
+  toNotificationSettingsMap,
+  type NotificationSettingsMap,
+} from "@/lib/notification-settings-client";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { SearchFixture } from "@/components/dev/search-fixtures";
 import { isSearchFixture } from "@/components/dev/search-fixture-surfaces";
@@ -591,6 +595,70 @@ function fixtureGameActivities(): ChatState["gameActivityByUserId"] {
   };
 }
 
+/**
+ * `&mutes=before|after`: the notification-mute captures. Both add unread
+ * activity on two more servers; `after` also mutes #random (until turned
+ * off), #design-system (for an hour, so its mention badge shows dimmed), the
+ * Design Club server (8 hours) and the DM with Grace.
+ */
+function mutesParam(): "before" | "after" | null {
+  const value = fixtureParam("mutes");
+  return value === "before" || value === "after" ? value : null;
+}
+
+const MUTE_RAIL_CHANNELS: Channel[] = [
+  {
+    id: "ch-dc-general",
+    server_id: "s-2",
+    name: "general",
+    channel_type: "text",
+    position: 0,
+    created_at: at(9000),
+  },
+  {
+    id: "ch-ns-general",
+    server_id: "s-3",
+    name: "general",
+    channel_type: "text",
+    position: 0,
+    created_at: at(9000),
+  },
+];
+
+function fixtureMutes(): NotificationSettingsMap {
+  const inMs = (ms: number) => new Date(Date.now() + ms).toISOString();
+  return toNotificationSettingsMap([
+    {
+      target_type: "channel",
+      target_id: "ch-random",
+      level: null,
+      muted: true,
+      muted_until: null,
+    },
+    {
+      target_type: "channel",
+      target_id: "ch-design",
+      level: null,
+      muted: true,
+      muted_until: inMs(60 * 60_000),
+    },
+    {
+      target_type: "server",
+      target_id: "s-2",
+      level: "all",
+      muted: true,
+      muted_until: inMs(8 * 60 * 60_000),
+    },
+    {
+      target_type: "channel",
+      target_id: "dm-grace",
+      level: null,
+      muted: true,
+      muted_until: null,
+    },
+  ]);
+}
+
 function seedStore(surface: string) {
   const isEmpty = surface === "shell-empty";
   // DM call fixtures render the DM shell: the call's conversation is the
@@ -650,6 +718,8 @@ function seedStore(surface: string) {
     voiceChannelStartedAt: { "ch-lounge": Date.now() - 25 * 60_000 },
     channelMentionCounts: { "ch-design": 2 },
     serverMentionCounts: { "s-2": 4 },
+    notificationSettings: mutesParam() === "after" ? fixtureMutes() : {},
+    notificationSettingsNow: Date.now(),
     typingUsers: { "ch-general": new Set(["u-grace"]) },
     pinsLoadedByChannelId: { [activeChannelId]: true },
     pinnedMessagesByChannelId: { [activeChannelId]: [messages[3]!] },
@@ -736,6 +806,7 @@ function Rail({
   voice?: boolean;
   loungeMembers?: VoiceChannelMember[];
 }) {
+  const mutes = mutesParam();
   return (
     <div className="z-10 flex w-15 shrink-0 flex-col items-center overflow-y-auto bg-ply-0 scrollbar-none">
       <ServerList
@@ -743,16 +814,20 @@ function Rail({
         activeServerId={dm ? "@me" : "s-1"}
         activeChannelId={dm ? "dm-ada" : "ch-general"}
         onSelect={() => {}}
-        channels={channels}
+        channels={mutes ? [...channels, ...MUTE_RAIL_CHANNELS] : channels}
         channelsByServerId={{ "s-1": channels }}
         readStates={{ "ch-general": at(0) }}
-        lastMessageAt={{ "ch-general": at(3), "ch-design": at(20) }}
+        lastMessageAt={{
+          "ch-general": at(3),
+          "ch-design": at(20),
+          ...(mutes ? { "ch-dc-general": at(2), "ch-ns-general": at(6) } : {}),
+        }}
         voiceChannelStates={{ "ch-lounge": loungeMembers }}
         localVoiceServerId={voice ? "s-1" : null}
         serverMentionCounts={{ "s-2": 4 }}
         homeBadgeCount={dm ? 0 : 1}
         unreadDms={
-          dm
+          dm || mutes === "after"
             ? []
             : [
                 {
@@ -1970,6 +2045,18 @@ function MobileFixture({ surface }: { surface: string }) {
             serverName="Yap HQ"
             currentUserId="u-me"
             onSelect={() => {}}
+            readStates={
+              mutesParam() ? { "ch-general": at(0), "ch-welcome": at(0) } : {}
+            }
+            lastMessageAt={
+              mutesParam()
+                ? {
+                    "ch-general": at(3),
+                    "ch-design": at(20),
+                    "ch-random": at(400),
+                  }
+                : {}
+            }
             voiceChannelStates={{ "ch-lounge": voiceMembers }}
             channelMentionCounts={{ "ch-design": 2 }}
           />
