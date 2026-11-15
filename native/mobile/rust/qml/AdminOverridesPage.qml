@@ -38,75 +38,85 @@ AdminPage {
             anchors.fill: parent
             title: qsTr("Add an override")
             contentHeight: addColumn.implicitHeight
-            Column {
-                id: addColumn
-                x: 16
-                width: parent.width - 32
-                bottomPadding: 16
-                Text {
-                    width: parent.width
-                    bottomPadding: 8
-                    textFormat: Text.PlainText
-                    text: root.channel ? qsTr("Pick a role or member to change what they can do in %1.").arg(root.channel.label) : ""
-                    wrapMode: Text.Wrap
-                    color: Theme.ink2
-                    font: Theme.type.description
-                }
-                AdminSection {
-                    visible: root.core.availableRoles.length > 0
-                    title: qsTr("Roles")
-                    Repeater {
-                        model: root.core.availableRoles
-                        delegate: AdminRow {
-                            id: rolePick
-                            required property var modelData
-                            text: modelData.name
-                            chevron: false
-                            leading: Component {
-                                Rectangle {
-                                    width: 12
-                                    height: 12
-                                    radius: 6
-                                    color: rolePick.modelData.color.length > 0 ? rolePick.modelData.color : Theme.ink3
+            flickable: addFlick
+            Flickable {
+                id: addFlick
+                anchors.fill: parent
+                contentHeight: addColumn.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                flickDeceleration: Native.flingDeceleration
+                maximumFlickVelocity: Native.maxFlingVelocity
+                Column {
+                    id: addColumn
+                    x: 16
+                    width: parent.width - 32
+                    bottomPadding: 16
+                    Text {
+                        width: parent.width
+                        bottomPadding: 8
+                        textFormat: Text.PlainText
+                        text: root.channel ? qsTr("Pick a role or member to change what they can do in %1.").arg(root.channel.label) : ""
+                        wrapMode: Text.Wrap
+                        color: Theme.ink2
+                        font: Theme.type.description
+                    }
+                    AdminSection {
+                        visible: root.core.availableRoles.length > 0
+                        title: qsTr("Roles")
+                        Repeater {
+                            model: root.core.availableRoles
+                            delegate: AdminRow {
+                                id: rolePick
+                                required property var modelData
+                                text: modelData.name
+                                chevron: false
+                                leading: Component {
+                                    Rectangle {
+                                        width: 12
+                                        height: 12
+                                        radius: 6
+                                        color: rolePick.modelData.color.length > 0 ? rolePick.modelData.color : Theme.ink3
+                                    }
                                 }
-                            }
-                            onOpened: {
-                                root.core.addRole(modelData)
-                                addSheet.close()
-                                root.edit(modelData.id)
+                                onOpened: {
+                                    root.core.addRole(modelData)
+                                    addSheet.close()
+                                    root.edit(modelData.id)
+                                }
                             }
                         }
                     }
-                }
-                AdminSection {
-                    visible: root.core.availableMembers.length > 0
-                    title: qsTr("Members")
-                    Repeater {
-                        model: root.core.availableMembers
-                        delegate: AdminRow {
-                            id: memberPick
-                            required property var modelData
-                            text: modelData.name
-                            chevron: false
-                            leading: Component {
-                                Avatar {
-                                    size: 24
-                                    initials: memberPick.modelData.initials
-                                    source: memberPick.modelData.avatar
+                    AdminSection {
+                        visible: root.core.availableMembers.length > 0
+                        title: qsTr("Members")
+                        Repeater {
+                            model: root.core.availableMembers
+                            delegate: AdminRow {
+                                id: memberPick
+                                required property var modelData
+                                text: modelData.name
+                                chevron: false
+                                leading: Component {
+                                    Avatar {
+                                        size: 24
+                                        initials: memberPick.modelData.initials
+                                        source: memberPick.modelData.avatar
+                                    }
                                 }
-                            }
-                            onOpened: {
-                                root.core.addMember(modelData)
-                                addSheet.close()
-                                root.edit(modelData.id)
+                                onOpened: {
+                                    root.core.addMember(modelData)
+                                    addSheet.close()
+                                    root.edit(modelData.id)
+                                }
                             }
                         }
                     }
-                }
-                AdminNote {
-                    error: false
-                    text: root.core.availableRoles.length === 0 && root.core.availableMembers.length === 0
-                        ? qsTr("Every role and member already has an override here.") : ""
+                    AdminNote {
+                        error: false
+                        text: root.core.availableRoles.length === 0 && root.core.availableMembers.length === 0
+                            ? qsTr("Every role and member already has an override here.") : ""
+                    }
                 }
             }
         }

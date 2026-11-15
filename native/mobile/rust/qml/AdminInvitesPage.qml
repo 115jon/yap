@@ -27,9 +27,12 @@ AdminPage {
         if (server)
             Admin.load(server.id, "invites")
     }
+    // Set once the page opened: the act's first value is not a new link.
+    property bool opened: false
     Component.onCompleted: {
         Admin.clear("invite")
-        createdCount = 0
+        createdCount = creating.done
+        opened = true
         load()
     }
     // A revoked invite is gone: nothing is armed any more.
@@ -38,7 +41,7 @@ AdminPage {
     onCreatingChanged: {
         if (creating.done < createdCount)
             createdCount = creating.done
-        else if (creating.done > createdCount) {
+        else if (opened && creating.done > createdCount) {
             createdCount = creating.done
             if (model.createdInviteLink.length > 0)
                 Native.share(model.createdInviteLink, qsTr("Invite people to %1").arg(server ? server.name : ""))

@@ -22,6 +22,12 @@ AdminPage {
 
     title: qsTr("Channels")
 
+    // A failed delete's error is that delete's: not shown on coming back.
+    onOnTopChanged: {
+        if (onTop && !deleting.busy)
+            Admin.clear("delete-channel")
+    }
+
     // The channel next to row `index` in its group (`step` -1 above, 1
     // below), or empty at the group's end: a category, or the loose text
     // or voice channels.

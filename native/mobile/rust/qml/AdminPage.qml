@@ -63,8 +63,10 @@ Rectangle {
             scroll.contentY = Math.max(0, at + item.height - room + 16)
     }
 
-    // Unsaved edits hold Back: it asks first.
-    onGuardingChanged: guarding ? Native.pushBackLayer(root) : Native.popBackLayer(root)
+    // Unsaved edits hold Back: it asks first. Only while on top, so a
+    // page pushed over this one keeps its own Back.
+    readonly property bool holdsLayer: guarding && onTop
+    onHoldsLayerChanged: holdsLayer ? Native.pushBackLayer(root) : Native.popBackLayer(root)
     Component.onDestruction: Native.popBackLayer(root)
     function backProgressed(progress) {}
     function backCancelled() {}
@@ -83,13 +85,19 @@ Rectangle {
         else if (serverSeen && onTop)
             serverOpened()
     }
-    onChannelChanged: {
+    function checkChannel() {
         if (!watchChannel)
             return
         if (channel)
             channelSeen = true
         else if (channelSeen && onTop && server)
             closeRequested()
+    }
+    onChannelChanged: checkChannel()
+    // A page under the one that closed checks again once it is on top.
+    onOnTopChanged: {
+        if (onTop)
+            checkChannel()
     }
     Component.onCompleted: {
         serverSeen = server !== null

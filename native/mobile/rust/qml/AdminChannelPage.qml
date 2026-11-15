@@ -23,7 +23,10 @@ AdminPage {
     guarding: draft.dirty && !draft.saving
     discardBody: qsTr("Your channel edits have not been saved.")
 
-    Component.onCompleted: Admin.openChannel(channelId)
+    Component.onCompleted: {
+        Admin.clear("delete-channel")
+        Admin.openChannel(channelId)
+    }
     Component.onDestruction: Admin.closeChannel()
 
     overlays: [

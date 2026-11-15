@@ -19,7 +19,20 @@ AdminPage {
     property string madeId: ""
 
     readonly property string shownId: roleId.length > 0 ? roleId : madeId
-    readonly property var role: shownId.length > 0 ? ((model.roles.items ?? []).find(entry => entry.id === shownId) ?? null) : null
+    readonly property bool rolesReady: model.roles.state === "ready"
+    readonly property var found: shownId.length > 0 ? ((model.roles.items ?? []).find(entry => entry.id === shownId) ?? null) : null
+    // The role as last listed: a reload (after a save) keeps it, so the
+    // page never turns into a new role's while the list is away.
+    property var lastRole: null
+    onFoundChanged: {
+        if (found)
+            lastRole = found
+        else if (rolesReady && lastRole && opened && onTop)
+            closeRequested() // deleted elsewhere
+    }
+    readonly property var role: shownId.length === 0 ? null : (found ?? lastRole)
+    // A shown role that is not listed yet (just created): nothing to save.
+    readonly property bool pending: shownId.length > 0 && role === null
     readonly property RoleDraft draft: RoleDraft {
         model: root.model
         role: root.role
@@ -27,11 +40,11 @@ AdminPage {
         onDeleted: root.closeRequested()
     }
     property bool armed: false
-    readonly property var palette: ["#e5484d", "#f76b15", "#ffc53d", "#46a758", "#12a594", "#0090ff", "#3e63dd", "#8e4ec6", "#d6409f", "#99aab5"]
+    readonly property var swatches: ["#e5484d", "#f76b15", "#ffc53d", "#46a758", "#12a594", "#0090ff", "#3e63dd", "#8e4ec6", "#d6409f", "#99aab5"]
 
-    title: draft.creating ? qsTr("New role") : (role ? role.name : qsTr("Role"))
+    title: pending ? qsTr("Role") : draft.creating ? qsTr("New role") : (role ? role.name : qsTr("Role"))
     // A new role asks only once something was set (or it is on its way).
-    guarding: !draft.saving && (draft.creating
+    guarding: !pending && !draft.saving && (draft.creating
         ? madeId.length === 0 && (draft.name !== qsTr("New role") || draft.color.length > 0 || draft.permissions !== 0)
         : draft.dirty)
     discardBody: draft.creating ? qsTr("This role has not been created.") : qsTr("Your role edits have not been saved.")
@@ -40,12 +53,15 @@ AdminPage {
     readonly property string createdRole: model.createdRole
     // The one made before this page opened is not this page's.
     property string createdBefore: ""
+    // Set once the page opened: a binding's first change is not news.
+    property bool opened: false
     onCreatedRoleChanged: {
-        if (roleId.length === 0 && madeId.length === 0 && createdRole.length > 0 && createdRole !== createdBefore)
+        if (opened && roleId.length === 0 && madeId.length === 0 && createdRole.length > 0 && createdRole !== createdBefore)
             madeId = createdRole
     }
     Component.onCompleted: {
         createdBefore = createdRole
+        opened = true
         Admin.clear("role")
         if (roleId.length === 0)
             Admin.clear("role.name")
@@ -97,7 +113,7 @@ AdminPage {
                     width: parent.width
                     spacing: 8
                     Repeater {
-                        model: root.palette
+                        model: root.swatches
                         delegate: Rectangle {
                             id: swatch
                             required property string modelData
@@ -205,8 +221,8 @@ AdminPage {
             size: "lg"
             variant: "primary"
             text: root.draft.creating ? qsTr("Create role") : qsTr("Save changes")
-            enabled: root.draft.dirty
-            loading: root.draft.saving
+            enabled: root.draft.dirty && !root.pending
+            loading: root.draft.saving || root.pending
             onClicked: {
                 Qt.inputMethod.commit()
                 root.draft.save()
