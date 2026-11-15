@@ -19,46 +19,35 @@ Column {
     signal cancelCreate()
     signal deleted()
 
-    readonly property bool creating: role === null
-    readonly property string roleId: role ? role.id : ""
-    readonly property bool isDefault: role ? role.isDefault : false
-    readonly property var groups: JSON.parse(Admin.schema()).rolePermissions
-    readonly property int adminBit: 1
+    // The draft (Yap.Ui RoleDraft, the phone's too).
+    readonly property RoleDraft draft: RoleDraft {
+        model: root.model
+        role: root.role
+        onCancelCreate: root.cancelCreate()
+        onDeleted: {
+            root.armed = false
+            root.host.popEscape(root)
+            root.deleted()
+        }
+    }
+    readonly property bool creating: draft.creating
+    readonly property string roleId: draft.roleId
+    readonly property bool isDefault: draft.isDefault
+    readonly property var groups: draft.groups
+    readonly property int adminBit: draft.adminBit
 
-    property string name: ""
-    property string color: ""
-    property int permissions: 0
-
-    readonly property var act: model.acts["role"] ?? { busy: false, error: "", done: 0 }
-    readonly property var deleting: model.acts["role-delete"] ?? { busy: false, error: "", done: 0 }
-    readonly property string nameError: model.acts["role.name"]?.error ?? ""
-    readonly property string colorError: model.acts["role.color"]?.error ?? ""
-    readonly property bool isAdmin: (permissions & adminBit) === adminBit
-    readonly property bool dirty: creating || name !== role.name || color !== role.color || permissions !== role.permissions
-    readonly property bool saving: act.busy
-    readonly property string saveError: act.error
-    property int savedCount: 0
-    property int deletedCount: 0
+    readonly property var deleting: draft.deleting
+    readonly property string nameError: draft.nameError
+    readonly property string colorError: draft.colorError
+    readonly property bool isAdmin: draft.isAdmin
+    readonly property bool dirty: draft.dirty
+    readonly property bool saving: draft.saving
+    readonly property string saveError: draft.saveError
     property bool armed: false
 
     // Reset on a new-role draft drops the draft.
-    function reset() {
-        Admin.clear("role")
-        Admin.clear("role.name")
-        Admin.clear("role.color")
-        if (creating) {
-            cancelCreate()
-            return
-        }
-        name = role.name
-        color = role.color
-        permissions = role.permissions
-    }
-    function save() {
-        if (saving)
-            return
-        Admin.saveRole(roleId, name, color, permissions)
-    }
+    function reset() { draft.reset() }
+    function save() { draft.save() }
     function dismiss() {
         armed = false
         host.popEscape(root)
@@ -67,42 +56,9 @@ Column {
 
     spacing: 16
     Component.onDestruction: host.popEscape(root)
-    Component.onCompleted: {
-        savedCount = act.done
-        deletedCount = deleting.done
-        name = role ? role.name : qsTr("New role")
-        color = role ? role.color : ""
-        permissions = role ? role.permissions : 0
-    }
     onRoleIdChanged: {
         if (armed)
             dismiss()
-        name = role ? role.name : qsTr("New role")
-        color = role ? role.color : ""
-        permissions = role ? role.permissions : 0
-    }
-    onActChanged: {
-        // Saved: the reloaded role is the draft now.
-        if (act.done < savedCount)
-            savedCount = act.done
-        else if (act.done > savedCount) {
-            savedCount = act.done
-            if (role) {
-                name = role.name
-                color = role.color
-                permissions = role.permissions
-            }
-        }
-    }
-    onDeletingChanged: {
-        if (deleting.done < deletedCount)
-            deletedCount = deleting.done
-        else if (deleting.done > deletedCount) {
-            deletedCount = deleting.done
-            armed = false
-            host.popEscape(root)
-            deleted()
-        }
     }
 
     // Title: the dot, the name, and Delete.
@@ -115,8 +71,7 @@ Column {
             width: 12
             height: 12
             radius: 6
-            color: /^#[0-9a-f]{6}$/i.test(root.color) ? root.color
-                : root.role && root.role.color.length > 0 ? root.role.color : Theme.ink3
+            color: root.draft.shownColor.length > 0 ? root.draft.shownColor : Theme.ink3
         }
         Text {
             anchors.left: dot.right
@@ -181,14 +136,11 @@ Column {
             label: qsTr("Role name")
             KitField {
                 width: parent.width
-                text: root.name
+                text: root.draft.name
                 maximumLength: 100
                 invalid: root.nameError.length > 0
                 Accessible.name: qsTr("Role name")
-                onTextEdited: {
-                    root.name = text
-                    Admin.clear("role.name")
-                }
+                onTextEdited: root.draft.nameEdited(text)
             }
             footer: RowError { text: root.nameError }
         }
@@ -204,7 +156,7 @@ Column {
             // colour applies as it changes; Esc puts the old one back.
             T.AbstractButton {
                 id: picker
-                readonly property bool valid: /^#[0-9a-f]{6}$/i.test(root.color)
+                readonly property bool valid: /^#[0-9a-f]{6}$/i.test(root.draft.color)
                 anchors.verticalCenter: parent.verticalCenter
                 width: 32
                 height: 32
@@ -223,10 +175,10 @@ Column {
                         anchors.fill: parent
                         anchors.margins: 3
                         radius: 3
-                        color: picker.valid ? root.color : "#99aab5"
+                        color: picker.valid ? root.draft.color : "#99aab5"
                     }
                 }
-                onClicked: popover.request(root.color)
+                onClicked: popover.request(root.draft.color)
 
                 ColorPopover {
                     id: popover
@@ -235,28 +187,24 @@ Column {
                     onPicked: value => {
                         // Esc gives back the colour as it was, case and all,
                         // so the draft is clean again.
-                        root.color = value === popover.initial ? value : value.toLowerCase()
-                        Admin.clear("role.color")
+                        root.draft.colorEdited(value === popover.initial ? value : value.toLowerCase())
                     }
                 }
             }
             KitField {
                 width: 160
-                text: root.color
+                text: root.draft.color
                 placeholderText: "#3e9b4f"
                 font: Theme.type.code
                 invalid: root.colorError.length > 0
                 Accessible.name: qsTr("Role colour")
-                onTextEdited: {
-                    root.color = text
-                    Admin.clear("role.color")
-                }
+                onTextEdited: root.draft.colorEdited(text)
             }
             KitButton {
-                visible: root.color.length > 0
+                visible: root.draft.color.length > 0
                 variant: "ghost"
                 text: qsTr("Clear")
-                onClicked: root.color = ""
+                onClicked: root.draft.color = ""
             }
             footer: RowError { text: root.colorError }
         }
@@ -275,13 +223,13 @@ Column {
                 model: group.modelData.items
                 delegate: SwitchSetting {
                     required property var modelData
-                    readonly property bool locked: root.isAdmin && modelData.mask !== root.adminBit
+                    readonly property bool locked: root.draft.locked(modelData.mask)
                     custom: true
                     label: modelData.name
                     description: modelData.desc
                     disabled: locked
-                    checked: locked || (root.permissions & modelData.mask) === modelData.mask
-                    onToggled: root.permissions = root.permissions ^ modelData.mask
+                    checked: locked || root.draft.has(modelData.mask)
+                    onToggled: root.draft.toggle(modelData.mask)
                 }
             }
         }

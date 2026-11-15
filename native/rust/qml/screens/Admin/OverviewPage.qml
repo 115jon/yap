@@ -17,83 +17,28 @@ Column {
     required property var model
 
     readonly property var server: model.server
-    readonly property bool canEdit: server.access.manageServer
-    readonly property var act: model.acts["overview"] ?? { busy: false, error: "", done: 0 }
-    readonly property string nameError: model.acts["overview.name"]?.error ?? ""
-    readonly property string iconError: localIconError.length > 0 ? localIconError : (model.acts["overview.icon"]?.error ?? "")
+    readonly property bool canEdit: draft.canEdit
+    readonly property string nameError: draft.nameError
+    readonly property string iconError: draft.iconError
 
-    property string name: server.name
-    property string iconPath: ""
-    property bool removeIcon: false
-    property bool allowPublicShares: server.allowPublicShares
-    property bool showSourceInShares: server.showSourceInShares
-    property bool allowShareIndexing: server.allowShareIndexing
-    property string localIconError: ""
-    property int savedCount: 0
+    // The draft (Yap.Ui ServerOverviewDraft, the phone's too).
+    readonly property ServerOverviewDraft draft: ServerOverviewDraft { model: root.model }
 
     // The workbench's unsaved bar.
-    readonly property bool dirty: canEdit && (name.trim() !== server.name || iconPath.length > 0 || removeIcon
-        || allowPublicShares !== server.allowPublicShares
-        || showSourceInShares !== server.showSourceInShares
-        || allowShareIndexing !== server.allowShareIndexing)
-    readonly property bool saving: act.busy
-    readonly property string saveError: act.error
+    readonly property bool dirty: draft.dirty
+    readonly property bool saving: draft.saving
+    readonly property string saveError: draft.saveError
+    readonly property string shownIcon: draft.shownIcon
 
-    readonly property string shownIcon: iconPath.length > 0 ? "file:///" + iconPath.replace(/\\/g, "/")
-        : removeIcon ? "" : server.icon
-
-    function reset() {
-        name = server.name
-        iconPath = ""
-        removeIcon = false
-        allowPublicShares = server.allowPublicShares
-        showSourceInShares = server.showSourceInShares
-        allowShareIndexing = server.allowShareIndexing
-        localIconError = ""
-        Admin.clear("overview")
-        Admin.clear("overview.name")
-        Admin.clear("overview.icon")
-    }
-    function save() {
-        if (!dirty || saving)
-            return
-        Admin.saveServer(JSON.stringify({
-            name: name,
-            iconPath: iconPath,
-            removeIcon: removeIcon,
-            allowPublicShares: allowPublicShares,
-            showSourceInShares: showSourceInShares,
-            allowShareIndexing: allowShareIndexing,
-        }))
-    }
+    function reset() { draft.reset() }
+    function save() { draft.save() }
     function pickIcon() {
         const paths = Files.pickFiles(qsTr("Choose a server icon"))
-        const path = paths.length > 0 ? paths[0] : ""
-        if (path.length === 0)
-            return
-        const problem = Admin.iconProblem(path)
-        localIconError = problem
-        if (problem.length > 0)
-            return
-        Admin.clear("overview.icon")
-        iconPath = path
-        removeIcon = false
+        draft.takeIcon(paths.length > 0 ? paths[0] : "")
     }
 
     spacing: 40
-    Component.onCompleted: savedCount = act.done
 
-    // A save that went through: the draft is the server now.
-    onActChanged: {
-        if (act.done < savedCount)
-            savedCount = act.done
-        else if (act.done > savedCount) {
-            savedCount = act.done
-            iconPath = ""
-            removeIcon = false
-            name = server.name
-        }
-    }
     SettingsCard {
         width: parent.width
         title: qsTr("Server profile")
@@ -142,11 +87,7 @@ Column {
                 visible: root.shownIcon.length > 0
                 variant: "ghost"
                 text: qsTr("Remove")
-                onClicked: {
-                    root.iconPath = ""
-                    root.removeIcon = root.server.icon.length > 0
-                    root.localIconError = ""
-                }
+                onClicked: root.draft.dropIcon()
             }
             footer: RowError { text: root.iconError }
         }
@@ -159,15 +100,12 @@ Column {
                 : qsTr("Only people with the Manage server permission can change it.")
             KitField {
                 width: parent.width
-                text: root.name
+                text: root.draft.name
                 readOnly: !root.canEdit
                 maximumLength: 100
                 invalid: root.nameError.length > 0
                 Accessible.name: qsTr("Server name")
-                onTextEdited: {
-                    root.name = text
-                    Admin.clear("overview.name")
-                }
+                onTextEdited: root.draft.nameEdited(text)
                 Keys.onReturnPressed: root.save()
             }
             footer: RowError { text: root.nameError }
@@ -184,24 +122,24 @@ Column {
             custom: true
             label: qsTr("Allow public message shares")
             description: qsTr("Members can share a snapshot of a message to a link anyone can open, no account needed.")
-            checked: root.allowPublicShares
-            onToggled: root.allowPublicShares = !root.allowPublicShares
+            checked: root.draft.allowPublicShares
+            onToggled: root.draft.allowPublicShares = !root.draft.allowPublicShares
         }
         SwitchSetting {
             custom: true
             label: qsTr("Show server and channel on shares")
             description: qsTr("Shared pages name this server and the channel the message came from.")
-            disabled: !root.allowPublicShares
-            checked: root.showSourceInShares
-            onToggled: root.showSourceInShares = !root.showSourceInShares
+            disabled: !root.draft.allowPublicShares
+            checked: root.draft.showSourceInShares
+            onToggled: root.draft.showSourceInShares = !root.draft.showSourceInShares
         }
         SwitchSetting {
             custom: true
             label: qsTr("Let search engines index shares")
             description: qsTr("Shared pages can appear in search results. Off keeps them reachable by link only.")
-            disabled: !root.allowPublicShares
-            checked: root.allowShareIndexing
-            onToggled: root.allowShareIndexing = !root.allowShareIndexing
+            disabled: !root.draft.allowPublicShares
+            checked: root.draft.allowShareIndexing
+            onToggled: root.draft.allowShareIndexing = !root.draft.allowShareIndexing
         }
     }
 

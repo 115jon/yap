@@ -18,6 +18,9 @@ Rectangle {
 
     // The category the channel goes in (empty: none).
     property string categoryId: ""
+    // Opened from Server settings: a new text channel closes the page there
+    // too, instead of opening in the chat.
+    property bool closeOnCreate: false
     readonly property bool sheet: false
     readonly property bool holdsBack: creator.busy
     property real backProgress: 0
@@ -38,7 +41,7 @@ Rectangle {
     property bool awaitingChannel: false
     readonly property ChannelCreator creator: ChannelCreator {
         onCreated: {
-            if (root.creator.voice) {
+            if (root.creator.voice || root.closeOnCreate) {
                 root.closeRequested()
                 return
             }
