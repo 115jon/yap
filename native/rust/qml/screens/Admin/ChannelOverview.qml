@@ -13,44 +13,17 @@ Column {
     required property var model
 
     readonly property var channel: model.channel
-    readonly property var act: model.acts["channel"] ?? { busy: false, error: "", done: 0 }
-    readonly property string nameError: model.acts["channel.name"]?.error ?? ""
+    // The draft (Yap.Ui ChannelDraft, the phone's too).
+    readonly property ChannelDraft draft: ChannelDraft { model: root.model }
+    readonly property string nameError: draft.nameError
+    readonly property bool dirty: draft.dirty
+    readonly property bool saving: draft.saving
+    readonly property string saveError: draft.saveError
 
-    property string name: channel.name
-    property string description: channel.description
-    property string shares: channel.publicShares
-    property int savedCount: 0
-
-    readonly property string preview: Admin.sanitizeChannelName(name, channel.voice, false)
-    readonly property string finalName: Admin.sanitizeChannelName(name, channel.voice, true)
-    readonly property bool dirty: finalName !== channel.name || description !== channel.description || shares !== channel.publicShares
-    readonly property bool saving: act.busy
-    readonly property string saveError: act.error
-
-    function reset() {
-        name = channel.name
-        description = channel.description
-        shares = channel.publicShares
-        Admin.clear("channel")
-        Admin.clear("channel.name")
-    }
-    function save() {
-        if (dirty && !saving)
-            Admin.saveChannel(name, description, shares)
-    }
+    function reset() { draft.reset() }
+    function save() { draft.save() }
 
     spacing: 40
-    Component.onCompleted: savedCount = act.done
-    onActChanged: {
-        if (act.done < savedCount)
-            savedCount = act.done
-        else if (act.done > savedCount) {
-            savedCount = act.done
-            name = channel.name
-            description = channel.description
-            shares = channel.publicShares
-        }
-    }
 
     SettingsCard {
         width: parent.width
@@ -61,19 +34,14 @@ Column {
             custom: true
             layout: "label"
             label: qsTr("Channel name")
-            description: root.channel.voice ? qsTr("Shown in the channel list as typed.")
-                : root.preview !== root.name ? qsTr("Shown as #%1").arg(root.preview.length > 0 ? root.preview : qsTr("channel"))
-                : qsTr("Lowercase, with dashes instead of spaces.")
+            description: root.draft.nameHint
             KitField {
                 width: parent.width
-                text: root.name
+                text: root.draft.name
                 maximumLength: 100
                 invalid: root.nameError.length > 0
                 Accessible.name: qsTr("Channel name")
-                onTextEdited: {
-                    root.name = text
-                    Admin.clear("channel.name")
-                }
+                onTextEdited: root.draft.nameEdited(text)
                 Keys.onReturnPressed: root.save()
             }
             footer: RowError { text: root.nameError }
@@ -84,11 +52,11 @@ Column {
             label: qsTr("Topic")
             TopicField {
                 width: parent.width
-                value: root.description
-                max: 1024
+                value: root.draft.description
+                max: root.draft.topicMax
                 placeholder: qsTr("What this channel is for")
                 accessibleName: qsTr("Topic")
-                onEdited: value => root.description = value
+                onEdited: value => root.draft.description = value
             }
             // FieldRow's helper line: gap-1.5, the count at Num sm on a 20
             // line.
@@ -99,7 +67,7 @@ Column {
                 lineHeightMode: Text.FixedHeight
                 horizontalAlignment: Text.AlignRight
                 textFormat: Text.PlainText
-                text: qsTr("%1 / %2").arg(root.description.length).arg(1024)
+                text: qsTr("%1 / %2").arg(root.draft.description.length).arg(root.draft.topicMax)
                 color: Theme.ink3
                 font: Theme.type.numSm
             }
@@ -115,10 +83,10 @@ Column {
                 width: 240
                 firstIsDefault: false
                 text: qsTr("Public sharing")
-                ids: ["inherit", "allow", "deny"]
-                names: [qsTr("Use the server setting"), qsTr("Allow public links"), qsTr("Turn off public links")]
-                current: root.shares
-                onPicked: id => root.shares = id
+                ids: root.draft.shareIds
+                names: root.draft.shareNames
+                current: root.draft.shares
+                onPicked: id => root.draft.shares = id
             }
         }
     }
