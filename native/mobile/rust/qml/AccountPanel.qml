@@ -73,6 +73,8 @@ Item {
     onHeightChanged: if (shown) place()
 
     visible: shown || grow > 0
+    // TalkBack reads only the panel while it is open (cpp/a11y.h).
+    A11y.modal: shown
     // 0 closed, 1 open: the card's scale and opacity, the scrim's.
     property real grow: shown ? 1 : 0
     onGrowChanged: if (grow <= 0) backProgress = 0
