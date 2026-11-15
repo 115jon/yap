@@ -191,8 +191,8 @@ Yap uses these services:
   Deadlock stats).
 - Firebase Cloud Messaging (Google) for push notifications to the mobile
   apps. A message notification carries IDs only (the notification, message,
-  channel, server and sender account IDs), its kind (mention, reply or
-  direct message), a fixed label for older app versions (such as "Yap" and
+  channel, server and sender account IDs), its kind (mention, reply,
+  direct message, or a message in a channel set to all messages), a fixed label for older app versions (such as "Yap" and
   "New mention") and the send time: no message text, attachment, or
   sender, channel or server name. The Android app fetches the text it shows
   from Yap's server with its own session. A DM call's ring also carries the

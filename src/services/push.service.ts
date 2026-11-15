@@ -10,8 +10,10 @@
 import type { D1Database } from "@cloudflare/workers-types";
 
 import { resolveChannelAccessForUsers } from "@/lib/channel-access";
+import { shouldNotify } from "@/lib/notification-levels";
 import type { FcmMessage, FcmSender } from "@/server/fcm";
 import { blockBetween } from "@/services/block.service";
+import { effectiveSettingsForUsers } from "@/services/notification-settings.service";
 
 // ─── Tokens ──────────────────────────────────────────────────────────────────
 
@@ -204,6 +206,7 @@ const LEGACY_TEXT: Record<MessagePush["type"], string> = {
   dm: "New direct message",
   mention: "New mention",
   reply: "New reply",
+  message: "New message",
 };
 
 /** A message FCM renders itself: it always has a `notification` block. */
@@ -311,62 +314,120 @@ export interface NotificationPushText {
   preview: string;
 }
 
+/** The columns both kinds of notification read, from `m` (the message) on. */
+const PUSH_TEXT_COLUMNS = `m.id AS message_id, m.channel_id, m.author_id, m.content,
+              julianday(m.created_at) <= COALESCE(
+                (SELECT julianday(rs.last_read_at) FROM read_states rs
+                 WHERE rs.user_id = r.id AND rs.channel_id = m.channel_id), 0)
+                AS read_since,
+              u.username, u.display_name, u.avatar_url,
+              c.name AS channel_name, c.channel_type, c.server_id,
+              s.name AS server_name`;
+const PUSH_TEXT_JOINS = `JOIN channels c ON c.id = m.channel_id
+       LEFT JOIN users u ON u.id = m.author_id
+       LEFT JOIN servers s ON s.id = c.server_id`;
+
+/** An "all messages" push's id: `message:<message id>:message:<user id>`. */
+const ALL_MESSAGES_ID = /^message:(.+):message:(.+)$/;
+
+/** The row for `notificationId` if it is `userId`'s, with its message. */
+async function pushTextRow(
+  db: D1Database,
+  userId: string,
+  notificationId: string,
+): Promise<Record<string, unknown> | null> {
+  const plain = ALL_MESSAGES_ID.exec(notificationId);
+  if (plain) {
+    // No inbox row: the delivery marker says the push went to this user.
+    if (plain[2] !== userId) return null;
+    return db
+      .prepare(
+        `SELECT 'message' AS type, 0 AS is_read, r.status AS user_status,
+                ${PUSH_TEXT_COLUMNS}
+         FROM notification_delivery_markers k
+         JOIN messages m ON m.id = k.message_id
+         JOIN users r ON r.id = ?
+         ${PUSH_TEXT_JOINS}
+         WHERE k.dedupe_key = ? AND k.notification_id = ?`,
+      )
+      .bind(userId, `${plain[1]}:message:${userId}`, notificationId)
+      .first<Record<string, unknown>>();
+  }
+  return db
+    .prepare(
+      `SELECT n.type, n.is_read, r.status AS user_status, ${PUSH_TEXT_COLUMNS}
+       FROM notifications n
+       JOIN messages m ON m.id = n.message_id AND m.channel_id = n.channel_id
+       JOIN users r ON r.id = n.user_id
+       ${PUSH_TEXT_JOINS}
+       WHERE n.id = ? AND n.user_id = ?`,
+    )
+    .bind(notificationId, userId)
+    .first<Record<string, unknown>>();
+}
+
+const PUSH_TYPES: ReadonlySet<string> = new Set<MessagePush["type"]>([
+  "mention",
+  "reply",
+  "dm",
+  "message",
+]);
+
 /**
  * The text of `userId`'s notification `notificationId`, for the device that
- * got its push, or null when there is nothing the user may see: not their
- * notification, the message deleted, the channel no longer visible to them
- * (left the server or the DM, lost View Channels), a block between them
- * and the author either way, the notification already read, or the user
- * on Do Not Disturb. The device asks after the push arrives, so this is
- * the state at that moment, not at send time.
+ * got its push, or null when there is nothing the user may see or wants
+ * shown: not their notification, the message deleted, the channel no
+ * longer visible to them (left the server or the DM, lost View Channels),
+ * a block between them and the author either way, the notification or the
+ * channel read since, the user on Do Not Disturb, or the channel or server
+ * muted (or its level lowered) so it would not notify now. The device asks
+ * after the push arrives, so this is the state at that moment, not at send
+ * time. A database failure throws (the route answers 500), never null.
  */
 export async function notificationPushText(
   db: D1Database,
   userId: string,
   notificationId: string,
 ): Promise<NotificationPushText | null> {
-  const row = await db
-    .prepare(
-      `SELECT n.type, n.channel_id, m.id AS message_id, m.author_id, m.content,
-              u.username, u.display_name, u.avatar_url,
-              c.name AS channel_name, c.channel_type, c.server_id,
-              s.name AS server_name
-       FROM notifications n
-       JOIN messages m ON m.id = n.message_id AND m.channel_id = n.channel_id
-       JOIN channels c ON c.id = n.channel_id
-       LEFT JOIN users u ON u.id = m.author_id
-       LEFT JOIN servers s ON s.id = c.server_id
-       JOIN users r ON r.id = n.user_id
-       WHERE n.id = ? AND n.user_id = ? AND n.is_read = 0
-         AND COALESCE(r.status, 'online') != 'dnd'`,
-    )
-    .bind(notificationId, userId)
-    .first<Record<string, unknown>>();
+  const row = await pushTextRow(db, userId, notificationId);
   if (!row) return null;
 
   const type = row.type as string;
-  if (type !== "mention" && type !== "reply" && type !== "dm") return null;
+  if (!PUSH_TYPES.has(type)) return null;
+  const pushType = type as MessagePush["type"];
+  if (Number(row.is_read) === 1 || Number(row.read_since) === 1) return null;
+  if (row.user_status === "dnd") return null;
   const channelId = row.channel_id as string;
   const authorId = row.author_id as string;
-  const [decisions, block] = await Promise.all([
+  const isDm = row.channel_type === "dm" || row.server_id === null;
+  const serverId = isDm ? null : (row.server_id as string);
+  const [decisions, block, settings] = await Promise.all([
     // The batch form, as it tells a D1 failure apart from "no access":
     // a failure must reach the route as a 500, not read as not found.
     resolveChannelAccessForUsers(db, channelId, [userId]),
     blockBetween(db, userId, authorId),
+    effectiveSettingsForUsers(db, { id: channelId, serverId, isDm }, [userId]),
   ]);
   const access = decisions.get(userId);
   if (access?.kind === "error") {
     throw new Error("notificationPushText: channel access lookup failed");
   }
   if (access?.kind !== "allowed" || block) return null;
+  // The rule the push was sent by (message.service.ts), on today's settings.
+  const effective = settings.get(userId);
+  if (
+    effective &&
+    !shouldNotify(effective, pushType === "mention" || pushType === "reply")
+  ) {
+    return null;
+  }
 
-  const isDm = row.channel_type === "dm" || row.server_id === null;
   const displayName = (row.display_name as string | null)?.trim();
   const channelName = row.channel_name as string | null;
   return {
-    type,
+    type: pushType,
     channel_id: channelId,
-    server_id: isDm ? null : (row.server_id as string),
+    server_id: serverId,
     message_id: row.message_id as string,
     sender: {
       id: authorId,
@@ -375,7 +436,7 @@ export async function notificationPushText(
     },
     conversation: !isDm && channelName ? `#${channelName}` : null,
     server_name: isDm ? null : ((row.server_name as string | null) ?? null),
-    preview: previewOf(type, (row.content as string | null) ?? ""),
+    preview: previewOf(pushType, (row.content as string | null) ?? ""),
   };
 }
 

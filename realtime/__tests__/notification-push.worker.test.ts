@@ -434,6 +434,36 @@ describe("GET /api/notifications/:id/push answers only what the user may see", (
     expect(text.status).toBe(500);
   });
 
+  it("is 404 once the recipient mutes the DM after the push", async () => {
+    const ada = await newUser("ada");
+    const bob = await newUser("bob");
+    const channelId = await dmBetween(ada, bob);
+    const { pushes } = await post(channelId, ada, "are you up?");
+    const id = pushes[0]!.notificationId;
+    expect((await fetchText(bob, id)).status).toBe(200);
+    await run(
+      `INSERT INTO notification_settings (user_id, target_type, target_id, level, muted, updated_at)
+       VALUES (?, 'channel', ?, NULL, 1, ?)`,
+      bob.id,
+      channelId,
+      new Date().toISOString(),
+    );
+
+    expect((await fetchText(bob, id)).status).toBe(404);
+  });
+
+  it("is 404 once the recipient read the channel", async () => {
+    const { bob, channelId, id } = await mentioned();
+    await run(
+      `INSERT INTO read_states (user_id, channel_id, last_read_at) VALUES (?, ?, ?)`,
+      bob.id,
+      channelId,
+      new Date(Date.now() + 1000).toISOString(),
+    );
+
+    expect((await fetchText(bob, id)).status).toBe(404);
+  });
+
   it("is 404 when the recipient left the DM", async () => {
     const ada = await newUser("ada");
     const bob = await newUser("bob");

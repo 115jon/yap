@@ -1524,12 +1524,8 @@ export async function generateAllMessagePushes(
       channelId: opts.channelId,
       serverId,
       messageId: opts.messageId,
-      senderName: opts.authorDisplayName?.trim() || opts.authorUsername,
-      channelName: channelInfo.channel_name,
-      serverName: channelInfo.server_name,
-      content: opts.content.trim().slice(0, 200),
+      // Ids only: the device fetches the text (push.service.ts).
       senderId: opts.authorId,
-      senderAvatarUrl: opts.authorAvatarUrl,
       sentAt: now,
     });
   }
