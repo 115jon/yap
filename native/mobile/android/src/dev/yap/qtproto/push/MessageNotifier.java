@@ -14,6 +14,7 @@ import android.graphics.Paint;
 import android.graphics.Shader;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 
@@ -30,6 +31,13 @@ import androidx.core.graphics.drawable.IconCompat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Message notifications drawn on the device, as the Expo app's
@@ -94,24 +102,40 @@ final class MessageNotifier {
         if (push.channelId.equals(PushShim.activeConversation()) && inForeground()) return;
         PushStore.Session session = PushStore.session(context);
         if (session == null) return;
-        ensureChannels(context);
+        if (alreadyShown(context, push)) return;
+        // FCM hands messages over one at a time, on one thread: a slow
+        // fetch here would hold up a ring behind it. Everything below is
+        // done by this deadline, or skipped.
+        long deadline = SystemClock.elapsedRealtime() + SHOW_BUDGET_MS;
+        // The push holds ids only: the text comes from the API, or a
+        // fallback line names the sender as the last fetch did.
+        PushApi.NotificationText fetched = fillText(context, session, push, deadline);
+        if (fetched != null && fetched.gone) return;
 
         IconCompat avatar = null;
         if (push.senderAvatar != null) {
-            Bitmap bitmap = PushApi.avatar(session, push.senderAvatar);
+            final String url = push.senderAvatar;
+            Bitmap bitmap = bounded(() -> PushApi.avatar(session, url), deadline);
             if (bitmap != null) avatar = IconCompat.createWithBitmap(circle(bitmap));
         }
+
+        // The fetches took time: the user may have opened the conversation,
+        // signed out (forgetAll, on the Qt thread), or seen this message
+        // already (another push). Checked last, right before posting.
+        if (push.channelId.equals(PushShim.activeConversation()) && inForeground()) return;
+        if (PushStore.session(context) == null) return;
+        if (alreadyShown(context, push)) return;
+        if (fetched != null) {
+            PushStore.rememberNames(context, push.senderId, fetched.senderName, push.channelId,
+                    fetched.conversation, fetched.serverName);
+        }
+        ensureChannels(context);
+        NotificationCompat.MessagingStyle previous = activeStyle(context, push.channelId);
         Person sender = new Person.Builder()
                 .setKey(push.senderId)
-                .setName(push.senderName)
+                .setName(push.senderName != null ? push.senderName : "Yap")
                 .setIcon(avatar)
                 .build();
-        NotificationCompat.MessagingStyle previous = activeStyle(context, push.channelId);
-        if (previous != null) {
-            for (NotificationCompat.MessagingStyle.Message m : previous.getMessages()) {
-                if (push.messageId.equals(m.getExtras().getString(EXTRA_MESSAGE_ID))) return;
-            }
-        }
         Conversation conversation = Conversation.of(push);
         NotificationCompat.MessagingStyle style = previous != null ? previous : newStyle(conversation);
         NotificationCompat.MessagingStyle.Message message =
@@ -120,7 +144,10 @@ final class MessageNotifier {
         style.addMessage(message);
         trim(style);
 
-        String shortcutId = publishShortcut(context, conversation, sender);
+        // A fallback that names no one keeps the shortcut it had (if any).
+        String shortcutId = push.senderName != null
+                ? publishShortcut(context, conversation, sender)
+                : conversation.shortcutId();
         Notification notification = builder(context, conversation, style)
                 .setShortcutId(shortcutId)
                 .setLocusId(new LocusIdCompat(shortcutId))
@@ -131,6 +158,82 @@ final class MessageNotifier {
         boolean shown = post(context, conversation.channelId, notification)
                 && channelOn(context, conversation.channel);
         postSummary(context, shown ? conversation.channelId : null, shown ? notification : null);
+    }
+
+    /** How long a push waits for its text before it shows the fallback. */
+    private static final long TEXT_TIMEOUT_MS = 5_000;
+    /**
+     * How long show() may take in all (text, then avatar): well inside the
+     * time FCM gives onMessageReceived (10 s on older Android).
+     */
+    private static final long SHOW_BUDGET_MS = 8_000;
+
+    /** Runs the fetches, so a socket that ignores its timeout cannot hold show(). */
+    private static final ExecutorService FETCHES = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "yap-push-fetch");
+        t.setDaemon(true);
+        return t;
+    });
+
+    /** `task`'s result by `deadline` (elapsedRealtime), else null. */
+    private static <T> T bounded(Callable<T> task, long deadline) {
+        long left = deadline - SystemClock.elapsedRealtime();
+        if (left <= 0) return null;
+        Future<T> future = FETCHES.submit(task);
+        try {
+            return future.get(left, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            Log.w(TAG, "push fetch: out of time");
+        } catch (ExecutionException e) {
+            Log.w(TAG, "push fetch failed: " + e.getCause().getClass().getSimpleName());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        future.cancel(true);
+        return null;
+    }
+
+    /** The conversation's notification already holds this message. */
+    private static boolean alreadyShown(Context context, YapPush.Message push) {
+        NotificationCompat.MessagingStyle previous = activeStyle(context, push.channelId);
+        if (previous == null) return false;
+        for (NotificationCompat.MessagingStyle.Message m : previous.getMessages()) {
+            if (push.messageId.equals(m.getExtras().getString(EXTRA_MESSAGE_ID))) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Fills in the push's text and names: fetched by its notification id
+     * (at most TEXT_TIMEOUT_MS), else the fallback ("New message from Ada",
+     * the names the last fetch gave, or "New message"). Returns what the
+     * fetch found (null when it failed and the fallback was filled in);
+     * GONE when the server says the user may not see the message
+     * (deleted, no longer in the channel, a block, read): nothing is shown.
+     */
+    private static PushApi.NotificationText fillText(Context context, PushStore.Session session,
+            YapPush.Message push, long deadline) {
+        long textDeadline = Math.min(deadline, SystemClock.elapsedRealtime() + TEXT_TIMEOUT_MS);
+        final String id = push.notificationId;
+        PushApi.NotificationText text = id == null ? null
+                : bounded(() -> PushApi.notificationText(session, id, textDeadline), textDeadline);
+        if (text != null && text.gone) return text;
+        if (text != null) {
+            push.senderName = text.senderName;
+            push.senderAvatar = text.senderAvatar;
+            push.conversation = text.conversation;
+            push.serverName = text.serverName;
+            push.preview = text.preview;
+            return text;
+        }
+        Log.i(TAG, "message text not fetched: the fallback shows");
+        push.senderName = PushStore.senderName(context, push.senderId);
+        if (!push.isDm()) {
+            push.conversation = PushStore.conversation(context, push.channelId);
+            push.serverName = PushStore.serverName(context, push.channelId);
+        }
+        push.preview = YapPush.fallbackText(push.senderName);
+        return null;
     }
 
     /**
@@ -169,6 +272,7 @@ final class MessageNotifier {
             }
         }
         ShortcutManagerCompat.removeAllDynamicShortcuts(context);
+        PushStore.forgetNames(context);
     }
 
     // ---- Building -----------------------------------------------------------

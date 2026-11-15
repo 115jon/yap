@@ -99,6 +99,7 @@ import { Route as ApiServersIdChannelsRouteImport } from './routes/api/servers/$
 import { Route as ApiServersIdCategoriesRouteImport } from './routes/api/servers/$id/categories'
 import { Route as ApiServersIdBansRouteImport } from './routes/api/servers/$id/bans'
 import { Route as ApiServersIdAuditLogsRouteImport } from './routes/api/servers/$id/audit-logs'
+import { Route as ApiNotificationsIdPushRouteImport } from './routes/api/notifications/$id/push'
 import { Route as ApiMessagesIdShareRouteImport } from './routes/api/messages/$id/share'
 import { Route as ApiInvitesCodeJoinRouteImport } from './routes/api/invites/$code/join'
 import { Route as ApiEmojisAssetsIdRouteImport } from './routes/api/emojis/assets/$id'
@@ -593,6 +594,11 @@ const ApiServersIdAuditLogsRoute = ApiServersIdAuditLogsRouteImport.update({
   path: '/$id/audit-logs',
   getParentRoute: () => ApiServersRoute,
 } as any)
+const ApiNotificationsIdPushRoute = ApiNotificationsIdPushRouteImport.update({
+  id: '/$id/push',
+  path: '/$id/push',
+  getParentRoute: () => ApiNotificationsRoute,
+} as any)
 const ApiMessagesIdShareRoute = ApiMessagesIdShareRouteImport.update({
   id: '/api/messages/$id/share',
   path: '/api/messages/$id/share',
@@ -829,7 +835,7 @@ export interface FileRoutesByFullPath {
   '/api/instagram-video': typeof ApiInstagramVideoRoute
   '/api/myinstants': typeof ApiMyinstantsRouteWithChildren
   '/api/notification-settings': typeof ApiNotificationSettingsRoute
-  '/api/notifications': typeof ApiNotificationsRoute
+  '/api/notifications': typeof ApiNotificationsRouteWithChildren
   '/api/oembed': typeof ApiOembedRoute
   '/api/presence': typeof ApiPresenceRoute
   '/api/proxy-media': typeof ApiProxyMediaRoute
@@ -903,6 +909,7 @@ export interface FileRoutesByFullPath {
   '/api/emojis/assets/$id': typeof ApiEmojisAssetsIdRoute
   '/api/invites/$code/join': typeof ApiInvitesCodeJoinRoute
   '/api/messages/$id/share': typeof ApiMessagesIdShareRoute
+  '/api/notifications/$id/push': typeof ApiNotificationsIdPushRoute
   '/api/servers/$id/audit-logs': typeof ApiServersIdAuditLogsRoute
   '/api/servers/$id/bans': typeof ApiServersIdBansRoute
   '/api/servers/$id/categories': typeof ApiServersIdCategoriesRouteWithChildren
@@ -960,7 +967,7 @@ export interface FileRoutesByTo {
   '/api/instagram-video': typeof ApiInstagramVideoRoute
   '/api/myinstants': typeof ApiMyinstantsRouteWithChildren
   '/api/notification-settings': typeof ApiNotificationSettingsRoute
-  '/api/notifications': typeof ApiNotificationsRoute
+  '/api/notifications': typeof ApiNotificationsRouteWithChildren
   '/api/oembed': typeof ApiOembedRoute
   '/api/presence': typeof ApiPresenceRoute
   '/api/proxy-media': typeof ApiProxyMediaRoute
@@ -1034,6 +1041,7 @@ export interface FileRoutesByTo {
   '/api/emojis/assets/$id': typeof ApiEmojisAssetsIdRoute
   '/api/invites/$code/join': typeof ApiInvitesCodeJoinRoute
   '/api/messages/$id/share': typeof ApiMessagesIdShareRoute
+  '/api/notifications/$id/push': typeof ApiNotificationsIdPushRoute
   '/api/servers/$id/audit-logs': typeof ApiServersIdAuditLogsRoute
   '/api/servers/$id/bans': typeof ApiServersIdBansRoute
   '/api/servers/$id/categories': typeof ApiServersIdCategoriesRouteWithChildren
@@ -1092,7 +1100,7 @@ export interface FileRoutesById {
   '/api/instagram-video': typeof ApiInstagramVideoRoute
   '/api/myinstants': typeof ApiMyinstantsRouteWithChildren
   '/api/notification-settings': typeof ApiNotificationSettingsRoute
-  '/api/notifications': typeof ApiNotificationsRoute
+  '/api/notifications': typeof ApiNotificationsRouteWithChildren
   '/api/oembed': typeof ApiOembedRoute
   '/api/presence': typeof ApiPresenceRoute
   '/api/proxy-media': typeof ApiProxyMediaRoute
@@ -1166,6 +1174,7 @@ export interface FileRoutesById {
   '/api/emojis/assets/$id': typeof ApiEmojisAssetsIdRoute
   '/api/invites/$code/join': typeof ApiInvitesCodeJoinRoute
   '/api/messages/$id/share': typeof ApiMessagesIdShareRoute
+  '/api/notifications/$id/push': typeof ApiNotificationsIdPushRoute
   '/api/servers/$id/audit-logs': typeof ApiServersIdAuditLogsRoute
   '/api/servers/$id/bans': typeof ApiServersIdBansRoute
   '/api/servers/$id/categories': typeof ApiServersIdCategoriesRouteWithChildren
@@ -1299,6 +1308,7 @@ export interface FileRouteTypes {
     | '/api/emojis/assets/$id'
     | '/api/invites/$code/join'
     | '/api/messages/$id/share'
+    | '/api/notifications/$id/push'
     | '/api/servers/$id/audit-logs'
     | '/api/servers/$id/bans'
     | '/api/servers/$id/categories'
@@ -1430,6 +1440,7 @@ export interface FileRouteTypes {
     | '/api/emojis/assets/$id'
     | '/api/invites/$code/join'
     | '/api/messages/$id/share'
+    | '/api/notifications/$id/push'
     | '/api/servers/$id/audit-logs'
     | '/api/servers/$id/bans'
     | '/api/servers/$id/categories'
@@ -1561,6 +1572,7 @@ export interface FileRouteTypes {
     | '/api/emojis/assets/$id'
     | '/api/invites/$code/join'
     | '/api/messages/$id/share'
+    | '/api/notifications/$id/push'
     | '/api/servers/$id/audit-logs'
     | '/api/servers/$id/bans'
     | '/api/servers/$id/categories'
@@ -1619,7 +1631,7 @@ export interface RootRouteChildren {
   ApiInstagramVideoRoute: typeof ApiInstagramVideoRoute
   ApiMyinstantsRoute: typeof ApiMyinstantsRouteWithChildren
   ApiNotificationSettingsRoute: typeof ApiNotificationSettingsRoute
-  ApiNotificationsRoute: typeof ApiNotificationsRoute
+  ApiNotificationsRoute: typeof ApiNotificationsRouteWithChildren
   ApiOembedRoute: typeof ApiOembedRoute
   ApiPresenceRoute: typeof ApiPresenceRoute
   ApiProxyMediaRoute: typeof ApiProxyMediaRoute
@@ -2313,6 +2325,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiServersIdAuditLogsRouteImport
       parentRoute: typeof ApiServersRoute
     }
+    '/api/notifications/$id/push': {
+      id: '/api/notifications/$id/push'
+      path: '/$id/push'
+      fullPath: '/api/notifications/$id/push'
+      preLoaderRoute: typeof ApiNotificationsIdPushRouteImport
+      parentRoute: typeof ApiNotificationsRoute
+    }
     '/api/messages/$id/share': {
       id: '/api/messages/$id/share'
       path: '/api/messages/$id/share'
@@ -2662,6 +2681,17 @@ const ApiMyinstantsRouteWithChildren = ApiMyinstantsRoute._addFileChildren(
   ApiMyinstantsRouteChildren,
 )
 
+interface ApiNotificationsRouteChildren {
+  ApiNotificationsIdPushRoute: typeof ApiNotificationsIdPushRoute
+}
+
+const ApiNotificationsRouteChildren: ApiNotificationsRouteChildren = {
+  ApiNotificationsIdPushRoute: ApiNotificationsIdPushRoute,
+}
+
+const ApiNotificationsRouteWithChildren =
+  ApiNotificationsRoute._addFileChildren(ApiNotificationsRouteChildren)
+
 interface ApiServersIdCategoriesRouteChildren {
   ApiServersIdCategoriesCategoryIdRoute: typeof ApiServersIdCategoriesCategoryIdRoute
 }
@@ -2952,7 +2982,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiInstagramVideoRoute: ApiInstagramVideoRoute,
   ApiMyinstantsRoute: ApiMyinstantsRouteWithChildren,
   ApiNotificationSettingsRoute: ApiNotificationSettingsRoute,
-  ApiNotificationsRoute: ApiNotificationsRoute,
+  ApiNotificationsRoute: ApiNotificationsRouteWithChildren,
   ApiOembedRoute: ApiOembedRoute,
   ApiPresenceRoute: ApiPresenceRoute,
   ApiProxyMediaRoute: ApiProxyMediaRoute,

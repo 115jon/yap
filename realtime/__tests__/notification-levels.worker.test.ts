@@ -26,6 +26,7 @@ import {
 import {
   hasNotificationsSinceLastRead,
   type MessagePush,
+  notificationPushText,
 } from "../../src/services/push.service";
 import { setTestRequestHeaders } from "../test-shims/react-start-server";
 
@@ -462,9 +463,24 @@ describe("all messages", () => {
     expect(plain.inbox).toEqual([]);
     expect(plain.pushes[0]).toMatchObject({
       serverId: lab.serverId,
-      channelName: "general",
-      content: "hello again",
+      notificationId: `message:${plain.messageId}:message:${bob.id}`,
     });
+    // Ids only: the phone fetches the text, which only bob can.
+    const id = plain.pushes[0]!.notificationId;
+    expect(JSON.stringify(plain.pushes[0])).not.toContain("hello again");
+    expect(await notificationPushText(db, bob.id, id)).toMatchObject({
+      type: "message",
+      conversation: "#general",
+      preview: "hello again",
+    });
+    expect(await notificationPushText(db, carol.id, id)).toBeNull();
+    expect(
+      await notificationPushText(
+        db,
+        carol.id,
+        `message:${plain.messageId}:message:${carol.id}`,
+      ),
+    ).toBeNull();
 
     // A redelivered task sends nothing new.
     const again = await generateAllMessagePushes(db, {
@@ -488,6 +504,8 @@ describe("all messages", () => {
     expect(await hasNotificationsSinceLastRead(db, bob.id, lab.channelId)).toBe(
       false,
     );
+    // Read since it was sent: the phone gets nothing to show.
+    expect(await notificationPushText(db, bob.id, id)).toBeNull();
 
     // A mention is pushed once, as a mention.
     const mention = await post(alice, lab.channelId, `@${bob.username} look`);
@@ -495,6 +513,14 @@ describe("all messages", () => {
 
     // The author's own messages never push them.
     expect((await post(bob, lab.channelId, "mine")).pushes).toEqual([]);
+
+    // Muted after the push went out: its text is not handed over, and an
+    // "all messages" push is not either once the level is lowered.
+    const later = await post(alice, lab.channelId, "one more");
+    const laterId = later.pushes[0]!.notificationId;
+    expect(await notificationPushText(db, bob.id, laterId)).not.toBeNull();
+    await setting(bob, "server", lab.serverId, { level: "mentions" });
+    expect(await notificationPushText(db, bob.id, laterId)).toBeNull();
   });
 
   it("stays silent while muted, under a channel level, or without access", async () => {

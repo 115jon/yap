@@ -69,6 +69,56 @@ final class PushStore {
         return token == null ? null : new Session(base, token);
     }
 
+    // ---- Names for the fallback -------------------------------------------
+    // Pushes name no one (FCM would see it). When a push's text cannot be
+    // fetched, the notification names the sender and the conversation as
+    // the last fetch did: kept here, on the device, and dropped at sign-out.
+
+    private static final String NAMES = "yap_push_names";
+    /** More than this many entries and the cache starts over. */
+    private static final int MAX_NAMES = 400;
+
+    private static SharedPreferences names(Context context) {
+        return context.getApplicationContext().getSharedPreferences(NAMES, Context.MODE_PRIVATE);
+    }
+
+    /** Remembers what a fetch said a sender and a channel are called. */
+    static void rememberNames(Context context, String senderId, String senderName, String channelId,
+            String conversation, String serverName) {
+        SharedPreferences prefs = names(context);
+        SharedPreferences.Editor edit = prefs.edit();
+        if (prefs.getAll().size() > MAX_NAMES) edit.clear();
+        putOrRemove(edit, "user:" + senderId, senderName);
+        putOrRemove(edit, "conversation:" + channelId, conversation);
+        putOrRemove(edit, "server:" + channelId, serverName);
+        edit.apply();
+    }
+
+    private static void putOrRemove(SharedPreferences.Editor edit, String key, String value) {
+        if (value != null) {
+            edit.putString(key, value);
+        } else {
+            edit.remove(key);
+        }
+    }
+
+    static String senderName(Context context, String senderId) {
+        return names(context).getString("user:" + senderId, null);
+    }
+
+    static String conversation(Context context, String channelId) {
+        return names(context).getString("conversation:" + channelId, null);
+    }
+
+    static String serverName(Context context, String channelId) {
+        return names(context).getString("server:" + channelId, null);
+    }
+
+    /** Sign-out: no name outlives the account. */
+    static void forgetNames(Context context) {
+        names(context).edit().clear().apply();
+    }
+
     static boolean asked(Context context) {
         return prefs(context).getBoolean(KEY_ASKED, false);
     }

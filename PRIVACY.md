@@ -190,9 +190,13 @@ Yap uses these services:
 - `deadlock-api.com`, from Yap's server only, for Deadlock stats (see
   Deadlock stats).
 - Firebase Cloud Messaging (Google) for push notifications to the mobile
-  apps. A message notification carries the sender's name, account ID and
-  avatar address, the channel and server names and IDs, the message ID and
-  send time, and the start of the message (up to 180 characters).
+  apps. A message notification carries IDs only (the notification, message,
+  channel, server and sender account IDs), its kind (mention, reply,
+  direct message, or a message in a channel set to all messages), a fixed label for older app versions (such as "Yap" and
+  "New mention") and the send time: no message text, attachment, or
+  sender, channel or server name. The Android app fetches the text it shows
+  from Yap's server with its own session. A DM call's ring also carries the
+  caller's name and avatar address, so the phone can ring at once.
 - KLIPY and Tenor for GIF, sticker and clip search. Yap's server sends them
   the search terms; KLIPY also gets a pseudonymous identifier derived from
   the account (never the account ID or name), the user's language, and which
