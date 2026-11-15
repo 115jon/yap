@@ -138,7 +138,11 @@ describe("no message text reaches FCM", () => {
     for (const [, message] of send.mock.calls) {
       const strings = stringsIn(message).join("\n");
       for (const text of TEXT) expect(strings).not.toContain(text);
-      expect(strings).not.toMatch(/preview|senderName|conversation/);
+      expect(strings).not.toMatch(/conversation|serverName|senderAvatar/);
+      // Only the generic line an older build draws: no name or text.
+      const data = (message as { data?: Record<string, string> }).data ?? {};
+      if ("senderName" in data) expect(data.senderName).toBe("Yap");
+      if ("preview" in data) expect(data.preview).toBe("New mention");
     }
   });
 });
@@ -277,6 +281,8 @@ describe("buildNativeMessagePush", () => {
       tag: "channel:chan-1",
       senderId: "user-9",
       sentAt: "2026-11-01T10:00:00.000Z",
+      senderName: "Yap",
+      preview: "New mention",
     });
   });
 

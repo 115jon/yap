@@ -16,7 +16,9 @@ const NOTIFICATION_ID = /^[\w:.-]{1,256}$/;
 /**
  * GET /api/notifications/:id/push — 404 alike for a notification that is
  * not the caller's, a deleted message, a channel the caller can no longer
- * see, and a block either way, so the answer says nothing about which.
+ * see, a block either way, a read notification and Do Not Disturb, so the
+ * answer says nothing about which. A database failure is a 500 (the device
+ * then shows its fallback), never this 404 (which shows nothing).
  */
 const pushText = Effect.fn("notifications.pushText")(function* (
   request: Request,

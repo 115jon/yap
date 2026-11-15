@@ -123,11 +123,11 @@ provide it; "required" means the app cannot work without it.
 
 - Message pushes are data-only FCM messages the app draws itself
   (`push/MessageNotifier.java`), `VISIBILITY_PRIVATE` with a public version
-  that says only "New message". On main today a push carries the sender's
-  name, avatar address, channel and server names and up to 180 characters of
-  the message (`src/services/push.service.ts`). **(pending, content-free push
-  PR)** pushes carry ids only and the phone fetches the text with its own
-  session; update PRIVACY.md's Firebase line and this note when it merges.
+  that says only "New message". A push carries ids only (notification,
+  message, channel, server and sender ids), the kind, the send time and a
+  fixed label for older app versions ("Yap", "New mention"): no message text
+  or names (`src/services/push.service.ts`). The phone fetches the text it
+  shows from `GET /api/notifications/:id/push` with its own session.
 - A DM ring (`call_ring`, `src/services/call.service.ts`) carries the call,
   channel and caller ids, the caller's name and avatar address and the ring
   time, so the phone can ring at once. It is shown with

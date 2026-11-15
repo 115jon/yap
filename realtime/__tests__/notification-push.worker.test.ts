@@ -151,13 +151,19 @@ async function post(channelId: string, author: TestUser, content: string) {
   return { messageId, pushes };
 }
 
-const routes = () =>
-  notificationPushRoutes(testServices({ auth: memoryAuth(sessions), db }));
+const routes = (database: D1Database = db) =>
+  notificationPushRoutes(
+    testServices({ auth: memoryAuth(sessions), db: database }),
+  );
 
-async function fetchText(user: TestUser | null, notificationId: string) {
+async function fetchText(
+  user: TestUser | null,
+  notificationId: string,
+  database: D1Database = db,
+) {
   const headers = new Headers();
   if (user) headers.set("authorization", `Bearer token-${user.id}`);
-  const response = await routes().GET({
+  const response = await routes(database).GET({
     request: new Request(
       `https://yap.test/api/notifications/${encodeURIComponent(notificationId)}/push`,
       { headers },
@@ -217,13 +223,20 @@ describe("message pushes carry ids only", () => {
       "kind",
       "messageId",
       "notificationId",
+      "preview",
       "ralph",
       "senderId",
+      "senderName",
       "sentAt",
       "serverId",
       "tag",
       "type",
     ]);
+    // What a build from before ids-only pushes draws: the kind, no text.
+    expect(buildNativeMessagePush(push!).data).toMatchObject({
+      senderName: "Yap",
+      preview: "New mention",
+    });
 
     const text = await fetchText(bob, push!.notificationId);
     expect(text.status).toBe(200);
@@ -374,6 +387,51 @@ describe("GET /api/notifications/:id/push answers only what the user may see", (
 
       expect((await fetchText(bob, id)).status).toBe(404);
     }
+  });
+
+  it("is 404 once the notification is read", async () => {
+    const { bob, id } = await mentioned();
+    await run(`UPDATE notifications SET is_read = 1 WHERE id = ?`, id);
+
+    expect((await fetchText(bob, id)).status).toBe(404);
+  });
+
+  it("is 404 while the recipient is on Do Not Disturb", async () => {
+    const { bob, id } = await mentioned();
+    await run(`UPDATE users SET status = 'dnd' WHERE id = ?`, bob.id);
+
+    expect((await fetchText(bob, id)).status).toBe(404);
+    await run(`UPDATE users SET status = 'online' WHERE id = ?`, bob.id);
+    expect((await fetchText(bob, id)).status).toBe(200);
+  });
+
+  it("is a 500, not a 404, when the database fails", async () => {
+    const { bob, id } = await mentioned();
+    const broken = {
+      prepare: () => {
+        throw new Error("D1_ERROR: database is locked");
+      },
+    } as unknown as D1Database;
+
+    const text = await fetchText(bob, id, broken);
+    expect(text.status).toBe(500);
+    expect(text.body).toMatchObject({ code: "INTERNAL_ERROR" });
+  });
+
+  it("is a 500 when only the access check fails", async () => {
+    const { bob, id } = await mentioned();
+    // The notification row reads; the channel lookups after it fail.
+    const failsAccess = {
+      prepare: (sql: string) => {
+        if (/FROM channels WHERE id = \?/.test(sql)) {
+          throw new Error("D1_ERROR: database is locked");
+        }
+        return db.prepare(sql);
+      },
+    } as unknown as D1Database;
+
+    const text = await fetchText(bob, id, failsAccess);
+    expect(text.status).toBe(500);
   });
 
   it("is 404 when the recipient left the DM", async () => {

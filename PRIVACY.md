@@ -192,7 +192,8 @@ Yap uses these services:
 - Firebase Cloud Messaging (Google) for push notifications to the mobile
   apps. A message notification carries IDs only (the notification, message,
   channel, server and sender account IDs), its kind (mention, reply or
-  direct message) and the send time: no message text, attachment, or
+  direct message), a fixed label for older app versions (such as "Yap" and
+  "New mention") and the send time: no message text, attachment, or
   sender, channel or server name. The Android app fetches the text it shows
   from Yap's server with its own session. A DM call's ring also carries the
   caller's name and avatar address, so the phone can ring at once.

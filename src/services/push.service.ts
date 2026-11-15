@@ -9,7 +9,7 @@
 
 import type { D1Database } from "@cloudflare/workers-types";
 
-import { resolveChannelAccess } from "@/lib/channel-access";
+import { resolveChannelAccessForUsers } from "@/lib/channel-access";
 import type { FcmMessage, FcmSender } from "@/server/fcm";
 import { blockBetween } from "@/services/block.service";
 
@@ -261,6 +261,11 @@ export function buildNativeMessagePush(push: MessagePush): FcmMessage {
     tag: `channel:${push.channelId}`,
     senderId: push.senderId,
     sentAt: push.sentAt,
+    // For app builds from before ids-only pushes, which draw these as-is:
+    // the kind of message, never its text or a name. Newer builds fetch
+    // the real text and ignore both.
+    senderName: "Yap",
+    preview: LEGACY_TEXT[push.type],
   };
   if (push.serverId) data.serverId = push.serverId;
   return { data, android: { priority: "HIGH", ttl: "86400s" } };
@@ -310,8 +315,10 @@ export interface NotificationPushText {
  * The text of `userId`'s notification `notificationId`, for the device that
  * got its push, or null when there is nothing the user may see: not their
  * notification, the message deleted, the channel no longer visible to them
- * (left the server or the DM, lost View Channels), or a block between them
- * and the author either way.
+ * (left the server or the DM, lost View Channels), a block between them
+ * and the author either way, the notification already read, or the user
+ * on Do Not Disturb. The device asks after the push arrives, so this is
+ * the state at that moment, not at send time.
  */
 export async function notificationPushText(
   db: D1Database,
@@ -329,7 +336,9 @@ export async function notificationPushText(
        JOIN channels c ON c.id = n.channel_id
        LEFT JOIN users u ON u.id = m.author_id
        LEFT JOIN servers s ON s.id = c.server_id
-       WHERE n.id = ? AND n.user_id = ?`,
+       JOIN users r ON r.id = n.user_id
+       WHERE n.id = ? AND n.user_id = ? AND n.is_read = 0
+         AND COALESCE(r.status, 'online') != 'dnd'`,
     )
     .bind(notificationId, userId)
     .first<Record<string, unknown>>();
@@ -339,11 +348,17 @@ export async function notificationPushText(
   if (type !== "mention" && type !== "reply" && type !== "dm") return null;
   const channelId = row.channel_id as string;
   const authorId = row.author_id as string;
-  const [access, block] = await Promise.all([
-    resolveChannelAccess(db, userId, channelId),
+  const [decisions, block] = await Promise.all([
+    // The batch form, as it tells a D1 failure apart from "no access":
+    // a failure must reach the route as a 500, not read as not found.
+    resolveChannelAccessForUsers(db, channelId, [userId]),
     blockBetween(db, userId, authorId),
   ]);
-  if (!access || block) return null;
+  const access = decisions.get(userId);
+  if (access?.kind === "error") {
+    throw new Error("notificationPushText: channel access lookup failed");
+  }
+  if (access?.kind !== "allowed" || block) return null;
 
   const isDm = row.channel_type === "dm" || row.server_id === null;
   const displayName = (row.display_name as string | null)?.trim();
