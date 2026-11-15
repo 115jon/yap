@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/115jon/yap/compare/qt-android-v0.13.0...qt-android-v0.13.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **native:** drawer and sheet drags no longer lose the finger to the list behind ([#351](https://github.com/115jon/yap/issues/351)) ([299ff9a](https://github.com/115jon/yap/commit/299ff9ac5f7d840e9fca3f92595817839dbc71e8))
+
 ## [0.13.0](https://github.com/115jon/yap/compare/qt-android-v0.12.0...qt-android-v0.13.0) (2026-11-15)
 
 
