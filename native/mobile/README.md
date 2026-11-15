@@ -240,10 +240,13 @@ banner's jump (no unread backlog arrived while the app was closed).
 Not there yet:
 
 - The profile is a phone layout of the `Profile` fields, not the desktop's
-  `ProfileCard`: that card needs QtMultimedia and five desktop-only layers
-  (effects, frames, video banners, badges, platform icons). It rises as a
-  page of the stack; it moves into the shared bottom sheet (drag to
-  dismiss) when that lands.
+  `ProfileCard`, which needs QtMultimedia. A video banner shows its first
+  frame (the phone plays video only full screen). The profile board under
+  it is the desktop's (`Yap.Ui` `BoardCore`, `BoardRack` and the widgets in
+  `board/`), read-only: editing the board, and the desktop's widget picker
+  and options, stay on the desktop and web. It rises as a page of the
+  stack; it moves into the shared bottom sheet (drag to dismiss) when that
+  lands.
 - The rail has no unread-DM avatar keys under Home (the desktop's), no
   create-server tile and no shop row. Friends is the first row of Home's
   pane ("Settings and Friends").
