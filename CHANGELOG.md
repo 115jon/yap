@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.3.2](https://github.com/115jon/yap/compare/v4.3.1...v4.3.2) (2026-11-15)
+
+
+### Bug Fixes
+
+* **native:** 🐛 draw the yap name effects on the phone ([108042b](https://github.com/115jon/yap/commit/108042b99f6c4f119db29f2ad257455460a98e00))
+
 ## [4.3.1](https://github.com/115jon/yap/compare/v4.3.0...v4.3.1) (2026-11-14)
 
 
