@@ -7,8 +7,11 @@ import Yap.Ui
 // A message's thread (the desktop's ThreadPanel, phone layout), a page over
 // the pager: "Thread" with "N replies", the root message over a seam and the
 // replies label (or "No replies yet"), the replies as the chat's rows on
-// the shared ThreadMessageModel, then a reply field. A long press opens the
-// message sheet, as in the chat; its Reply goes to the thread's field.
+// the shared ThreadMessageModel, then the reply composer: the chat's
+// (MobileComposer on ComposerCore) with `@` suggestions, emoji, the attach
+// sheet, pasted pictures and GIFs, every send answering the root. A long
+// press opens the message sheet, as in the chat; its Reply goes to the
+// thread's field.
 // Loading shows the spinner; a failure says so with Try again.
 Rectangle {
     id: root
@@ -44,12 +47,22 @@ Rectangle {
         editingId = ""
         Panels.openThread(rootId)
     }
-    function send() {
-        const text = field.text.trim()
-        if (text.length === 0)
-            return
-        Panels.sendReply(text)
-        field.text = ""
+    // The composer's shared core, for the picker sheet's sends (a GIF or a
+    // sticker goes out as a reply to the root).
+    readonly property ComposerCore composerCore: composer.core
+    // An emoji from the picker sheet: at the caret, the keyboard back up.
+    function insertEmoji(emoji) {
+        composer.insertText(emoji)
+        composer.focusField()
+    }
+    // The composer's send. Text alone is the thread's own reply (its row
+    // shows at once); finished uploads ride the channel's send, which takes
+    // them, as a reply to the root (the echo then lands in the thread).
+    function send(text, replyToId) {
+        if (Chat.uploadsReady > 0)
+            Chat.sendMessage(text, replyToId)
+        else
+            Panels.sendReply(text)
     }
 
     color: Theme.ply0
@@ -148,7 +161,7 @@ Rectangle {
             threadActions: false
             foot: messageId === Panels.threadRootId ? rootFoot : null
             onMenuRequested: actions.openFor(row)
-            onReplyRequested: field.forceActiveFocus()
+            onReplyRequested: composer.focusField()
             onEditRequested: id => root.editingId = id
             onEditSaved: (id, text) => {
                 root.editingId = ""
@@ -214,43 +227,56 @@ Rectangle {
         }
     }
 
-    // The reply field and its Send key, over the keyboard.
-    Rectangle {
+    // The reply composer, over the keyboard (the chat's: see MobileComposer).
+    MobileComposer {
         id: composer
         anchors.bottom: parent.bottom
         anchors.bottomMargin: root.bottomInset
-        width: parent.width
-        height: field.height + 16
-        color: Theme.ply0
-        Rectangle {
-            width: parent.width
-            height: 1
-            color: Theme.line
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: root.leftInset
+        anchors.rightMargin: root.rightInset
+        threadRoot: root.rootId
+        placeholder: qsTr("Reply to thread…")
+        enabled: root.ready
+        onSend: (text, replyToId) => root.send(text, replyToId)
+        onOpenImages: (images, index) => viewer.show(images, index)
+        onPickerRequested: tab => {
+            picker.active = true
+            picker.item.openOn(tab, "gifs")
         }
-        MobileField {
-            id: field
-            x: 12 + root.leftInset
-            y: 8
-            width: parent.width - 24 - root.leftInset - root.rightInset - sendKey.width - 4
-            enabled: root.ready
-            placeholderText: qsTr("Reply to thread…")
-            Accessible.name: qsTr("Reply to thread")
-            onAccepted: root.send()
+        onAttachRequested: {
+            attachSheet.active = true
+            attachSheet.item.open()
         }
-        IconKey {
-            id: sendKey
-            focusPolicy: Qt.NoFocus
-            anchors.left: field.right
-            anchors.leftMargin: 4
-            anchors.verticalCenter: field.verticalCenter
-            iconName: "send"
-            tip: qsTr("Send")
-            enabled: root.ready && (field.text + field.preeditText).trim().length > 0
-            onClicked: {
-                // The keyboard's word in progress counts.
-                Qt.inputMethod.commit()
-                root.send()
+    }
+
+    // The + key's sheet and the emoji and GIF picker, made on first use
+    // (as the chat's).
+    Loader {
+        id: attachSheet
+        anchors.fill: parent
+        z: 9
+        active: false
+        sourceComponent: AttachSheet {
+            onChosen: what => {
+                if (what === "gifs" || what === "stickers") {
+                    picker.active = true
+                    picker.item.openOn("gifs", what)
+                } else {
+                    composer.attach(what)
+                }
             }
+        }
+    }
+    Loader {
+        id: picker
+        anchors.fill: parent
+        z: 9
+        active: false
+        sourceComponent: PickerSheet {
+            composer: root.composerCore
+            onPicked: emoji => root.insertEmoji(emoji)
         }
     }
 
@@ -259,7 +285,7 @@ Rectangle {
         id: actions
         anchors.fill: parent
         z: 9
-        onReplyRequested: (messageId, author, text) => field.forceActiveFocus()
+        onReplyRequested: (messageId, author, text) => composer.focusField()
         onEditRequested: messageId => root.editingId = messageId
         onProfileRequested: userId => root.profileRequested(userId)
     }
