@@ -45,6 +45,7 @@ const QML: &[&str] = &[
     "qml/BottomSheet.qml",
     "qml/SheetRow.qml",
     "qml/ServerSheet.qml",
+    "qml/NotifySheet.qml",
     "qml/InviteLandingPage.qml",
     "qml/SharePickerPage.qml",
     "qml/CreateServerPage.qml",
