@@ -24,12 +24,13 @@ Item {
     // A tile's spoken name: what it opens, where it sits, and on the tenth
     // how many more there are ("+N").
     function tileName(name, index) {
+        // Joined, not substituted after the name: a "%2" in a file name
+        // stays as it is.
         const open = name ? qsTr("Open %1").arg(name) : qsTr("Open image")
-        const where = qsTr("%1, %2 of %3").arg(open).arg(index + 1).arg(count)
+        const where = qsTr("%1 of %2").arg(index + 1).arg(count)
         const extra = more(index)
-        if (extra === 0)
-            return where
-        return extra === 1 ? qsTr("%1, 1 more image").arg(where) : qsTr("%1, %2 more images").arg(where).arg(extra)
+        const rest = extra === 0 ? "" : extra === 1 ? qsTr("1 more image") : qsTr("%1 more images").arg(extra)
+        return open + ", " + where + (rest.length > 0 ? ", " + rest : "")
     }
 
     // ImageGrid.tsx layouts as rectangles in a `w`-wide box.
