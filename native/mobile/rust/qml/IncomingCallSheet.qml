@@ -29,6 +29,8 @@ Rectangle {
     visible: shownLevel > 0
     opacity: shownLevel
     z: 120
+    // TalkBack reads only the ring while it rings (cpp/a11y.h).
+    A11y.modal: shown
     color: Theme.ply0
     Accessible.role: Accessible.AlertMessage
     Accessible.name: qsTr("Incoming voice call from %1").arg(call.callerName ?? "")

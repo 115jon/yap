@@ -11,11 +11,14 @@ import Yap.Ui
 // and the name; a tap on either picks a new one. Then numbered sections:
 // Avatar (choose from the gallery, frame it, remove it), Banner (choose,
 // remove), About you (display name, pronouns, custom status, about me,
-// each with its count). Pictures come from Android's photo picker (no
-// storage permission); a new avatar is framed first (AvatarFramePage). Once
+// each with its count, and the display name style, edited on
+// NameStylePage and saved with the rest), Collectibles (each slot's worn
+// item, Change on CollectiblePickerPage, which applies at once, and Remove;
+// the shop). Pictures come from Android's photo picker (no storage
+// permission); a new avatar is framed first (AvatarFramePage). Once
 // anything changed, Cancel and Save ride above the keyboard; Back while
-// edits are unsaved asks before it drops them. The profile colours, the
-// name style and the collectibles stay on the desktop.
+// edits are unsaved asks before it drops them. The profile colours and
+// nameplate uploads stay on the desktop.
 Rectangle {
     id: root
 
@@ -55,6 +58,11 @@ Rectangle {
         },
         Translate { x: root.backProgress * root.width * 0.1 }
     ]
+
+    // The slots' Remove (applies at once) and their names.
+    ShopCore {
+        id: shop
+    }
 
     ProfileDraft {
         id: draft
@@ -390,6 +398,68 @@ Rectangle {
                     error: draft.nameError
                     onEdited: value => draft.displayName = value
                 }
+                // The display name style: the name in the draft's style,
+                // Edit (or Add) and Clear.
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    Text {
+                        textFormat: Text.PlainText
+                        text: qsTr("Display name style")
+                        color: Theme.ink1
+                        font: Theme.type.labelStrong
+                    }
+                    Rectangle {
+                        width: parent.width
+                        height: styleRow.height + 24
+                        radius: Theme.radius
+                        color: Theme.ply2
+                        border.width: 1
+                        border.color: Theme.line
+                        Item {
+                            id: styleRow
+                            x: 12
+                            y: 12
+                            width: parent.width - 24
+                            height: Math.max(styleName.height, styleKeys.height)
+                            DisplayName {
+                                id: styleName
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width - styleKeys.width - 12
+                                text: draft.displayName.trim().length > 0 ? draft.displayName.trim() : Settings.username
+                                nameStyle: draft.nameStyle
+                                color: Theme.ink2
+                                font: Theme.type.menuTitle
+                                ground: Theme.ply2
+                            }
+                            Row {
+                                id: styleKeys
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 4
+                                KitButton {
+                                    visible: draft.nameStyle.length > 0
+                                    variant: "ghost"
+                                    text: qsTr("Clear")
+                                    Accessible.name: qsTr("Clear display name style")
+                                    enabled: !draft.saving
+                                    onClicked: draft.nameStyle = ""
+                                }
+                                KitButton {
+                                    variant: "secondary"
+                                    ground: Theme.ply2
+                                    text: draft.nameStyle.length > 0 ? qsTr("Edit") : qsTr("Add")
+                                    Accessible.name: draft.nameStyle.length > 0 ? qsTr("Edit display name style") : qsTr("Add display name style")
+                                    enabled: !draft.saving
+                                    onClicked: {
+                                        Qt.inputMethod.hide()
+                                        Router.open("NameStylePage", { draft: draft })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 Field {
                     label: qsTr("Pronouns")
                     max: draft.limits.pronouns
@@ -411,6 +481,47 @@ Rectangle {
                     placeholder: qsTr("Night owl, synth collector, always up for co-op.")
                     value: draft.bio
                     onEdited: value => draft.bio = value
+                }
+            }
+
+            Section {
+                number: 4
+                title: qsTr("Collectibles")
+                Note {
+                    text: qsTr("Free to equip. Changes here apply at once.")
+                }
+                Slot {
+                    kind: "avatar_decoration"
+                    worn: draft.worn.avatarDecoration?.name ?? ""
+                    removable: draft.worn.avatarDecoration !== undefined
+                }
+                Slot {
+                    kind: "profile_effect"
+                    worn: draft.worn.profileEffect?.name ?? ""
+                    removable: draft.worn.profileEffect !== undefined
+                }
+                Slot {
+                    kind: "profile_frame"
+                    worn: draft.worn.profileFrame?.name ?? ""
+                    removable: draft.worn.profileFrame !== undefined
+                }
+                // A custom (uploaded) plate is removed with the profile's
+                // Save, as on the desktop.
+                Slot {
+                    kind: "nameplate"
+                    worn: draft.removeNameplate ? qsTr("Removed when you save")
+                        : draft.worn.nameplate?.name ?? (Session.mePlate.length > 0 ? qsTr("Custom nameplate") : "")
+                    removable: draft.canRemoveNameplate
+                    withSave: true
+                }
+                KitButton {
+                    variant: "secondary"
+                    iconName: "shop"
+                    text: qsTr("Browse the shop")
+                    onClicked: {
+                        Qt.inputMethod.hide()
+                        Router.open("ShopPage")
+                    }
                 }
             }
         }
@@ -542,6 +653,72 @@ Rectangle {
             id: rows
             width: parent.width
             spacing: 12
+        }
+    }
+
+    // A collectible slot: its name and what is worn, Change (the slot's
+    // picker) and Remove.
+    component Slot: Item {
+        id: slot
+        required property string kind
+        property string worn: ""
+        property bool removable: false
+        // Remove goes with the profile's Save (the nameplate) rather than
+        // at once.
+        property bool withSave: false
+        readonly property string label: shop.kindLabel(kind)
+        width: parent ? parent.width : 0
+        height: Math.max(slotText.height, slotKeys.height)
+        Column {
+            id: slotText
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width - slotKeys.width - 12
+            spacing: 2
+            Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: slot.label
+                color: Theme.ink1
+                font: Theme.type.labelStrong
+            }
+            Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: slot.worn.length > 0 ? slot.worn : qsTr("None")
+                elide: Text.ElideRight
+                color: Theme.ink2
+                font: Theme.type.description
+            }
+        }
+        Row {
+            id: slotKeys
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 4
+            KitButton {
+                visible: slot.removable
+                variant: "ghost"
+                text: qsTr("Remove")
+                Accessible.name: qsTr("Remove %1").arg(slot.label.toLowerCase())
+                enabled: !draft.saving
+                onClicked: {
+                    Native.haptic(Native.Tick)
+                    if (slot.withSave)
+                        draft.removePlate()
+                    else
+                        shop.remove(slot.kind)
+                }
+            }
+            KitButton {
+                variant: "secondary"
+                text: qsTr("Change")
+                Accessible.name: qsTr("Change %1").arg(slot.label.toLowerCase())
+                enabled: !draft.saving
+                onClicked: {
+                    Qt.inputMethod.hide()
+                    Router.open("CollectiblePickerPage", { kind: slot.kind }, { key: slot.kind })
+                }
+            }
         }
     }
 

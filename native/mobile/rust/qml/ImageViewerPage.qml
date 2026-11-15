@@ -149,6 +149,8 @@ Item {
     }
 
     visible: shown
+    // TalkBack reads only the viewer while it is up (cpp/a11y.h).
+    A11y.modal: shown
     enabled: shown && !exit.running
 
     // In: the scrim fades and the picture grows from 0.94 (dur-3).

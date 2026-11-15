@@ -56,6 +56,14 @@ Window {
         property: "lightBars"
         value: Theme.lightGround
     }
+    // The account's media filter (Settings > Privacy and safety): "high"
+    // hides sensitive media behind its frame (SensitiveMediaFrame), as the
+    // desktop's Shell feeds it; "high" until the account says.
+    Binding {
+        target: ShellState
+        property: "mediaFilter"
+        value: Settings.mediaFilter.length > 0 ? Settings.mediaFilter : "high"
+    }
 
     Component.onCompleted: {
         // The core starts out focused; say so before anything loads, or a

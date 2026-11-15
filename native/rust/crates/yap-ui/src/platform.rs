@@ -130,6 +130,25 @@ pub trait Platform: Send + Sync + 'static {
         let _ = volume;
     }
 
+    /// This device's UI sound settings as JSON (`{sounds, soundVolume,
+    /// soundNotifications, soundVoiceJoinLeave, soundConnect, soundMute,
+    /// soundScreenShare, soundCalls}`), for an app whose shell has no
+    /// settings object of its own (`Settings.soundSettings`). `None`: the
+    /// app shows them elsewhere (the desktop's `Desktop`).
+    fn sound_settings_json(&self) -> Option<String> {
+        None
+    }
+
+    /// Saves one UI sound setting: a switch (`sounds`, `soundNotifications`,
+    /// ...) as 0 or 1, `soundVolume` as 0 to 100 (`Settings.setSoundSetting`).
+    fn set_sound_setting(&self, key: &str, value: i32) {
+        let _ = (key, value);
+    }
+
+    /// Plays the notification sound at the sound volume, switches aside
+    /// (`Settings.playTestSound`).
+    fn play_test_sound(&self) {}
+
     /// Whether the system has a network, when the app can ask (`None`:
     /// it cannot). A phone app in the background can have its own network
     /// blocked while the device's is up: a host name that does not resolve
