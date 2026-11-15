@@ -54,6 +54,11 @@ Item {
     property bool dockedMembers: true
     readonly property bool membersDocked: docked && dockedMembers && hasMembers
 
+    // The pan has this touch: the pages' lists hold still under it. Only
+    // once it pans: a touch that set off its way but turns into a scroll
+    // before the pan's threshold is still the list's.
+    readonly property bool held: pan.active
+
     // The conversation is on screen (it counts as read only then).
     readonly property bool chatShown: hasChat && (wide || page === "chat")
     readonly property bool membersShown: hasMembers && (membersDocked || page === "members")
@@ -296,6 +301,7 @@ Item {
     DrawerPage {
         id: drawer
         chatHasRows: chat.hasRows
+        held: pager.held
         x: pager.wide ? 0
             : -pager.parallax * (1 - Math.max(0, Math.min(1, pager.offset / Math.max(1, pager.drawerWidth))))
         width: pager.drawerWidth
@@ -339,6 +345,7 @@ Item {
             id: chat
             anchors.fill: parent
             visible: pager.hasChat
+            held: pager.held
             enabled: pager.chatShown
             // Aside (the drawer or members over it): only the peek is read.
             A11y.hidden: !enabled
@@ -427,6 +434,7 @@ Item {
         active: built
         sourceComponent: MembersPage {
             closeKey: !pager.docked
+            held: pager.held
             onCloseRequested: pager.show("chat")
             onProfileRequested: userId => pager.profileRequested(userId)
         }
@@ -439,43 +447,32 @@ Item {
 
     // The pan. An item of its own over the pages: a handler here sees every
     // touch without taking it, and claims it only once it has travelled
-    // sideways; a list that started scrolling first keeps its touch.
+    // sideways the right way; a list that started scrolling first keeps its
+    // touch.
     Item {
         anchors.fill: parent
-
-        // Which way the touch set off, read before the pan's threshold: from
-        // the chat or members only a rightward drag pans, from the drawer
-        // only a leftward one. Anything else (a leftward drag on a message,
-        // a scroll) switches the pan off until the finger lifts, so it never
-        // claims that touch.
-        PointHandler {
-            id: probe
-
-            property bool decided: false
-
-            target: null
-            onActiveChanged: {
-                decided = false
-                if (!active)
-                    pan.wrongWay = false
-            }
-            onPointChanged: {
-                if (!active || decided || pan.active)
-                    return
-                const dx = point.position.x - point.pressPosition.x
-                const dy = point.position.y - point.pressPosition.y
-                if (Math.abs(dx) < 6 && Math.abs(dy) < 6)
-                    return
-                decided = true
-                const rightward = pager.page !== "drawer"
-                pan.wrongWay = Math.abs(dy) > Math.abs(dx) || (rightward ? dx < 0 : dx > 0)
-            }
-        }
 
         DragHandler {
             id: pan
 
-            property bool wrongWay: false
+            // Which way the touch set off, decided once per touch from its
+            // first steps (in the scene: the chat moves under the finger).
+            // From the chat or members only a rightward drag pans, from the
+            // drawer only a leftward one; anything else (a leftward drag on
+            // a message, a scroll) is refused until the finger lifts, so the
+            // pan never claims that touch. Decided here, as each step
+            // reaches the handler and before it weighs its threshold:
+            // Qt Quick hands over a frame's moves as one step, often past
+            // the threshold already, so a separate handler deciding it
+            // could hear of the step after the pan had taken it.
+            property bool decided: false
+            property bool refused: false
+            // The touch may be the pan's: decided its way, until the lift.
+            // Once it pans, the pages' lists hold still (Pager.held): a
+            // Flickable takes a touch from a handler whenever it sees the
+            // finger travel its way, without asking, which dropped a pan
+            // half way and sent the chat back.
+            readonly property bool claims: decided && !refused
 
             property real from: 0
             property real startX: 0
@@ -485,13 +482,33 @@ Item {
             property int samples: 0
 
             target: null
-            enabled: !pager.wide && pager.hasChat && !wrongWay && !chat.overlayShown
-            xAxis.enabled: true
+            enabled: !pager.wide && pager.hasChat && !chat.overlayShown
+            // No axis, so no drag, until the touch is decided the pan's way.
+            xAxis.enabled: active || claims
             yAxis.enabled: false
             dragThreshold: 14
             // Once it pans, the drag is its own: a row's handler under the
             // finger (which moves along with the chat) does not take it over.
             grabPermissions: PointerHandler.CanTakeOverFromAnything
+
+            function decide() {
+                if (decided)
+                    return
+                const dx = centroid.scenePosition.x - centroid.scenePressPosition.x
+                const dy = centroid.scenePosition.y - centroid.scenePressPosition.y
+                if (Math.abs(dx) < 6 && Math.abs(dy) < 6)
+                    return
+                const rightward = pager.page !== "drawer"
+                refused = Math.abs(dy) >= Math.abs(dx) || (rightward ? dx < 0 : dx > 0)
+                decided = true
+            }
+            // Each touch starts undecided, and a lift ends what it decided.
+            onGrabChanged: transition => {
+                if (transition !== PointerDevice.GrabExclusive) {
+                    decided = false
+                    refused = false
+                }
+            }
 
             // A drag taken away (by the system's back gesture, a sheet that
             // opened) lands back where it started, not where it was heading
@@ -517,7 +534,8 @@ Item {
                 }
                 Qt.callLater(settle)
             }
-            onCentroidChanged: if (active) follow()
+            // Before the handler weighs this step against its threshold.
+            onCentroidChanged: active ? follow() : decide()
 
             function settle() {
                 if (active)

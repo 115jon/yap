@@ -12,6 +12,8 @@ Rectangle {
 
     // The key back to the chat (not when the column is docked beside it).
     property bool closeKey: true
+    // The pager pans with the touch: the list holds still (Pager.held).
+    property bool held: false
 
     signal closeRequested()
     signal profileRequested(string userId)
@@ -76,6 +78,7 @@ Rectangle {
         topMargin: 4
         bottomMargin: root.bottomInset + 16
         clip: true
+        interactive: !root.held
         model: MemberListModel
 
         delegate: MemberEntry {

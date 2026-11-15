@@ -22,6 +22,8 @@ Item {
     signal conversationOpened()
     // The open conversation shows rows (picking it again only goes back).
     property bool chatHasRows: false
+    // The pager pans with the touch: the lists hold still (Pager.held).
+    property bool held: false
     signal profileRequested(string userId)
     // The account plate was tapped: the panel grows out of it (Main.qml).
     signal accountRequested(Item plate)
@@ -79,6 +81,7 @@ Item {
             bottomMargin: root.plateClear
             spacing: 8
             clip: true
+            interactive: !root.held
             model: ServerListModel
 
             // Home (the desktop rail's first key): the Yappy mark, the
@@ -289,6 +292,7 @@ Item {
             bottomMargin: root.plateClear
             spacing: 2
             clip: true
+            interactive: !root.held
             model: ChannelTreeModel
             delegate: TreeRow {
                 id: row
@@ -323,6 +327,7 @@ Item {
             visible: active
             sourceComponent: DmsPane {
                 chatHasRows: root.chatHasRows
+                held: root.held
                 bottomClear: root.plateClear
                 onConversationOpened: root.conversationOpened()
                 onProfileRequested: userId => root.profileRequested(userId)
