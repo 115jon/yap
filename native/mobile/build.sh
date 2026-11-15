@@ -21,7 +21,8 @@
 #                    $YAPM/qt). QT_ANDROID_ROOT is still read for Android;
 #                    aab reads YAP_QT_DIR only.
 #   QT_HOST_PATH     a desktop Qt 6.11.3 with its tools (moc, qmlcachegen,
-#                    androiddeployqt)
+#                    androiddeployqt, and qtshadertools' qsb for the
+#                    name-effect shaders)
 #   Android: ANDROID_SDK_ROOT (or ANDROID_HOME) and ANDROID_NDK_ROOT (default:
 #   the SDK's ndk/$YAP_NDK_VERSION, 27.2.12479018, r27c, the NDK Qt 6.11.3
 #   for Android was built with), JDK 17+.

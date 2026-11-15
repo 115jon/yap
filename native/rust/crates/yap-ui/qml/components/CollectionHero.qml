@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // A collection's hero (ShopView.tsx CollectionHero): the hero art over the
@@ -10,6 +9,10 @@ Rectangle {
     id: root
 
     required property var hero
+    // The copy's start and width: the desktop's 32 px and half the art; a
+    // phone gives it more of its width.
+    property real inset: 32
+    property real copyWidth: Math.min(width * 0.52, width - 2 * inset)
 
     signal browse(string id)
 
@@ -47,9 +50,9 @@ Rectangle {
     }
 
     Column {
-        x: 32
+        x: root.inset
         anchors.verticalCenter: parent.verticalCenter
-        width: Math.min(parent.width * 0.52, parent.width - 64)
+        width: root.copyWidth
         spacing: 12
 
         Row {

@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // A collection's own colours behind its art (the catalog's CSS

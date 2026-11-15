@@ -1,7 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Yap.Media
-import com.yap.native
+import Yap.Platform
 import Yap.Ui
 
 // The large live preview of one item on you (CollectiblePreviews.tsx

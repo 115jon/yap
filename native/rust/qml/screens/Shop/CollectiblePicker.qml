@@ -18,48 +18,36 @@ import Yap.Ui
 Popup {
     id: root
 
-    readonly property var model: JSON.parse(Shop.picker)
-    readonly property var m: model ?? ({ title: "", sections: [], chips: [], preview: null, kind: "" })
-    readonly property string kind: m.kind ?? ""
-    // The store sends `total` once the catalog is in.
-    readonly property bool hasCatalog: m.total !== undefined
-    readonly property bool showNone: hasCatalog && (m.query ?? "").trim().length === 0
-    // An Apply from here is in flight: close when it lands without an error.
-    property bool applying: false
+    // Yap.Ui's ShopCore: the picker's model, its sections, the draft and
+    // Apply, shared with the phone's picker page.
+    readonly property ShopCore core: ShopCore {
+        picks: true
+        // An Apply landed without an error.
+        onApplied: root.close()
+    }
+    readonly property var m: core.picker
+    readonly property string kind: core.pickerKind
+    readonly property bool hasCatalog: core.hasCatalog
+    readonly property bool showNone: core.showNone
     // The option with keyboard focus (roving), by id.
     property string focusId: ""
 
     readonly property int cellMin: kind === "avatar_decoration" ? 88 : kind === "profile_effect" ? 84 : kind === "profile_frame" ? 104 : 0
 
     function show(kind) {
-        Shop.openPicker(kind)
-        applying = false
+        core.showPicker(kind)
         focusId = ""
         open()
     }
     function apply() {
-        if (!m.changed || m.busy)
-            return
-        applying = true
-        if (m.selectedId === "__none")
-            Shop.remove(kind)
-        else
-            Shop.equip(m.selectedId)
+        core.apply()
     }
     function escaped(text) {
         return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     }
     function choose(id) {
         focusId = id
-        Shop.choosePicker(id)
-    }
-
-    onModelChanged: {
-        if (applying && root.model && !root.model.busy) {
-            applying = false
-            if ((root.model.error ?? "").length === 0)
-                root.close()
-        }
+        core.choose(id)
     }
 
     parent: Overlay.overlay
@@ -75,7 +63,7 @@ Popup {
     focus: true
     padding: 0
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-    onClosed: Shop.openPicker("")
+    onClosed: core.closePicker()
 
     // Over the profile editor: the lighter stacked scrim.
     Overlay.modal: Scrim { color: Theme.scrimStacked }
@@ -212,7 +200,7 @@ Popup {
                         leadingInset: 20
                         placeholderText: qsTr("Search %1").arg((root.m.many ?? "").toLowerCase())
                         text: root.m.query ?? ""
-                        onTextEdited: Shop.setPickerQuery(text)
+                        onTextEdited: root.core.setPickerQuery(text)
                         Accessible.name: qsTr("Search %1").arg((root.m.many ?? "").toLowerCase())
                         Keys.onDownPressed: grid.focusFirst()
                         Icon {
@@ -296,17 +284,10 @@ Popup {
                 readonly property int inner: width - 40
                 readonly property int columns: root.kind === "nameplate" ? 2 : Math.max(1, Math.floor(inner / Math.max(1, root.cellMin)))
                 readonly property real cellWidth: inner / columns
-                // "No <kind>" first (not while searching), then the sections.
-                readonly property var groups: !root.hasCatalog ? []
-                    : (root.showNone ? [{ id: "__none_group", none: true, items: [null] }] : []).concat(root.m.sections)
-                // Every option in reading order, for the arrow keys.
-                readonly property var order: {
-                    const out = []
-                    for (const g of groups)
-                        for (const item of g.items)
-                            out.push(item === null ? "__none" : item.id)
-                    return out
-                }
+                // "No <kind>" first (not while searching), then the sections;
+                // every option in reading order, for the arrow keys.
+                readonly property var groups: root.core.groups
+                readonly property var order: root.core.order
 
                 model: groups
 

@@ -419,7 +419,10 @@ Item {
             layer.mipmap: root.yap && (root.effect === "ember" || root.effect === "candlelit"
                 || (root.effect === "crt" && !root.light))
             layer.effect: ShaderEffect {
-                // One baked variant per effect (shaders/namefx.frag, MODE).
+                // One baked variant per effect (shaders/namefx.frag, MODE),
+                // over a vertex stage of the same GLSL versions (OpenGL ES
+                // links the two only when they match).
+                vertexShader: "qrc:/shaders/namefx.vert.qsb"
                 fragmentShader: "qrc:/shaders/name-" + root.effect + ".frag.qsb"
                 readonly property real light: root.light ? 1 : 0
                 readonly property real em: root.em
