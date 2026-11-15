@@ -43,7 +43,7 @@ impl Realtime for MobileRealtime {
         crate::voice::spawn(api, http, target, commands, events);
     }
 
-    /// The room's soundboard clips (`sound.rs`).
+    /// The room's soundboard clips and Listen Together stream (`sound.rs`).
     #[cfg(target_os = "android")]
     fn spawn_audio(
         &self,
@@ -277,6 +277,12 @@ impl Platform for Mobile {
         crate::sound::set_soundboard_volume(volume);
     }
 
+    /// The Listen Together sheet's volume (`sound.rs`).
+    #[cfg(target_os = "android")]
+    fn set_listen_volume(&self, volume: u8) {
+        crate::sound::set_listen_volume(volume);
+    }
+
     /// The call page's per-person volume and mute (`voice.rs`).
     #[cfg(target_os = "android")]
     fn peer_audio(&self, user_id: &str) -> Option<(u16, bool)> {
@@ -286,6 +292,22 @@ impl Platform for Mobile {
     #[cfg(target_os = "android")]
     fn set_peer_audio(&self, user_id: &str, volume: u16, muted: bool, save: bool) {
         crate::voice::set_peer_audio(user_id, volume, muted, save);
+    }
+
+    /// Settings > Notifications' sound rows (`sound.rs`).
+    #[cfg(target_os = "android")]
+    fn sound_settings_json(&self) -> Option<String> {
+        Some(crate::sound::settings_json())
+    }
+
+    #[cfg(target_os = "android")]
+    fn set_sound_setting(&self, key: &str, value: i32) {
+        crate::sound::set_setting(key, value);
+    }
+
+    #[cfg(target_os = "android")]
+    fn play_test_sound(&self) {
+        crate::sound::play_test();
     }
 
     fn on_update(&self, update: ViewUpdate) -> bool {

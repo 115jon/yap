@@ -24,6 +24,10 @@ import Yap.Ui
 // - `sendGif`: a GIF picker tile goes out as the reply, which then clears
 //   (the typed text stays).
 //
+// With `drafts` off (the phone's thread reply field) the composer keeps no
+// draft: it starts empty and does not follow the open channel, so the
+// channel's own draft is neither shown in it nor overwritten by it.
+//
 // With `liveWord` (a soft keyboard), the word being composed (the field's
 // preedit) counts as typed for Send, `@` suggestions and typing pings, and
 // is committed before anything edits the text.
@@ -34,6 +38,9 @@ Item {
     property MentionPanel mentions
     property bool liveWord: Theme.touch
     property bool atomicMentions: !Theme.touch
+    // Keep the channel's draft (see above); a reply field of its own turns
+    // it off.
+    property bool drafts: true
 
     // The message being replied to (empty id: none). Cancelling clears only
     // the id, so a bar on its way out still names who it was.
@@ -374,6 +381,8 @@ Item {
     property bool puttingDraft: false
 
     function keepDraft() {
+        if (!root.drafts)
+            return
         ComposerDrafts.keep(root.draftChannel, {
             text: root.typed, map: root.customMap,
             replyToId: root.replyToId, replyToName: root.replyToName,
@@ -403,6 +412,8 @@ Item {
     }
 
     function restoreDraft(channelId) {
+        if (!root.drafts)
+            return
         root.draftChannel = channelId
         root.putDraft(ComposerDrafts.take(channelId))
     }
@@ -427,7 +438,7 @@ Item {
     Connections {
         target: Nav
         function onActiveChannelIdChanged() {
-            if (Nav.activeChannelId === root.draftChannel)
+            if (!root.drafts || Nav.activeChannelId === root.draftChannel)
                 return
             root.keepDraft()
             root.restoreDraft(Nav.activeChannelId)

@@ -1,5 +1,4 @@
 import QtQuick
-import com.yap.native
 import Yap.Ui
 
 // Yappy printed through the accent dither on a 32-cell grid (ui/yap-bark.tsx).

@@ -223,10 +223,16 @@ pub mod qobject {
         #[cxx_name = "ltClear"]
         fn lt_clear(self: &Apps);
 
-        /// 0..1.
+        /// 0..1, this device's (saved where the app keeps it: the phone).
         #[qinvokable]
         #[cxx_name = "ltVolume"]
         fn lt_volume(self: &Apps, volume: f64);
+
+        /// Hear the room's stream here (`true`), or stop it on this device
+        /// only (`false`); the room plays on for everyone else.
+        #[qinvokable]
+        #[cxx_name = "ltListen"]
+        fn lt_listen(self: &Apps, listening: bool);
 
         #[qinvokable]
         #[cxx_name = "ltLoudness"]
@@ -602,6 +608,17 @@ impl qobject::Apps {
 
     pub fn lt_volume(&self, volume: f64) {
         send(AppsCommand::LtVolume(volume));
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a percentage in 0..=100"
+        )]
+        let percent = (volume.clamp(0.0, 1.0) * 100.0).round() as u8;
+        crate::platform::platform().set_listen_volume(percent);
+    }
+
+    pub fn lt_listen(&self, listening: bool) {
+        send(AppsCommand::LtListen(listening));
     }
 
     pub fn lt_loudness(&self, enabled: bool, preset: &QString) {

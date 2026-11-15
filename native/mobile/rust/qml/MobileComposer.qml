@@ -22,10 +22,18 @@ import Yap.Ui
 // (Send, `@` suggestions, typing pings) before the keyboard commits it.
 // Each channel keeps its unsent text and reply (ComposerDrafts) while the
 // app runs; signed out, the field and the reply empty.
+//
+// The thread page's reply field is this composer too, with `threadRoot` set:
+// its sends reply to that message (the GIFs and stickers through the core,
+// the rest as `send`'s reply id), it has no reply bar of its own (a thread
+// is the reply), and it keeps no draft, which stays the channel's.
 Rectangle {
     id: root
 
     property string placeholder: ""
+    // The thread's root message when this is a thread's reply field (empty:
+    // the channel's composer).
+    property string threadRoot: ""
     // The message being replied to (empty: none): ComposerCore's.
     property alias replyToId: core.replyToId
     property alias replyToName: core.replyToName
@@ -56,9 +64,28 @@ Rectangle {
         mentions: mentionPanel
         liveWord: true
         atomicMentions: false
+        drafts: root.threadRoot.length === 0
         onSend: (text, replyToId) => root.send(text, replyToId)
         onSent: root.emojiOpen = false
         onGifSent: root.gifSent()
+    }
+
+    // In a thread every send answers its root: the core's reply holds it,
+    // put back after a send or a GIF cleared it (the bar stays hidden).
+    function holdThreadRoot() {
+        if (root.threadRoot.length > 0 && core.replyToId !== root.threadRoot) {
+            core.replyToId = root.threadRoot
+            core.replyToName = ""
+            core.replyToText = ""
+            core.replyToFiles = 0
+        }
+    }
+    onThreadRootChanged: holdThreadRoot()
+    Connections {
+        target: core
+        function onReplyToIdChanged() {
+            root.holdThreadRoot()
+        }
     }
 
     // What is in the field, the keyboard's word in progress included.
@@ -150,9 +177,14 @@ Rectangle {
     }
     // A photo the camera took after Android killed the app behind it goes
     // to the tray once a channel's composer can take it.
+    // (The channel's composer takes it, not a thread's.)
     readonly property bool takesLeftover: root.enabled && Nav.activeChannelId.length > 0
+        && root.threadRoot.length === 0
     onTakesLeftoverChanged: takeLeftoverPhoto()
-    Component.onCompleted: takeLeftoverPhoto()
+    Component.onCompleted: {
+        holdThreadRoot()
+        takeLeftoverPhoto()
+    }
     function takeLeftoverPhoto() {
         if (!root.takesLeftover)
             return
@@ -280,7 +312,7 @@ Rectangle {
         Rectangle {
             id: replyBar
             width: parent.width
-            height: root.replyToId.length > 0 ? 48 : 0
+            height: root.replyToId.length > 0 && root.threadRoot.length === 0 ? 48 : 0
             visible: height > 0
             clip: true
             color: Theme.tint1
@@ -479,7 +511,8 @@ Rectangle {
                     id: field
                     wrapMode: TextEdit.Wrap
                     color: Theme.ink1
-                    placeholderText: root.replyToId.length > 0 ? qsTr("Reply to %1…").arg(root.replyToName) : root.placeholder
+                    placeholderText: root.replyToId.length > 0 && root.threadRoot.length === 0
+                        ? qsTr("Reply to %1…").arg(root.replyToName) : root.placeholder
                     placeholderTextColor: Theme.ink3
                     font: Theme.type.message
                     topPadding: 10

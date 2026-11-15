@@ -965,8 +965,9 @@ without libwebrtc. What is the phone's own:
   `YAP_ADM_AUDIO=1`, so the phone has no RNNoise and no per-person panning
   (spatial audio is heard flat), and one mixed playout. The voice settings
   are the defaults: the phone has no page for the output and per-person
-  volumes, sensitivity or processing yet. The soundboard's and Listen
-  Together's audio are not played (`yap-audio` is not in the app). No
+  volumes, sensitivity or processing yet. The soundboard's clips and
+  Listen Together's stream play through `yap-audio` on the app's speaker
+  (`yap-speaker`, AAudio) as call audio. No
   camera, screen share or remote video yet: the phone asks for no video,
   so none is pulled.
 - **Start-up.** libwebrtc needs the process's `JavaVM`, the application
