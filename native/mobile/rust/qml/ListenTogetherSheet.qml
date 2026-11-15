@@ -15,9 +15,9 @@ import Yap.Ui
 //   for it, the clock for a track with a length), Listen or Stop here
 //   (this phone only; the room plays on for everyone else), play or pause
 //   and skip for the room, this phone's volume (saved for the next call:
-//   a room already playing starts at it, half on a fresh install), then
-//   Add (radio stations from radio-browser, or a track search or a
-//   YouTube or Spotify link) and the queue (play, remove, Clear queue).
+//   a room already playing starts at it, half on a fresh install), the
+//   queue (play, remove, Clear queue), then Add (radio stations from
+//   radio-browser, or a track search or a YouTube or Spotify link).
 // The call page makes it; the soundboard's Listen Together key opens it.
 Item {
     id: root
@@ -554,6 +554,76 @@ Item {
                     }
                 }
 
+                // ── The queue ────────────────────────────────────────────
+                Item {
+                    width: parent.width
+                    height: 40
+                    Label {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width - clearKey.width - 8
+                        text: core.queueCount > 0 ? qsTr("Queue · %1").arg(core.queueCount) : qsTr("Queue")
+                    }
+                    KitButton {
+                        id: clearKey
+                        visible: core.queueCount > 0 && !root.confirmClear
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        size: "sm"
+                        variant: "ghost"
+                        text: qsTr("Clear queue")
+                        onClicked: root.confirmClear = true
+                    }
+                }
+                InlineConfirm {
+                    visible: root.confirmClear
+                    height: visible ? implicitHeight : 0
+                    consequence: qsTr("Every queued track is removed for everyone listening in this call.")
+                    confirmLabel: qsTr("Clear")
+                    onCancelled: root.confirmClear = false
+                    onConfirmed: {
+                        Apps.ltClear()
+                        root.confirmClear = false
+                    }
+                }
+                Note {
+                    visible: core.queueCount === 0
+                    text: qsTr("The queue is empty.")
+                }
+                Repeater {
+                    model: core.queue
+                    delegate: TrackLine {
+                        id: entry
+                        required property var modelData
+                        title: modelData.title
+                        meta: modelData.radio ? [qsTr("Live Radio"), core.queueMeta(modelData)].filter(x => x.length > 0).join(" · ")
+                            : core.queueMeta(modelData)
+                        artwork: modelData.artwork
+                        current: modelData.current
+                        IconKey {
+                            visible: !entry.modelData.current
+                            size: 48
+                            iconName: "play"
+                            tone: "ghost"
+                            tip: qsTr("Play %1").arg(entry.modelData.title)
+                            Accessible.name: tip
+                            onClicked: {
+                                Native.haptic(Native.Tick)
+                                Apps.ltPlay(entry.modelData.entryId)
+                            }
+                        }
+                        IconKey {
+                            size: 48
+                            iconName: "trash"
+                            tone: "destructive"
+                            tip: qsTr("Remove %1").arg(entry.modelData.title)
+                            Accessible.name: tip
+                            onClicked: {
+                                Native.haptic(Native.Tick)
+                                Apps.ltRemove(entry.modelData.entryId)
+                            }
+                        }
+                    }
+                }
                 // ── Add ──────────────────────────────────────────────────
                 Label { text: qsTr("Add to the queue") }
                 Row {
@@ -727,76 +797,6 @@ Item {
                     }
                 }
 
-                // ── The queue ────────────────────────────────────────────
-                Item {
-                    width: parent.width
-                    height: 40
-                    Label {
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - clearKey.width - 8
-                        text: core.queueCount > 0 ? qsTr("Queue · %1").arg(core.queueCount) : qsTr("Queue")
-                    }
-                    KitButton {
-                        id: clearKey
-                        visible: core.queueCount > 0 && !root.confirmClear
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        size: "sm"
-                        variant: "ghost"
-                        text: qsTr("Clear queue")
-                        onClicked: root.confirmClear = true
-                    }
-                }
-                InlineConfirm {
-                    visible: root.confirmClear
-                    height: visible ? implicitHeight : 0
-                    consequence: qsTr("Every queued track is removed for everyone listening in this call.")
-                    confirmLabel: qsTr("Clear")
-                    onCancelled: root.confirmClear = false
-                    onConfirmed: {
-                        Apps.ltClear()
-                        root.confirmClear = false
-                    }
-                }
-                Note {
-                    visible: core.queueCount === 0
-                    text: qsTr("The queue is empty.")
-                }
-                Repeater {
-                    model: core.queue
-                    delegate: TrackLine {
-                        id: entry
-                        required property var modelData
-                        title: modelData.title
-                        meta: modelData.radio ? [qsTr("Live Radio"), core.queueMeta(modelData)].filter(x => x.length > 0).join(" · ")
-                            : core.queueMeta(modelData)
-                        artwork: modelData.artwork
-                        current: modelData.current
-                        IconKey {
-                            visible: !entry.modelData.current
-                            size: 48
-                            iconName: "play"
-                            tone: "ghost"
-                            tip: qsTr("Play %1").arg(entry.modelData.title)
-                            Accessible.name: tip
-                            onClicked: {
-                                Native.haptic(Native.Tick)
-                                Apps.ltPlay(entry.modelData.entryId)
-                            }
-                        }
-                        IconKey {
-                            size: 48
-                            iconName: "trash"
-                            tone: "destructive"
-                            tip: qsTr("Remove %1").arg(entry.modelData.title)
-                            Accessible.name: tip
-                            onClicked: {
-                                Native.haptic(Native.Tick)
-                                Apps.ltRemove(entry.modelData.entryId)
-                            }
-                        }
-                    }
-                }
             }
         }
     }
