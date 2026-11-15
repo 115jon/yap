@@ -21,80 +21,43 @@ Rectangle {
     // The column's scroller, to keep the editor's focus in view.
     property Flickable scroller: null
 
-    readonly property var st: parse(Board.state, {})
-    readonly property var rack: parse(Board.rack, { rows: 0, cells: [] })
-    readonly property var boardData: parse(Board.data, {})
-    readonly property var activity: parse(Board.activity, {})
-    readonly property var wishlist: parse(Board.wishlist, {})
-    readonly property string tab: st.tab ?? "board"
-    readonly property bool editing: st.editing ?? false
-    readonly property bool previewing: editing && (st.preview ?? "me") !== "me"
+    // The board's state, tab and discard confirm, shared with the phone.
+    readonly property BoardCore core: BoardCore {
+        ownerName: panel.ownerName
+        ownerAvatar: panel.ownerAvatar
+        ownerInitials: panel.ownerInitials
+        onDiscardAsked: if (panel.scroller) panel.scroller.contentY = 0
+        onCloseRequested: panel.closeRequested()
+    }
+    readonly property var st: core.st
+    readonly property var rack: core.rack
+    readonly property var boardData: core.boardData
+    readonly property var activity: core.activity
+    readonly property var wishlist: core.wishlist
+    readonly property string tab: core.tab
+    readonly property bool editing: core.editing
+    readonly property bool previewing: core.previewing
     readonly property bool narrow: width < 540
     readonly property int gutter: narrow ? 16 : 28
     readonly property int rackGapY: narrow ? 20 : 22
     // Room the modal's close key takes at the header's right end.
     property int closeReserve: 0
-    readonly property var ctx: Object.assign({}, st.ctx ?? {}, {
-        ownerName: ownerName,
-        ownerAvatar: ownerAvatar,
-        ownerInitials: ownerInitials
-    })
-    property bool confirmDiscard: false
-    // What the discard confirm goes on to once confirmed: a tab, or
-    // closing the profile (`closeRequested`).
-    property string pendingTab: ""
-    property bool pendingClose: false
-    readonly property bool unsaved: editing && (st.dirty ?? false)
+    readonly property var ctx: core.ctx
+    readonly property bool confirmDiscard: core.confirmDiscard
+    readonly property bool unsaved: core.unsaved
     signal closeRequested()
 
-    // A tab, through the discard confirm while the draft has changes.
-    // The tab already shown does nothing.
     function chooseTab(id) {
-        if (id === tab)
-            return
-        if (unsaved) {
-            pendingTab = id
-            pendingClose = false
-            askDiscard()
-        } else {
-            Board.setTab(id)
-        }
+        core.chooseTab(id)
     }
 
-    // Closing the profile: true when it may close now; otherwise the
-    // confirm shows and closes it once the changes are discarded.
+    // Closing the profile: true when it may close now (BoardCore.mayClose).
     function mayClose() {
-        if (!unsaved)
-            return true
-        pendingTab = ""
-        pendingClose = true
-        askDiscard()
-        return false
-    }
-
-    function askDiscard() {
-        confirmDiscard = true
-        if (scroller)
-            scroller.contentY = 0
-    }
-
-    function parse(text, fallback) {
-        if (!text || text.length === 0)
-            return fallback
-        try {
-            return JSON.parse(text)
-        } catch (e) {
-            return fallback
-        }
+        return core.mayClose()
     }
 
     implicitHeight: header.height + body.implicitHeight + (narrow ? 40 : 48)
     color: Theme.ply3
-    onEditingChanged: {
-        confirmDiscard = false
-        pendingTab = ""
-        pendingClose = false
-    }
 
     // ── Tabs ────────────────────────────────────────────────────────────
     // Sticks to the top of the column while it scrolls (sticky top-0).
@@ -112,11 +75,7 @@ Rectangle {
             height: parent.height
             spacing: 20
             Repeater {
-                model: [
-                    { id: "board", label: qsTr("Board") },
-                    { id: "activity", label: qsTr("Activity") },
-                    { id: "wishlist", label: qsTr("Wishlist") }
-                ]
+                model: panel.core.tabs
                 delegate: Item {
                     id: tabKey
                     required property var modelData
@@ -273,7 +232,7 @@ Rectangle {
                         text: qsTr("Discard")
                         onClicked: {
                             if (panel.st.dirty ?? false)
-                                panel.confirmDiscard = true
+                                panel.core.confirmDiscard = true
                             else
                                 Board.edit(false)
                         }
@@ -327,11 +286,9 @@ Rectangle {
                         variant: "secondary"
                         text: panel.confirmDiscard ? qsTr("Keep editing") : (panel.st.conflict ?? false) ? qsTr("Use theirs") : qsTr("Try again")
                         onClicked: {
-                            if (panel.confirmDiscard) {
-                                panel.confirmDiscard = false
-                                panel.pendingTab = ""
-                                panel.pendingClose = false
-                            } else if (panel.st.conflict ?? false)
+                            if (panel.confirmDiscard)
+                                panel.core.keepEditing()
+                            else if (panel.st.conflict ?? false)
                                 Board.useTheirs()
                             else
                                 Board.done()
@@ -343,18 +300,10 @@ Rectangle {
                         variant: panel.confirmDiscard ? "destructive" : "primary"
                         text: panel.confirmDiscard ? qsTr("Discard") : qsTr("Keep mine")
                         onClicked: {
-                            if (panel.confirmDiscard) {
-                                const tab = panel.pendingTab
-                                const close = panel.pendingClose
-                                panel.confirmDiscard = false
-                                Board.discard()
-                                if (close)
-                                    panel.closeRequested()
-                                else if (tab.length > 0)
-                                    Board.setTab(tab)
-                            } else {
+                            if (panel.confirmDiscard)
+                                panel.core.discardNow()
+                            else
                                 Board.keepMine()
-                            }
                         }
                     }
                 }
