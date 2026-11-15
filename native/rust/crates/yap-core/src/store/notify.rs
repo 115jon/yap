@@ -52,6 +52,10 @@ pub enum NotifyCommand {
     /// The store's own wake-up when a timed mute runs out; only the newest
     /// counts.
     Expire(u64),
+    /// The store's own nudge after settings came from the server: it runs
+    /// stamped with the wall clock, so badges and the next expiry are
+    /// judged against now rather than the last command's time.
+    Refresh,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

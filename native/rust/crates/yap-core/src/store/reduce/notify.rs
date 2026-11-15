@@ -43,6 +43,34 @@ impl State {
                     self.sync_notify(fx);
                 }
             }
+            NotifyCommand::Refresh => {
+                // Reschedule from the fresh clock (the old wake-up's wait
+                // may have been figured from a stale one).
+                self.notify.expiry = None;
+                self.sync_notify(fx);
+            }
+        }
+    }
+
+    /// Settings arrived outside a command (the list, an answer, another
+    /// device's change), so the store's clock may be as old as the last
+    /// command: with a timed mute among them, ask to run again stamped with
+    /// the wall clock.
+    fn notify_from_server(&mut self, fx: &mut Effects) {
+        self.sync_notify(fx);
+        if self.now_ms.is_none()
+            && self
+                .notify
+                .all()
+                .any(|setting| setting.mute_ends_at().is_some())
+        {
+            fx.push(Effect::Later {
+                delay: Duration::ZERO,
+                input: Box::new(Input::UserAt {
+                    command: Command::Notify(NotifyCommand::Refresh),
+                    now_ms: self.clock_ms(),
+                }),
+            });
         }
     }
 
@@ -128,7 +156,7 @@ impl State {
                         for setting in settings {
                             self.notify.put(setting);
                         }
-                        self.sync_notify(fx);
+                        self.notify_from_server(fx);
                     }
                     // What was known stays (a reconnect's refetch failed).
                     Ok(_) => {}
@@ -137,7 +165,7 @@ impl State {
             }
             (_, Ok(ApiResponse::Notify(NotifyResponse::Setting(setting)))) => {
                 self.notify.put(setting);
-                self.sync_notify(fx);
+                self.notify_from_server(fx);
             }
             // A body the store does not read: the change stands as applied.
             (NotifyOp::Update { .. }, Ok(_)) => {}
@@ -164,7 +192,7 @@ impl State {
     /// `NOTIFICATION_SETTINGS_UPDATE`: the stored setting, from any device.
     pub(super) fn on_notify_setting(&mut self, fx: &mut Effects, setting: NotificationSetting) {
         self.notify.put(setting);
-        self.sync_notify(fx);
+        self.notify_from_server(fx);
     }
 
     /// A command arrived after the mute the store waits on ran out.

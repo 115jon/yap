@@ -341,6 +341,41 @@ fn any_command_after_a_mute_ran_out_should_end_it() {
 }
 
 #[test]
+fn a_timed_mute_from_another_device_should_be_judged_against_the_wall_clock() {
+    let mut client = Client::online();
+    // The app sat idle since NOW; another device muted for an hour two
+    // hours later. The store's clock still says NOW.
+    let fx = client.update(setting(
+        "channel",
+        VOICE,
+        Value::Null,
+        true,
+        json!("2026-11-04T15:00:00.000Z"),
+    ));
+    let command = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::Later { delay, input } if delay.is_zero() => match &**input {
+                Input::UserAt { command, .. } => Some(command.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("a nudge");
+    assert_eq!(command, Command::Notify(NotifyCommand::Refresh));
+    // The runtime stamps it with the wall clock: the wake-up is an hour out,
+    // not three.
+    let fx = client.command_at(command, NOW + 2 * HOUR);
+    let (delay, _) = later(&fx).expect("a wake-up");
+    assert!(
+        delay >= Duration::from_millis(HOUR as u64)
+            && delay < Duration::from_millis(HOUR as u64 + 1000),
+        "{delay:?}"
+    );
+    assert!(client.tree_row(VOICE).notify_muted);
+}
+
+#[test]
 fn a_refused_change_should_be_put_back() {
     let mut client = Client::online();
     client.command(Command::Notify(NotifyCommand::SetLevel {
