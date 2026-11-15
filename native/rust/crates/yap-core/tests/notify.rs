@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use yap_core::notification_levels::{MuteChoice, NotificationLevel, NotificationTargetType};
-use yap_core::shell::ToastView;
+use yap_core::shell::{Sound, ToastView};
 use yap_core::store::notify::{NotifyCommand, NotifyRequest};
 use yap_core::store::view::{ChannelTreeRow, DmRow, ServerRow, TreeKind};
 use yap_core::store::{
@@ -463,6 +463,29 @@ fn a_plain_server_message_should_toast_only_at_all_messages() {
     assert!(toasts(&client.message("m3", VOICE, "lunch?")).is_empty());
     client.update(setting("channel", VOICE, json!("all"), true, Value::Null));
     assert!(toasts(&client.message("m4", VOICE, "lunch?")).is_empty());
+}
+
+#[test]
+fn a_muted_open_channel_should_keep_its_message_knock_quiet() {
+    let knocks = |fx: &[Effect]| {
+        fx.iter()
+            .filter(|e| matches!(e, Effect::View(ViewUpdate::Sound(Sound::Message))))
+            .count()
+    };
+    let mut client = Client::online();
+    assert_eq!(knocks(&client.message("m1", TEXT, "hi")), 1);
+    client.update(setting("channel", TEXT, Value::Null, true, Value::Null));
+    assert_eq!(knocks(&client.message("m2", TEXT, "hi")), 0);
+    client.update(setting("channel", TEXT, json!("none"), false, Value::Null));
+    assert_eq!(knocks(&client.message("m3", TEXT, "hi")), 0);
+    client.update(setting(
+        "channel",
+        TEXT,
+        json!("mentions"),
+        false,
+        Value::Null,
+    ));
+    assert_eq!(knocks(&client.message("m4", TEXT, "hi")), 1);
 }
 
 #[test]

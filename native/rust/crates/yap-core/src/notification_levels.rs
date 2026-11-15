@@ -247,6 +247,13 @@ pub fn should_notify(effective: EffectiveNotificationSettings, addressed: bool) 
     effective.level == NotificationLevel::All && !effective.muted
 }
 
+/// `silencesChannelSounds` (notification-settings-client.ts): a muted
+/// channel or DM, or one set to nothing, keeps the open channel's message
+/// knock quiet too.
+pub fn silences_channel_sounds(effective: EffectiveNotificationSettings) -> bool {
+    effective.muted || effective.level == NotificationLevel::None
+}
+
 /// `showsUnreadBadge`: muted channels show none.
 pub fn shows_unread_badge(effective: EffectiveNotificationSettings) -> bool {
     !effective.muted

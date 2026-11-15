@@ -4107,8 +4107,11 @@ impl State {
             .as_ref()
             .is_some_and(|log| log.channel_id == channel && log.get(&message.id).is_none());
         // useChatArea.ts: a knock for someone else's message in the open
-        // channel, focused or not.
-        if open && !mine {
+        // channel, focused or not, unless it is muted or set to nothing.
+        if open
+            && !mine
+            && !notification_levels::silences_channel_sounds(self.notify_effective(&channel))
+        {
             fx.view(ViewUpdate::Sound(Sound::Message));
         }
         // chat-gateway.ts: a server message that does not mention you
