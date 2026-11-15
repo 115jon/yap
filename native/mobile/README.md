@@ -694,8 +694,8 @@ and a DM call's ring (`kind: call_ring | call_ring_stop`,
   hard wait, since FCM hands pushes over one at a time and a ring may be
   queued behind. The server answers only the notification's recipient
   while they can still see the message, at the time of the fetch; its 404
-  (`NOTIFICATION_NOT_FOUND`: deleted, left, blocked, already read, Do Not
-  Disturb) shows nothing. A 5xx or any other failure (offline, signed out,
+  (`NOTIFICATION_NOT_FOUND`: deleted, left, blocked, read since, Do Not
+  Disturb, muted or a lowered notification level) shows nothing. A 5xx or any other failure (offline, signed out,
   slow) shows "New message from Ada", with the names the last fetch gave
   (`PushStore`, cleared at sign-out), or "New message". After the
   fetches, right before posting, the conversation, the session and the
