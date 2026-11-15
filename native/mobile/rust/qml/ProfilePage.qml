@@ -15,8 +15,13 @@ import Yap.Ui
 // Their collectibles are the desktop card's (Yap.Ui): the frame around the
 // page (its back art under it, its front art over it, the page inset by the
 // frame's footprint) and the profile effect over it, one pass and then its
-// still (only the still under reduced motion). Video banners and the
-// profile board are the desktop's only.
+// still (only the still under reduced motion). A video banner shows its
+// first frame (InlineVideo's poster): the phone plays video only full
+// screen (Player), so nothing decodes on a page that stays open.
+//
+// Their board (Yap.Ui BoardCore and BoardRack, the desktop's widgets) sits
+// under the profile on the desktop column's ply-3: Board · Activity ·
+// Wishlist, read-only. Editing the board stays on the desktop and web.
 //
 // The actions follow the relationship (Yap.Ui ProfileFriendCore): Message
 // or Accept across the page, then Add friend, Cancel request, Decline or
@@ -78,6 +83,10 @@ Rectangle {
     readonly property real inSide: framed ? frameInfo.side * width : 0
     readonly property real inTop: framed ? frameInfo.top * width : 0
     readonly property real inBottom: framed ? frameInfo.bottom * width : 0
+    // A video file (ProfileVideoLayer.isVideo on the desktop): an extension,
+    // or the type the core put in the fragment (`#video/webm`).
+    readonly property string banner: loaded ? Profile.banner : ""
+    readonly property bool videoBanner: /\.(mp4|webm|mov|m4v|ogv)($|[?#])|#video\//i.test(banner)
     // Remove friend, asked in place (Block asks through `friend`).
     property bool confirmRemove: false
     readonly property string asking: friend.confirmBlock ? "block" : confirmRemove ? "remove" : ""
@@ -176,10 +185,21 @@ Rectangle {
                     Image {
                         anchors.fill: parent
                         visible: status === Image.Ready
-                        source: root.loaded ? Profile.banner : ""
+                        source: root.videoBanner ? "" : root.banner
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
                         sourceSize.width: 1080
+                    }
+                    // A video banner: its first frame, still.
+                    Loader {
+                        anchors.fill: parent
+                        active: root.videoBanner
+                        sourceComponent: InlineVideo {
+                            source: root.banner.replace(/#.*$/, "")
+                            preview: true
+                            bare: true
+                            Accessible.ignored: true
+                        }
                     }
                 }
 
