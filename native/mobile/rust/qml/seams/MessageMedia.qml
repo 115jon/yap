@@ -42,9 +42,9 @@ Column {
     readonly property var clips: items.filter(item => !isPicture(item) && isVideo(item))
     readonly property var files: items.filter(item => !isPicture(item) && !isVideo(item))
     // What the viewer pages through, in the order shown: the pictures, then
-    // the videos that show (a hidden one stays out until it is shown). The
-    // picture at `i` opens the viewer at `i`.
-    readonly property var images: pictures.concat(clips.filter(item => !hiddenMedia(item)))
+    // the videos, each once it shows (a hidden one stays out until it is
+    // shown: the viewer has no blur of its own).
+    readonly property var images: pictures.concat(clips).filter(item => !hiddenMedia(item))
 
     // The box a picture fits in.
     readonly property real boxWidth: Math.min(maxWidth, 320)
@@ -221,11 +221,11 @@ Column {
             item: root.pictures[0]
             boxWidth: root.boxWidth
             boxHeight: root.boxHeight
-            onActivated: root.openImage(root.images, 0)
+            onActivated: root.openImage(root.images, root.images.indexOf(item))
         }
     }
     // Two or more: the mosaic, at most ten tiles, "+N" on the tenth (whose
-    // tap opens the viewer there, at the tenth).
+    // tap opens the viewer there, at the tenth while none is hidden).
     Loader {
         active: root.pictures.length > 1
         visible: active
@@ -244,7 +244,7 @@ Column {
                 height: rect.h
                 more: grid.more(index)
                 label: grid.tileName(item.name, index)
-                onActivated: root.openImage(root.images, index)
+                onActivated: root.openImage(root.images, root.images.indexOf(item))
             }
         }
     }
