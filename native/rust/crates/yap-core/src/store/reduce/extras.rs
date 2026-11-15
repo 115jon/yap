@@ -286,6 +286,22 @@ impl State {
 
     // Inbox
 
+    /// After a gateway gap: a list already loaded (or failed) loads again,
+    /// so the inbox's rows follow the badge's count; one never opened
+    /// waits for its first open.
+    pub(super) fn refresh_inbox(&mut self, fx: &mut Effects) {
+        if matches!(self.extras.inbox_fetch, Fetch::Ready | Fetch::Failed(_)) {
+            self.load_inbox(fx);
+        }
+    }
+
+    /// Signed out: the next account starts with no rows and loads its own.
+    pub(super) fn reset_inbox(&mut self, fx: &mut Effects) {
+        self.extras.inbox.clear();
+        self.extras.inbox_fetch = Fetch::Idle;
+        self.sync_extras(fx);
+    }
+
     fn load_inbox(&mut self, fx: &mut Effects) {
         if let Some(id) = self.extras_http(fx, ExtrasRequest::Inbox, ExtrasOp::Inbox) {
             self.extras.inbox_fetch = Fetch::Loading(id);

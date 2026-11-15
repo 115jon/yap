@@ -5,7 +5,9 @@ import com.yap.mobile
 import Yap.Ui
 
 // Home's pane (the desktop's DmSidebar, the archived Expo app's DmsPane.tsx): the
-// Friends row with the incoming requests' count, a silkscreen label with
+// Friends row with the incoming requests' count, the Inbox row (the
+// desktop's bell: mentions and replies, InboxPage.qml) with the unread
+// count, a silkscreen label with
 // the conversations' count, then one row per direct message in the
 // server's order (the newest on top), on the desktop's DmListModel.
 Item {
@@ -79,6 +81,46 @@ Item {
                     onTapped: {
                         Native.haptic(Native.Tick)
                         root.friendsRequested()
+                    }
+                }
+            }
+            // Inbox (the desktop header's bell), over the pager.
+            Rectangle {
+                width: parent.width
+                height: 48
+                color: inboxTap.pressed ? Theme.tint1 : "transparent"
+                Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+                Accessible.role: Accessible.Button
+                Accessible.name: Extras.inboxUnread > 0
+                    ? qsTr("Inbox, %n unread", "", Extras.inboxUnread) : qsTr("Inbox")
+                Accessible.onPressAction: Router.open("InboxPage")
+                Icon {
+                    id: inboxGlyph
+                    x: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    name: "bell"
+                    size: Theme.iconLg
+                    color: Theme.ink2
+                }
+                Text {
+                    anchors.left: inboxGlyph.right
+                    anchors.leftMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Inbox")
+                    color: Theme.ink1
+                    font: Extras.inboxUnread > 0 ? Theme.type.rowUnread : Theme.type.row
+                }
+                CountBadge {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    count: Extras.inboxUnread
+                }
+                TapHandler {
+                    id: inboxTap
+                    onTapped: {
+                        Native.haptic(Native.Tick)
+                        Router.open("InboxPage")
                     }
                 }
             }

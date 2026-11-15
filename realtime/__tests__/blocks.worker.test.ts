@@ -428,11 +428,25 @@ describe("notifications", () => {
       channelId,
       serverId,
     );
+    // Members read the channel through @everyone (VIEW_CHANNELS), as a
+    // real join gives them; a mention needs it.
+    const everyoneId = `role-${crypto.randomUUID()}`;
+    await run(
+      `INSERT INTO roles (id, server_id, name, permissions, is_default) VALUES (?, ?, '@everyone', 256, 1)`,
+      everyoneId,
+      serverId,
+    );
     for (const member of members) {
       await run(
         `INSERT INTO server_members (server_id, user_id) VALUES (?, ?)`,
         serverId,
         member.id,
+      );
+      await run(
+        `INSERT INTO member_roles (server_id, user_id, role_id) VALUES (?, ?, ?)`,
+        serverId,
+        member.id,
+        everyoneId,
       );
     }
     return channelId;
@@ -516,15 +530,16 @@ describe("notifications", () => {
     expect(await inbox(bob)).toBe(1);
   });
 
-  it("still notifies the blocked user about the blocker's mentions", async () => {
-    // A block silences the blocked user for the blocker, not the reverse.
+  it("does not notify the blocked user about the blocker's mentions", async () => {
+    // A block silences notifications both ways: the blocked user hears
+    // nothing from the blocker either.
     const alice = await newUser("alice");
     const bob = await newUser("bob");
     const channelId = await serverChannel(alice, bob);
     await block(bob, alice);
 
-    const sent = await notify(channelId, bob, `@${alice.username} hi`);
-    expect(sent.map((n) => n.userId)).toEqual([alice.id]);
+    expect(await notify(channelId, bob, `@${alice.username} hi`)).toEqual([]);
+    expect(await inbox(alice)).toBe(0);
   });
 });
 
