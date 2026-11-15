@@ -27,6 +27,7 @@ AdminPage {
     }
 
     Component.onCompleted: {
+        Admin.clear("overrides")
         core.load()
         if (server)
             Admin.load(server.id, "roles")

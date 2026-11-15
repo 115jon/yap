@@ -53,7 +53,7 @@ AdminPage {
         // Cleared: the next finish counts from nothing.
         kickedBefore = 0
         bannedBefore = 0
-        reasonField.text = ""
+        reasonField.field.text = ""
         armed = which
     }
 
@@ -152,7 +152,7 @@ AdminPage {
                     onCancelled: root.armed = ""
                     onConfirmed: {
                         Qt.inputMethod.commit()
-                        Admin.ban(root.userId, reasonField.text)
+                        Admin.ban(root.userId, reasonField.live)
                     }
                 }
             }

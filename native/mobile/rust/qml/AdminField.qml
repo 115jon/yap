@@ -3,14 +3,17 @@ import Yap.Ui
 
 // A labelled field in Server settings: the label, the phone field, then
 // its hint and error lines. Typing keeps the field above the keyboard
-// (`page.reveal`).
+// (`page.reveal`). `text` is the draft's value: the field follows it
+// without a binding, and `edited` hands back what is typed with the word
+// being composed (`live`), which the field's own text must not take.
 Column {
     id: root
 
     property string label
     property string hint: ""
     property string error: ""
-    property alias text: field.text
+    property string text: ""
+    readonly property string live: field.text + field.preeditText
     property alias placeholderText: field.placeholderText
     property alias maximumLength: field.maximumLength
     property alias readOnly: field.readOnly
@@ -22,6 +25,15 @@ Column {
     signal accepted()
 
     width: parent ? parent.width : 0
+
+    onTextChanged: {
+        if (live !== text)
+            field.text = text
+    }
+    onLiveChanged: {
+        if (live !== text)
+            edited(live)
+    }
     spacing: 6
 
     Text {
@@ -36,7 +48,7 @@ Column {
         width: parent.width
         invalid: root.error.length > 0
         Accessible.name: root.label
-        onTextEdited: root.edited(text)
+        Component.onCompleted: text = root.text
         onAccepted: root.accepted()
         onActiveFocusChanged: if (activeFocus && root.page) Qt.callLater(root.page.reveal, root)
     }

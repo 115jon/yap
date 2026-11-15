@@ -65,7 +65,9 @@ Rectangle {
 
     // Unsaved edits hold Back: it asks first. Only while on top, so a
     // page pushed over this one keeps its own Back.
-    readonly property bool holdsLayer: guarding && onTop
+    // Activating too: a second Back while the page over this one leaves
+    // still asks first.
+    readonly property bool holdsLayer: guarding && (StackView.status === StackView.Active || StackView.status === StackView.Activating)
     onHoldsLayerChanged: holdsLayer ? Native.pushBackLayer(root) : Native.popBackLayer(root)
     Component.onDestruction: Native.popBackLayer(root)
     function backProgressed(progress) {}
@@ -90,15 +92,21 @@ Rectangle {
             return
         if (channel)
             channelSeen = true
-        else if (channelSeen && onTop && server)
+        else if (channelSeen && onTop && model.server)
             closeRequested()
     }
     onChannelChanged: checkChannel()
-    // A page under the one that closed checks again once it is on top.
-    onOnTopChanged: {
-        if (onTop)
+    // A page under the one that closed checks again once it is on top
+    // (later: the check reads `onTop`).
+    function checkOnTop() {
+        if (!onTop)
+            return
+        if (serverSeen && !model.server)
+            serverOpened()
+        else
             checkChannel()
     }
+    onOnTopChanged: Qt.callLater(checkOnTop)
     Component.onCompleted: {
         serverSeen = server !== null
         channelSeen = channel !== null

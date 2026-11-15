@@ -23,6 +23,12 @@ AdminPage {
 
     title: qsTr("Overview")
     guarding: draft.dirty && !draft.saving
+    // An earlier visit's failed save is not this one's.
+    Component.onCompleted: {
+        Admin.clear("overview")
+        Admin.clear("overview.name")
+        Admin.clear("overview.icon")
+    }
     holdsBack: draft.deleting.busy
     discardBody: qsTr("Your server edits have not been saved.")
 
@@ -66,7 +72,7 @@ AdminPage {
 
     function armDelete() {
         draft.armDelete()
-        confirmField.text = ""
+        confirmField.field.text = ""
         deleteArmed = true
     }
 
@@ -215,7 +221,7 @@ AdminPage {
                 placeholderText: root.server ? root.server.name : ""
                 inputMethodHints: Qt.ImhNoPredictiveText
                 onEdited: root.draft.armDelete()
-                onAccepted: root.draft.deleteServer(text)
+                onAccepted: root.draft.deleteServer(confirmField.live)
             }
             InlineConfirm {
                 irreversible: true
@@ -229,7 +235,7 @@ AdminPage {
                 }
                 onConfirmed: {
                     Qt.inputMethod.commit()
-                    root.draft.deleteServer(confirmField.text)
+                    root.draft.deleteServer(confirmField.live)
                 }
             }
         }

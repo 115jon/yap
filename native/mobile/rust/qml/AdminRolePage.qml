@@ -24,11 +24,23 @@ AdminPage {
     // The role as last listed: a reload (after a save) keeps it, so the
     // page never turns into a new role's while the list is away.
     property var lastRole: null
+    // The list went away under a shown role (a reload): once it is back,
+    // the draft reads the role again (a save's copy came from lastRole).
+    property bool lost: false
     onFoundChanged: {
-        if (found)
+        if (found) {
             lastRole = found
-        else if (rolesReady && lastRole && opened && onTop)
-            closeRequested() // deleted elsewhere
+            if (lost) {
+                lost = false
+                Qt.callLater(draft.load)
+            }
+        } else if (shownId.length > 0 && lastRole) {
+            // Read the state here: `rolesReady` may not have updated yet.
+            if (model.roles.state === "ready" && opened && onTop)
+                closeRequested() // deleted elsewhere
+            else
+                lost = true
+        }
     }
     readonly property var role: shownId.length === 0 ? null : (found ?? lastRole)
     // A shown role that is not listed yet (just created): nothing to save.
@@ -63,8 +75,8 @@ AdminPage {
         createdBefore = createdRole
         opened = true
         Admin.clear("role")
-        if (roleId.length === 0)
-            Admin.clear("role.name")
+        Admin.clear("role.name")
+        Admin.clear("role.color")
     }
 
     Text {

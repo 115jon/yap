@@ -74,7 +74,17 @@ AdminPage {
                 TextArea {
                     id: topicField
                     width: parent.width
-                    text: root.draft.description
+                    // Follows the draft without a binding; the draft takes
+                    // the word being composed too (`live`).
+                    readonly property string live: text + preeditText
+                    Component.onCompleted: text = root.draft.description
+                    Connections {
+                        target: root.draft
+                        function onDescriptionChanged() {
+                            if (topicField.live !== root.draft.description)
+                                topicField.text = root.draft.description
+                        }
+                    }
                     placeholderText: qsTr("What this channel is for")
                     wrapMode: TextEdit.Wrap
                     leftPadding: 14
@@ -99,8 +109,10 @@ AdminPage {
                             text = text.slice(0, root.draft.topicMax)
                             cursorPosition = text.length
                         }
-                        if (text !== root.draft.description)
-                            root.draft.description = text
+                    }
+                    onLiveChanged: {
+                        if (live !== root.draft.description)
+                            root.draft.description = live
                     }
                     onActiveFocusChanged: if (activeFocus) Qt.callLater(root.reveal, topicBlock)
                 }
