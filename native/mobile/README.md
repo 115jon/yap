@@ -689,13 +689,20 @@ and a DM call's ring (`kind: call_ring | call_ring_stop`,
 - **Text.** A message push carries ids only (FCM never sees the text or
   any name). The service fetches what it shows,
   `GET /api/notifications/:id/push` (the sender, the conversation, the
-  first 180 characters), with the stored session, for at most 5 s. The
-  server answers only the notification's recipient while they can still
-  see the message; its 404 (`NOTIFICATION_NOT_FOUND`: deleted, left,
-  blocked) shows nothing. Any other failure (offline, signed out, slow)
-  shows "New message from Ada", with the names the last fetch gave
-  (`PushStore`, cleared at sign-out), or "New message". A ring fetches
-  nothing first.
+  first 180 characters), with the stored session, for at most 5 s; the
+  text and the avatar together get at most 8 s, on a worker thread with a
+  hard wait, since FCM hands pushes over one at a time and a ring may be
+  queued behind. The server answers only the notification's recipient
+  while they can still see the message, at the time of the fetch; its 404
+  (`NOTIFICATION_NOT_FOUND`: deleted, left, blocked, already read, Do Not
+  Disturb) shows nothing. A 5xx or any other failure (offline, signed out,
+  slow) shows "New message from Ada", with the names the last fetch gave
+  (`PushStore`, cleared at sign-out), or "New message". After the
+  fetches, right before posting, the conversation, the session and the
+  shown messages are checked again, and only then are the names kept. The push also carries `senderName: "Yap"` and a generic
+  `preview` ("New mention") for builds from before this change; this
+  build ignores both. A ring fetches nothing first: it still carries the
+  caller's name and avatar address.
 - **Drawing** (`push/MessageNotifier.java`, a port of the Expo app's
   `MessageNotifier.kt`): one MessagingStyle notification per conversation,
   with the sender's avatar, the last eight messages and the brand accent,

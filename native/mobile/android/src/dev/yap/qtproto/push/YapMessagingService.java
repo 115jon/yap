@@ -11,8 +11,10 @@ import java.util.concurrent.TimeUnit;
  * FCM's messages and token rotation. Yap's data-only pushes are drawn here,
  * natively, so they show with the app killed, without starting Qt.
  * onMessageReceived runs on a background thread and may block for a few
- * seconds (FCM allows about 20), which covers fetching a message's text
- * (at most 5 s; pushes carry ids only) and its sender's avatar. A ring
+ * seconds (FCM allows 10 to 20), which covers fetching a message's text
+ * (pushes carry ids only) and its sender's avatar: at most 8 s together
+ * (MessageNotifier.SHOW_BUDGET_MS). FCM delivers one push at a time, so
+ * that bound also caps how long a ring can wait behind a message. A ring
  * fetches nothing first.
  */
 public final class YapMessagingService extends FirebaseMessagingService {
