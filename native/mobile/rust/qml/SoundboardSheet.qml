@@ -63,6 +63,8 @@ Item {
         root.notice = ""
         search.clear()
         flick.contentY = 0
+        // A settings upload's error is not the call's.
+        core.clearError()
         core.load()
         const saved = Apps.soundboardVolume()
         root.boardVolume = saved < 0 ? 100 : saved

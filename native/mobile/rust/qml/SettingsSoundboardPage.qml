@@ -35,6 +35,8 @@ SettingsFrame {
     JoinLeaveCore {
         id: core
     }
+    // An in-call soundboard error is not this page's.
+    Component.onCompleted: core.clearError()
 
     function openChooser(which) {
         Native.haptic(Native.Tick)
@@ -313,7 +315,7 @@ SettingsFrame {
             font: Theme.type.caption
         }
         SettingsErrorText {
-            text: core.error
+            text: core.error.length > 0 ? core.error : chooser.up ? "" : root.notice
         }
     }
 
