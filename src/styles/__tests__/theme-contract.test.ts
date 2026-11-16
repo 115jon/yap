@@ -270,6 +270,29 @@ describe.each(THEMES)("contrast contract: %s", (theme) => {
     ).toBeGreaterThanOrEqual(4.5);
   });
 
+  it("danger-ink stays >= 4.5:1 on danger-tint over ply-0..3 and on danger-tint inside a tint-1 confirm panel", () => {
+    plies.forEach((ply, i) => {
+      const tint = over(c("--t-danger-ink"), t["--t-danger-tint-mix"], ply);
+      expect(
+        contrast(c("--t-danger-ink"), tint),
+        `danger-ink on danger-tint over ply-${i}`,
+      ).toBeGreaterThanOrEqual(4.5);
+      // The confirm panel stack is held to AA on the light themes only; the
+      // dark themes' lighter panels are tracked separately.
+      if (t["--t-scheme"] !== "light") return;
+      const panel = over(c("--t-ink-1"), "6%", ply);
+      const panelTint = over(
+        c("--t-danger-ink"),
+        t["--t-danger-tint-mix"],
+        panel,
+      );
+      expect(
+        contrast(c("--t-danger-ink"), panelTint),
+        `danger-ink on danger-tint in a tint-1 panel over ply-${i}`,
+      ).toBeGreaterThanOrEqual(4.5);
+    });
+  });
+
   it("the input edge is >= 3:1 on ply-2", () => {
     const edge = over(c("--t-ink-1"), t["--t-line-field-mix"], ply2);
     expect(contrast(edge, ply2)).toBeGreaterThanOrEqual(3);

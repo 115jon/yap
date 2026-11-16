@@ -47,7 +47,7 @@ QtObject {
     readonly property var ledsLight: ({
         talk: "#1a9a52", onTalk: "#000000", successInk: "#14803f",
         live: "#0a7ec2", liveInk: "#0a6aa6", liveTintMix: 0.12,
-        dangerFill: "#c8282e", onDanger: "#ffffff", dangerInk: "#c4262b", dangerTintMix: 0.10,
+        dangerFill: "#c8282e", onDanger: "#ffffff", dangerInk: "#b02024", dangerTintMix: 0.10,
         idle: "#a86b0c", warningInk: "#946006", badge: "#c8282e", onBadge: "#ffffff",
         lineMix: 0.09, lineStrongMix: 0.16, lineFieldMix: 0.48, guideMix: 0.18, scrim: 0.28
     })
