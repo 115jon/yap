@@ -11,11 +11,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// `ProfileBoard`: the stored document.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Board {
     #[serde(default = "one")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<u32>", optional))]
     pub v: u32,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<Widget>>", optional))]
     pub widgets: Vec<Widget>,
 }
 
@@ -34,6 +37,7 @@ impl Default for Board {
 }
 
 /// `ProfileWidget`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Widget {
     pub id: String,
@@ -43,10 +47,12 @@ pub struct Widget {
     /// `S`, `M` or `L`.
     pub size: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Value>", optional))]
     pub cfg: Value,
 }
 
 /// `BoardUserRef`: a person a board names (a guestbook author).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoardUserRef {
     pub id: String,
@@ -69,6 +75,7 @@ impl BoardUserRef {
 }
 
 /// `GuestbookNote`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuestbookNote {
     pub id: String,
@@ -78,14 +85,18 @@ pub struct GuestbookNote {
 }
 
 /// `BoardData.guestbook`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuestbookPreview {
     pub enabled: bool,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<GuestbookNote>>", optional))]
     pub notes: Vec<GuestbookNote>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub total: i64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub can_post: bool,
     /// Why the viewer may not post (`GUESTBOOK_OWN`, `GUESTBOOK_OFF`,
     /// `GUESTBOOK_BLOCKED`, `GUESTBOOK_NO_SHARED_SPACE`); older servers
@@ -95,6 +106,7 @@ pub struct GuestbookPreview {
 }
 
 /// `BoardGameTotal`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameTotal {
     pub name: String,
@@ -104,47 +116,61 @@ pub struct GameTotal {
 }
 
 /// `BoardData.last_game`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LastGame {
     pub name: String,
     #[serde(default)]
     pub icon_url: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub ended_at: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub seconds: f64,
 }
 
 /// `BoardData.top_games`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TopGames {
     pub range: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<GameTotal>>", optional))]
     pub games: Vec<GameTotal>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub total_seconds: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub game_count: i64,
 }
 
 /// `BoardData.voice_hours`: one entry per day, oldest first.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VoiceHours {
     pub period: String,
     pub start_day: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<f64>>", optional))]
     pub days: Vec<f64>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub total_seconds: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub previous_seconds: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub stream_seconds: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub longest_seconds: f64,
 }
 
 /// `BoardData.last_listen`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LastListen {
     pub tracks: i64,
@@ -154,6 +180,7 @@ pub struct LastListen {
 }
 
 /// An awarded badge on the board (`BoardData.badges`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoardBadge {
     pub id: String,
@@ -161,6 +188,7 @@ pub struct BoardBadge {
 }
 
 /// `BoardServer`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoardServer {
     pub id: String,
@@ -168,13 +196,16 @@ pub struct BoardServer {
     #[serde(default)]
     pub icon_url: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub member_count: i64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub viewer_is_member: bool,
 }
 
 /// `DeadlockBoardData`. The digest (`DeadlockDigest`, a few KB) goes to
 /// the widget as it came.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DeadlockData {
     /// `not_linked`, `pending`, `ok`, `empty` or `protected`.
@@ -184,6 +215,7 @@ pub struct DeadlockData {
     #[serde(default)]
     pub fetched_at: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub stale: bool,
     /// Owner only: the Steam name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -193,6 +225,7 @@ pub struct DeadlockData {
 /// `BoardData`: what the widgets render besides their config, filled only
 /// for the widget types on the board. A field the server left out stays
 /// out (`None`); `last_game` and `last_listen` may also be `null`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct BoardData {
     #[serde(
@@ -235,34 +268,44 @@ where
 }
 
 /// `BoardData.game_totals[name]`: seconds this week and all time.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct GameWeek {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub week: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub all: f64,
 }
 
 /// `GET /api/users/:id/board` (`BoardResponse`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct BoardResponse {
     pub user_id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Board>", optional))]
     pub board: Board,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub version: i64,
     /// Owner only: widget ids shown to nobody else.
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<String>>", optional))]
     pub drafts: Vec<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub is_owner: bool,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<BoardData>", optional))]
     pub data: BoardData,
     #[serde(default)]
     pub updated_at: Option<String>,
 }
 
 /// `DroppedWidget`: what a save left out.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DroppedWidget {
     #[serde(default)]
@@ -273,30 +316,39 @@ pub struct DroppedWidget {
 }
 
 /// `PUT /api/users/me/board` (`BoardSaveResponse`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BoardSaveResponse {
     pub board: Board,
     pub version: i64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<String>>", optional))]
     pub drafts: Vec<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<DroppedWidget>>", optional))]
     pub dropped: Vec<DroppedWidget>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub updated_at: String,
 }
 
 /// `GET /api/users/:id/guestbook` (`GuestbookPage`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuestbookPage {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<GuestbookNote>>", optional))]
     pub notes: Vec<GuestbookNote>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub total: i64,
     #[serde(default)]
     pub next_cursor: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub enabled: bool,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub can_post: bool,
     /// Why the viewer may not post (`GUESTBOOK_OWN`, `GUESTBOOK_OFF`,
     /// `GUESTBOOK_BLOCKED`, `GUESTBOOK_NO_SHARED_SPACE`); older servers
@@ -309,6 +361,7 @@ pub struct GuestbookPage {
 }
 
 /// `ActivityEventData`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ActivityData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -330,6 +383,7 @@ pub struct ActivityData {
 }
 
 /// `ActivityEvent`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActivityEvent {
     pub id: String,
@@ -338,6 +392,7 @@ pub struct ActivityEvent {
     #[serde(default, rename = "ref")]
     pub reference: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ActivityData>", optional))]
     pub data: ActivityData,
     pub started_at: String,
     #[serde(default)]
@@ -345,21 +400,26 @@ pub struct ActivityEvent {
     #[serde(default)]
     pub seconds: Option<f64>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub hidden: bool,
 }
 
 /// `ActivitySettings`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActivitySettings {
     pub retention_days: i64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<String>>", optional))]
     pub hidden_kinds: Vec<String>,
 }
 
 /// `GET /api/users/:id/activity` (`ActivityPage`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ActivityPage {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<ActivityEvent>>", optional))]
     pub events: Vec<ActivityEvent>,
     #[serde(default)]
     pub next_cursor: Option<String>,
@@ -367,10 +427,12 @@ pub struct ActivityPage {
     #[serde(default)]
     pub settings: Option<ActivitySettings>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub is_owner: bool,
 }
 
 /// `WishlistItem`: a shop collectible by sku, or a free-text hint.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts"))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WishlistItem {
@@ -386,15 +448,19 @@ pub enum WishlistItem {
 }
 
 /// `GET /api/users/:id/wishlist`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WishlistResponse {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<WishlistItem>>", optional))]
     pub items: Vec<WishlistItem>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub is_owner: bool,
 }
 
 /// `ProfilePrefs` (`GET`/`PATCH /api/users/me/profile-prefs`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProfilePrefs {
     pub activity: ActivitySettings,
@@ -403,11 +469,13 @@ pub struct ProfilePrefs {
 
 /// `PROFILE_BOARD_UPDATE`: a board was saved, or (`data`) only its
 /// widgets' data changed; open profiles of that user fetch it again.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "profile-board.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoardUpdate {
     pub user_id: String,
     pub version: i64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub data: bool,
 }
 

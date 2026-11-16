@@ -13,6 +13,7 @@ use serde_json::Value;
 /// Which socket a `POST /api/voice/socket-ticket` ticket is for. Only the
 /// chat gateway asks there now (`global`); the call sockets get theirs from
 /// [`VoiceAdmissionRequest`] (`realtime/ADMISSION.md`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TicketAudience {
@@ -20,15 +21,18 @@ pub enum TicketAudience {
 }
 
 /// Body of `POST /api/voice/socket-ticket` (the chat gateway's ticket).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SocketTicketRequest {
     pub audience: TicketAudience,
 }
 
 /// One ICE (STUN/TURN) server. The wire allows `urls` as a string or a list.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IceServer {
     #[serde(deserialize_with = "string_or_list")]
+    #[cfg_attr(feature = "ts", ts(as = "ts_wire::StringOrList"))]
     pub urls: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
@@ -51,15 +55,18 @@ fn string_or_list<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Stri
 
 /// The participant's media credentials: an admission's `media` (the same
 /// object the deprecated `media_bootstrap` was).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MediaBootstrap {
     pub participant_id: String,
     pub voice_token: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<IceServer>>", optional))]
     pub ice_servers: Vec<IceServer>,
 }
 
 /// A call socket an admission issues a ticket for.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CallSocket {
@@ -72,14 +79,17 @@ pub enum CallSocket {
 /// Body of `POST /api/voice/admission` (`realtime/ADMISSION.md` "Request"):
 /// the call sockets' tickets and, with `media`, the voice token and TURN,
 /// from one Kova check.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceAdmissionRequest {
     pub channel_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub server_id: Option<String>,
     /// The server derives it for server channels; sent as the web sends it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub room_slug: Option<String>,
     /// Which tickets to issue: non-empty, no repeats.
     pub sockets: Vec<CallSocket>,
@@ -89,10 +99,12 @@ pub struct VoiceAdmissionRequest {
     /// Only when `media` is false: the participant the client already is,
     /// which binds the voice ticket.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub participant_id: Option<String>,
     /// The grant a `VoiceMove` frame carried: stands in for CONNECT in the
     /// channel it names. Only on the join after a move.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub move_grant: Option<String>,
 }
 
@@ -154,6 +166,7 @@ impl VoiceAdmissionRequest {
 /// Response of `POST /api/voice/admission`. Each ticket is present when its
 /// socket was asked for, is single use, and expires at `expires_at` (issue
 /// time plus 60 s). Tickets are opaque: the client never reads their claims.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VoiceAdmission {
     pub access_mode: Option<String>,
@@ -182,6 +195,7 @@ impl VoiceAdmission {
 
 /// Response of `POST /api/voice/socket-ticket` (the chat gateway's ticket).
 /// Single use with a 60 s TTL.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct SocketTicket {
     pub ticket: String,
@@ -197,10 +211,12 @@ pub struct SocketTicket {
 /// A user (`GET /api/users/me` returns one for the signed-in account).
 /// Member lists, DM recipients and `GET /api/users/:id/profile` carry the
 /// profile fields too; elsewhere they are absent.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct User {
     pub id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub username: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
@@ -304,6 +320,7 @@ impl User {
 }
 
 /// A server (guild) from `GET /api/servers`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Server {
     pub id: String,
@@ -317,6 +334,7 @@ pub struct Server {
         deserialize_with = "opt_bool_or_int",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ts_wire::BoolOrInt>"))]
     pub invites_paused: Option<bool>,
     /// The public message share switches (Server settings → Overview).
     #[serde(
@@ -324,22 +342,26 @@ pub struct Server {
         deserialize_with = "opt_bool_or_int",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ts_wire::BoolOrInt>"))]
     pub allow_public_shares: Option<bool>,
     #[serde(
         default,
         deserialize_with = "opt_bool_or_int",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ts_wire::BoolOrInt>"))]
     pub show_source_in_shares: Option<bool>,
     #[serde(
         default,
         deserialize_with = "opt_bool_or_int",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ts_wire::BoolOrInt>"))]
     pub allow_share_indexing: Option<bool>,
 }
 
 /// Channel kind. Anything else decodes as [`ChannelType::Other`].
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChannelType {
@@ -351,16 +373,19 @@ pub enum ChannelType {
 }
 
 /// A channel.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Channel {
     pub id: String,
     pub server_id: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub name: String,
     pub description: Option<String>,
     pub channel_type: ChannelType,
     pub category_id: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub position: i64,
     pub created_at: Option<String>,
     pub permissions: Option<i64>,
@@ -374,6 +399,7 @@ pub struct Channel {
 }
 
 /// A voice channel's status (`voice_status`, lib/voice-channel-status.ts).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct VoiceStatus {
     #[serde(default)]
@@ -385,22 +411,28 @@ pub struct VoiceStatus {
 }
 
 /// A channel category.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Category {
     pub id: String,
     pub server_id: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub name: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub rank: i64,
 }
 
 /// `GET /api/servers/:id/channels`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ChannelsResponse {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<Channel>>", optional))]
     pub channels: Vec<Channel>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<Category>>", optional))]
     pub categories: Vec<Category>,
 }
 
@@ -408,10 +440,12 @@ pub struct ChannelsResponse {
 
 /// A message attachment. `url` is relative (`/api/attachments/...`, needs
 /// the session) for uploads and absolute for GIF-picker picks.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct Attachment {
     pub id: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub filename: String,
     pub content_type: Option<String>,
     pub url: Option<String>,
@@ -421,27 +455,34 @@ pub struct Attachment {
     pub file_key: Option<String>,
     /// Marked sensitive by the sender (blurred under the high filter).
     #[serde(default, deserialize_with = "bool_or_int")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ts_wire::BoolOrInt>", optional))]
     pub is_nsfw: bool,
 }
 
 /// One emoji's reactions on a message. `emoji` is the native character
 /// (skin tone applied) or a custom `<:name:id>` token.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct Reaction {
     pub emoji: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub count: i64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub me: bool,
     /// Who reacted; the web highlights a chip when this has the viewer.
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<String>>", optional))]
     pub users: Vec<String>,
 }
 
 /// An embed's author (`EmbedAuthor`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct EmbedAuthor {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
@@ -456,18 +497,22 @@ pub struct EmbedAuthor {
 }
 
 /// An embed's site (`EmbedProvider`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct EmbedProvider {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 }
 
 /// An embed picture with its size when the server read it.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct EmbedImage {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<f64>,
@@ -476,12 +521,15 @@ pub struct EmbedImage {
 }
 
 /// One picture or clip of an embed (`EmbedMedia`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EmbedMedia {
     #[serde(rename = "type", default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub kind: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<f64>,
@@ -492,6 +540,7 @@ pub struct EmbedMedia {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_type: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub is_gif: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alt_text: Option<String>,
@@ -500,9 +549,11 @@ pub struct EmbedMedia {
 }
 
 /// An embed's player or file (`EmbedVideo`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct EmbedVideo {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<f64>,
@@ -526,6 +577,7 @@ pub struct EmbedVideo {
 }
 
 /// Engagement counts of a social post (`EmbedMetrics`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct EmbedMetrics {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -543,6 +595,7 @@ pub struct EmbedMetrics {
 }
 
 /// A post's sound (`EmbedAudio`): TikTok's music, Instagram's audio.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EmbedAudio {
@@ -557,6 +610,7 @@ pub struct EmbedAudio {
 }
 
 /// The link card an X post carries (`EmbedExternalCard`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct EmbedExternalCard {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -568,10 +622,12 @@ pub struct EmbedExternalCard {
 }
 
 /// The post an X post quotes or reposts.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReferencedTweet {
     #[serde(rename = "type", default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
@@ -588,15 +644,18 @@ pub struct ReferencedTweet {
         skip_serializing_if = "Vec::is_empty",
         deserialize_with = "lenient_list"
     )]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<EmbedMedia>>", optional))]
     pub media: Vec<EmbedMedia>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<String>,
 }
 
 /// An embed's footer line.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct EmbedFooter {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub text: String,
     #[serde(rename = "iconURL", default, skip_serializing_if = "Option::is_none")]
     pub icon_url: Option<String>,
@@ -604,22 +663,29 @@ pub struct EmbedFooter {
 
 /// A link preview the server unfurled (`EmbedInfo`, src/lib/types.ts). Only
 /// what the cards draw is kept; the rest is ignored.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Embed {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub url: String,
     /// `link`, `image`, `video` or `rich`.
     #[serde(rename = "type", default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub kind: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub unavailable: bool,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub restricted: bool,
     /// The link is the media itself: drawn bare, without a card.
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub direct: bool,
     /// `large` (under the text) or `thumbnail` (beside it); absent is large.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -653,6 +719,7 @@ pub struct Embed {
         skip_serializing_if = "Vec::is_empty",
         deserialize_with = "lenient_list"
     )]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<EmbedMedia>>", optional))]
     pub media: Vec<EmbedMedia>,
     #[serde(
         default,
@@ -696,54 +763,69 @@ pub struct Embed {
 
 /// `POST /api/channels/:id/messages/upload` and `.../messages/gif` (201):
 /// the attachment, not yet linked to a message.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct UploadedFile {
     pub id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub file_url: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub file_name: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<u64>", optional))]
     pub file_size: u64,
     pub content_type: Option<String>,
 }
 
 /// One rendition of a picker GIF (`GifPickerAsset`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GifAsset {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub url: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub width: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub height: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<u64>", optional))]
     pub size_bytes: u64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub content_type: String,
 }
 
 /// One GIF picker result (`GifPickerItem`): `preview` for the grid, `send`
 /// for the message.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GifItem {
     pub id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub title: String,
     /// `klipy`, `tenor` or `external`.
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub provider: String,
     #[serde(default)]
     pub alt_text: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<GifAsset>", optional))]
     pub preview: GifAsset,
     /// The lightest picture fit for a tile (`tinygif`, a small webp), from
     /// newer servers; absent on favourites.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thumb: Option<GifAsset>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<GifAsset>", optional))]
     pub send: GifAsset,
     #[serde(default)]
     pub media_type: Option<String>,
@@ -769,30 +851,39 @@ pub struct GifItem {
 
 /// One start-screen category (`GifPickerCategory`): a GIF behind its label;
 /// a press searches `query`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GifCategory {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub label: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub query: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub image_url: String,
 }
 
 /// `GET /api/gifs?mode=categories…`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct GifCategories {
     #[serde(default, deserialize_with = "lenient_list")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<GifCategory>>", optional))]
     pub categories: Vec<GifCategory>,
 }
 
 /// `GET /api/gifs?mode=autocomplete…` and `mode=suggestions`: search terms.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct GifTerms {
     #[serde(default, deserialize_with = "lenient_list")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<String>>", optional))]
     pub results: Vec<String>,
 }
 
@@ -807,23 +898,28 @@ fn opt_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<f64>,
 }
 
 /// `GET /api/gifs?mode=search…`: a page and the cursor of the next one.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct GifPage {
     #[serde(default, deserialize_with = "lenient_list")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<GifItem>>", optional))]
     pub results: Vec<GifItem>,
     pub next: Option<String>,
 }
 
 /// The message a reply quotes (`reply_to`): the server sends the first 200
 /// characters of its content. Absent when the parent was deleted.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ReplyTo {
     pub id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub content: String,
     pub author_id: Option<String>,
     pub author: Option<User>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub attachment_count: i64,
 }
 
@@ -837,32 +933,40 @@ fn lenient<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(
 }
 
 /// A chat message. Reactions and embeds that do not decode are skipped.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Message {
     pub id: String,
     pub channel_id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub author_id: String,
     /// Shared: a channel's messages hold one copy per author (the log
     /// interns them), and a `User` is ~0.5 KB inline (performance pass 6).
     pub author: Option<Arc<User>>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub content: String,
     pub reply_to_id: Option<String>,
     /// Boxed: most messages are not replies, and it holds a `User` too.
     #[serde(default, deserialize_with = "lenient")]
     pub reply_to: Option<Box<ReplyTo>>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub is_pinned: bool,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub created_at: String,
     /// Set once the message has been edited.
     pub updated_at: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<Attachment>>", optional))]
     pub attachments: Vec<Attachment>,
     #[serde(default, deserialize_with = "lenient_list")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<Reaction>>", optional))]
     pub reactions: Vec<Reaction>,
     #[serde(default, deserialize_with = "lenient_list")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<Embed>>", optional))]
     pub embeds: Vec<Embed>,
     pub nonce: Option<String>,
     pub content_revision: Option<i64>,
@@ -879,14 +983,17 @@ pub struct Message {
     /// Messages that reply to this one, its thread (message.service.ts
     /// `formatMessageRow`; 0 when absent).
     #[serde(default, deserialize_with = "count")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Option<i64>>", optional))]
     pub reply_count: i64,
 }
 
 /// A DM call's outcome, kept as a system message (`type: "call"`,
 /// call-record.ts `CallRecordSchema`); the message's author is the caller.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct CallRecord {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub call_id: String,
     /// `missed`, `declined` or `ended`.
     pub outcome: String,
@@ -905,18 +1012,24 @@ fn count<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
 /// A thread starter in `GET /api/channels/{id}/threads` (`{threads}`,
 /// message.service.ts `fetchChannelThreads`): a message with replies, its
 /// content cut to 200 characters, newest reply first.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ThreadSummary {
     pub id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub content: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<User>", optional))]
     pub author: User,
     #[serde(default, deserialize_with = "count")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Option<i64>>", optional))]
     pub reply_count: i64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub last_reply_at: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub created_at: String,
 }
 
@@ -924,6 +1037,7 @@ pub struct ThreadSummary {
 /// arrived after a link unfurl): only `id` is guaranteed, and a field that is
 /// absent did not change. A full update carries `author` and decodes as
 /// [`Message`] instead.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct MessagePatch {
     pub id: String,
@@ -952,10 +1066,12 @@ fn lenient_some_list<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(
 }
 
 /// `GET /api/channels/:id/messages`. `hasMoreBefore` is absent in `after` mode.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessagePage {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<Message>>", optional))]
     pub messages: Vec<Message>,
     pub has_more_before: Option<bool>,
     pub has_more_after: Option<bool>,
@@ -963,6 +1079,7 @@ pub struct MessagePage {
 
 /// One channel's read mark (`GET /api/read-states`, `READ_STATE_UPDATE`).
 /// Timestamps are ISO 8601 and compare as strings, as on the web.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ReadState {
     pub channel_id: String,
@@ -970,6 +1087,7 @@ pub struct ReadState {
 }
 
 /// The newest message time of one channel.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct LastMessage {
     pub channel_id: String,
@@ -978,25 +1096,31 @@ pub struct LastMessage {
 
 /// `GET /api/read-states`: every read mark and every channel's newest
 /// message time.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ReadStates {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<ReadState>>", optional))]
     pub read_states: Vec<ReadState>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<LastMessage>>", optional))]
     pub last_messages: Vec<LastMessage>,
 }
 
 /// One notification (`GET /api/notifications`, `NOTIFICATION_CREATE`).
 /// Unread `mention` and `reply` notifications are the mention counts.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Notification {
     pub id: String,
     #[serde(rename = "type", default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub kind: String,
     pub channel_id: Option<String>,
     pub server_id: Option<String>,
     pub message_id: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub is_read: bool,
     /// Who mentioned, replied or wrote (the toast's title).
     #[serde(default)]
@@ -1015,11 +1139,14 @@ pub struct Notification {
 }
 
 /// The author a notification carries.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct NotificationUser {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub username: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
@@ -1034,19 +1161,24 @@ impl Notification {
 
 /// A server role. Member lists send `is_default` as a bool, some
 /// dispatches as SQLite's 0 or 1.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Role {
     pub id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub name: String,
     /// `#rrggbb`; absent or empty when the role has no colour.
     pub color: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub position: i64,
     #[serde(default, deserialize_with = "bool_or_int")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ts_wire::BoolOrInt>", optional))]
     pub is_default: bool,
     /// The bitmask (src/lib/permissions.ts); 0 when a payload leaves it out.
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub permissions: i64,
 }
 
@@ -1088,11 +1220,13 @@ pub(crate) fn lenient_vec<'de, D: Deserializer<'de>, T: serde::de::DeserializeOw
 }
 
 /// One server member (`GET /api/servers/:id/members` is a bare array).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct Member {
     pub user: User,
     /// Highest position first, as the server sorts them.
     #[serde(default, deserialize_with = "lenient_list")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<Role>>", optional))]
     pub roles: Vec<Role>,
     /// When they joined the server (an ISO string or epoch ms), for the
     /// full profile's "Member Since".
@@ -1115,10 +1249,12 @@ impl Member {
 
 /// A direct message channel (`GET /api/dms`, `POST /api/dms`,
 /// `DM_CHANNEL_CREATE`): the other person is `recipient`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct DmChannel {
     pub id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub name: String,
     pub created_at: Option<String>,
     pub recipient: User,
@@ -1127,6 +1263,7 @@ pub struct DmChannel {
 /// One relationship (`GET /api/friends`, `RELATIONSHIP_ADD`;
 /// social.service.ts `listRelationships`): the other person and what they
 /// are to the signed-in user.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Relationship {
     pub user: User,
@@ -1144,6 +1281,7 @@ impl Relationship {
 
 /// `POST /api/friends`: `{user, type}`; `type` 0 when it accepted their
 /// request (friends.ts:63), 3 when it sent one.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct FriendRequestSent {
     #[serde(rename = "type", default)]
@@ -1152,27 +1290,36 @@ pub struct FriendRequestSent {
 
 /// `GET /api/users/:id/profile`: the full user and the servers and friends
 /// you share (user.service.ts `getUserProfileMutuals`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ProfileResponse {
     pub user: User,
     #[serde(default, rename = "mutualServers")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<MutualServers>", optional))]
     pub mutual_servers: MutualServers,
     #[serde(default, rename = "mutualFriends")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<MutualFriends>", optional))]
     pub mutual_friends: MutualFriends,
 }
 
 /// `mutualFriends`: how many, and the first few (UserProfileModal.tsx).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct MutualFriends {
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub count: i64,
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<MutualFriend>>", optional))]
     pub items: Vec<MutualFriend>,
 }
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct MutualFriend {
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub id: String,
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub username: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
@@ -1180,17 +1327,23 @@ pub struct MutualFriend {
 }
 
 /// `mutualServers`: how many, and the first few.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct MutualServers {
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub count: i64,
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<MutualServer>>", optional))]
     pub items: Vec<MutualServer>,
 }
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct MutualServer {
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub id: String,
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub name: String,
     pub icon_url: Option<String>,
 }
@@ -1198,25 +1351,30 @@ pub struct MutualServer {
 // Server administration (server settings, channel settings)
 
 /// One invite link (`GET /api/servers/:id/invites`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct Invite {
     pub code: String,
     pub channel_id: Option<String>,
     pub channel_name: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub inviter_id: String,
     pub inviter: Option<User>,
     /// `None` or 0: no limit.
     pub max_uses: Option<i64>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub uses: i64,
     #[serde(default, deserialize_with = "bool_or_int")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ts_wire::BoolOrInt>", optional))]
     pub temporary: bool,
     pub expires_at: Option<String>,
     pub created_at: Option<String>,
 }
 
 /// What `POST /api/servers/:id/invites` answers.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct CreatedInvite {
     pub code: String,
@@ -1224,27 +1382,34 @@ pub struct CreatedInvite {
 
 /// `GET /api/invites/:code` (social.service.ts `getInviteInfo`,
 /// InviteClient.tsx `InvitePreview`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct InvitePreview {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub code: String,
     pub server: InviteServer,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<InviteInviter>", optional))]
     pub inviter: InviteInviter,
 }
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct InviteServer {
     pub id: String,
     pub name: String,
     pub icon_url: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub member_count: i64,
 }
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct InviteInviter {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub username: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
@@ -1252,11 +1417,14 @@ pub struct InviteInviter {
 
 /// `POST /api/invites/:code/join`: `{joined: true, server}` or
 /// `{already_member: true, server}`; `server` is the stored row.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct JoinedInvite {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub joined: bool,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub already_member: bool,
     /// `None` when missing or not a server row.
     #[serde(default, deserialize_with = "lenient_server")]
@@ -1268,6 +1436,7 @@ fn lenient_server<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<S
 }
 
 /// One ban (`GET /api/servers/:id/bans`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct Ban {
     pub user_id: String,
@@ -1276,35 +1445,43 @@ pub struct Ban {
     pub reason: Option<String>,
     pub banned_by_username: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub created_at: String,
 }
 
 /// One audit log entry (`GET /api/servers/:id/audit-logs`, newest first).
 /// `created_at` may be SQLite's `YYYY-MM-DD HH:MM:SS` (UTC).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct AuditLog {
     pub id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub actor_id: String,
     pub actor: Option<User>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub action_type: String,
     pub target_id: Option<String>,
     pub changes: Option<Value>,
     pub reason: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub created_at: String,
 }
 
 /// A channel permission override (`GET /api/channels/:id/permissions`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PermissionOverride {
     pub target_id: String,
     /// `role` or `user`.
     pub target_type: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub allow: i64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub deny: i64,
 }
 
@@ -1313,20 +1490,25 @@ pub struct PermissionOverride {
 /// One row of `GET /api/sessions` (`{ sessions: [...] }`): the user's Yap
 /// sessions, the caller's own first (only that one while Kova cannot list
 /// app sessions).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct SessionInfo {
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub id: String,
     /// Epoch ms, or an ISO string.
     pub last_active_at: Option<Value>,
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub is_current: bool,
     pub activity: Option<SessionActivity>,
 }
 
 /// What the session's client reported about itself, when anything.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct SessionActivity {
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub is_mobile: bool,
     pub browser_name: Option<String>,
     pub device_type: Option<String>,
@@ -1335,35 +1517,48 @@ pub struct SessionActivity {
 }
 
 /// One shared message link from `GET /api/shares` (`{ shares: [...] }`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct ShareItem {
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub id: String,
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub token: String,
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub content: String,
+    #[cfg_attr(feature = "ts", ts(as = "Option<ShareAuthor>", optional))]
     pub author: ShareAuthor,
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub created_at: String,
     pub expires_at: Option<String>,
     pub revoked_at: Option<String>,
     /// `active`, `revoked`, `deleted` or `expired`.
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub status: String,
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub view_count: i64,
 }
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct ShareAuthor {
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub username: String,
     pub display_name: Option<String>,
 }
 
 /// Kova's `GET /api/auth/get-session`: only the user's email is read.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct KovaSession {
+    #[cfg_attr(feature = "ts", ts(as = "Option<KovaUser>", optional))]
     pub user: KovaUser,
 }
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct KovaUser {
@@ -1372,15 +1567,18 @@ pub struct KovaUser {
 
 /// One row of Kova's `GET /api/auth/list-accounts`: a linked provider
 /// (`credential` for email and password).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct KovaAccount {
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub provider_id: String,
 }
 
 // Device sign-in (Kova)
 
 /// Body of `POST .../device/start`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts"))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DeviceStartRequest {
     pub platform: String,
@@ -1389,6 +1587,7 @@ pub struct DeviceStartRequest {
 }
 
 /// Response of `POST .../device/start`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceStart {
@@ -1400,6 +1599,7 @@ pub struct DeviceStart {
 }
 
 /// Body of `POST .../device/poll` (and `.../device/cancel`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts"))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DevicePollRequest {
@@ -1407,6 +1607,7 @@ pub struct DevicePollRequest {
 }
 
 /// Where a device sign-in stands.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DevicePollStatus {
@@ -1419,10 +1620,25 @@ pub enum DevicePollStatus {
 
 /// Response of `POST .../device/poll`. Errors (`expired_token`, `slow_down`)
 /// arrive as `error` with a non-2xx status and no `status`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DevicePollResponse {
     pub status: Option<DevicePollStatus>,
     pub session_token: Option<String>,
     pub error: Option<String>,
+}
+
+/// TypeScript for fields whose deserializer takes more than their Rust type.
+#[cfg(feature = "ts")]
+mod ts_wire {
+    /// `bool_or_int`: D1 rows carry booleans as 0 or 1.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "rest.ts", type = "boolean | number")]
+    pub struct BoolOrInt;
+
+    /// `string_or_list`: one URL or several.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "rest.ts", type = "string | Array<string>")]
+    pub struct StringOrList;
 }

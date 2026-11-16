@@ -16,33 +16,44 @@ pub const GAME_ACTIVITY_TEXT_MAX: usize = 128;
 pub const GAME_ACTIVITY_URL_MAX: usize = 256;
 
 /// One activity. Optional fields are left out of the JSON when unset.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "game-activity.ts"))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GameActivity {
     /// Always `playing`.
+    #[cfg_attr(feature = "ts", ts(type = "\"playing\""))]
     pub kind: String,
     pub name: String,
     /// Catalog id (a Discord application id, decimal).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub app_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub steam_app_id: Option<String>,
     /// `/api/game-icons/{app id}/{icon hash}.png`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub icon_url: Option<String>,
     /// Epoch ms the game started.
     pub started_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub details: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub large_image: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub small_image: Option<String>,
     /// `detected`, `rpc` or `manual`.
+    #[cfg_attr(feature = "ts", ts(type = "\"detected\" | \"rpc\" | \"manual\""))]
     pub source: String,
     /// A structured live state (Deadlock only), `DeadlockLiveState`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub game: Option<DeadlockLiveState>,
 }
 
@@ -57,7 +68,8 @@ pub const DEADLOCK_LIVE_PHASES: &[&str] = &[
     "spectating",
 ];
 /// `DEADLOCK_LIVE_MODES`.
-pub const DEADLOCK_LIVE_MODES: &[&str] = &["ranked", "unranked", "brawl", "bots", "private", "other"];
+pub const DEADLOCK_LIVE_MODES: &[&str] =
+    &["ranked", "unranked", "brawl", "bots", "private", "other"];
 /// `DEADLOCK_PARTY_MAX`: most party members a live state may name.
 pub const DEADLOCK_PARTY_MAX: usize = 5;
 
@@ -66,29 +78,49 @@ pub const DEADLOCK_PARTY_MAX: usize = 5;
 /// (Steam account ids); the gateway checks the first against the linked
 /// Steam account and replaces `party` with `party_user_ids` before anything
 /// is stored or sent, so received values carry only the latter.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "game-activity.ts"))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DeadlockLiveState {
     /// Always `deadlock`.
+    #[cfg_attr(feature = "ts", ts(type = "\"deadlock\""))]
     pub kind: String,
     /// One of [`DEADLOCK_LIVE_PHASES`].
+    #[cfg_attr(
+        feature = "ts",
+        ts(
+            type = "\"menu\" | \"hideout\" | \"queue\" | \"match_intro\" | \"in_match\" | \"post_match\" | \"spectating\""
+        )
+    )]
     pub phase: String,
     /// The hero's class name without `hero_` (`haze`).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub hero: Option<String>,
     /// One of [`DEADLOCK_LIVE_MODES`].
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "ts",
+        ts(
+            optional,
+            type = "\"ranked\" | \"unranked\" | \"brawl\" | \"bots\" | \"private\" | \"other\""
+        )
+    )]
     pub mode: Option<String>,
     /// Epoch ms the phase began.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub phase_started_at: Option<i64>,
     /// The 32-bit Steam account id playing (sent only).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub account_id: Option<u32>,
     /// The party's 32-bit Steam account ids (sent only).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub party: Option<Vec<u32>>,
     /// The party as Yap users (received only; the gateway drops a sent one).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub party_user_ids: Option<Vec<String>>,
 }
 
@@ -353,6 +385,7 @@ pub(crate) fn present_activity<'de, D: Deserializer<'de>, T: From<GameActivity>>
 
 /// ActivityUpdate (op 43, C->S on the global gateway): this session's
 /// activity, `null` to clear it.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "game-activity.ts"))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ActivityUpdate {
     pub game_activity: Option<GameActivity>,
@@ -362,6 +395,32 @@ pub struct ActivityUpdate {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The TypeScript of the `String` fields that hold one of a list
+    /// (`ts(type = ...)` above) must name exactly that list.
+    #[cfg(feature = "ts")]
+    #[test]
+    fn ts_literal_types_should_match_their_lists() {
+        use ts_rs::{Config, TS};
+        let union = |values: &[&str]| {
+            values
+                .iter()
+                .map(|v| format!("\"{v}\""))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        };
+        let cfg = Config::new();
+        let live = DeadlockLiveState::decl(&cfg);
+        assert!(live.contains("kind: \"deadlock\""), "{live}");
+        let phases = format!("phase: {}", union(DEADLOCK_LIVE_PHASES));
+        assert!(live.contains(&phases), "{live}");
+        let modes = format!("mode?: {}", union(DEADLOCK_LIVE_MODES));
+        assert!(live.contains(&modes), "{live}");
+        let activity = GameActivity::decl(&cfg);
+        assert!(activity.contains("kind: \"playing\""), "{activity}");
+        let sources = format!("source: {}", union(GAME_ACTIVITY_SOURCES));
+        assert!(activity.contains(&sources), "{activity}");
+    }
 
     const HASH: &str = "a60bb76ba4d4acafbd4cb9aad6e61739";
 

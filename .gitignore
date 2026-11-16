@@ -117,3 +117,5 @@ showcase/
 
 # Lighthouse CI
 .lighthouseci/
+/packages/rust/target/
+/packages/rust/Cargo.lock

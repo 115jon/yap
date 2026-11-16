@@ -29,6 +29,8 @@ jobs:
       # requires `required` with strict up-to-date branches, and admins are
       # included, so every commit on main is the tree its PR already tested.
       code: ${{ steps.manual.outputs.code || steps.filter.outputs.code || 'false' }}
+      # rust-shared runs when the Rust the web shares changes.
+      rust: ${{ steps.manual.outputs.code || steps.filter.outputs.rust || 'false' }}
     steps:
       - name: Mark all files as relevant for manual runs
         id: manual
@@ -69,6 +71,43 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
+            rust:
+              - 'native/rust/Cargo.toml'
+              - 'native/rust/crates/yap-protocol/**'
+              - 'packages/rust/**'
+              - 'packages/protocol/src/generated/**'
+              - '.github/workflows/ci.yml'
+
+  rust-shared:
+    name: rust-shared
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        # actions/checkout v4.4.0
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Setup pnpm workspace
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Setup Rust
+        run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
+
+      # packages/protocol/src/generated is written from yap-protocol's Rust
+      # types (packages/rust/protocol-ts). Regenerate and fail on any change,
+      # so a Rust wire change cannot land without its TypeScript.
+      - name: Check generated protocol types
+        run: |
+          pnpm run protocol:generate
+          git add --intent-to-add packages/protocol/src/generated
+          git diff --exit-code -- packages/protocol/src/generated || {
+            echo "::error::packages/protocol/src/generated is stale: run pnpm protocol:generate and commit the result."
+            exit 1
+          }
+
+      - name: Clippy
+        run: cargo clippy --manifest-path packages/rust/Cargo.toml --all-targets -- -D warnings
 
   quality:
     name: quality
@@ -171,6 +210,7 @@ jobs:
       - unit
       - worker-runtime
       - build
+      - rust-shared
     runs-on: ubuntu-latest
     steps:
       - name: Require all CI jobs to pass
@@ -180,12 +220,14 @@ jobs:
           UNIT_RESULT: ${{ needs.unit.result }}
           WORKER_RESULT: ${{ needs.worker-runtime.result }}
           BUILD_RESULT: ${{ needs.build.result }}
+          RUST_RESULT: ${{ needs.rust-shared.result }}
         run: |
           if [[ "$CHANGES_RESULT" != "success" || \
             "$QUALITY_RESULT" != "success" || \
             ( "$UNIT_RESULT" != "success" && "$UNIT_RESULT" != "skipped" ) || \
             ( "$WORKER_RESULT" != "success" && "$WORKER_RESULT" != "skipped" ) || \
-            ( "$BUILD_RESULT" != "success" && "$BUILD_RESULT" != "skipped" ) ]]; then
-            echo "CI failed: changes=$CHANGES_RESULT quality=$QUALITY_RESULT unit=$UNIT_RESULT worker=$WORKER_RESULT build=$BUILD_RESULT"
+            ( "$BUILD_RESULT" != "success" && "$BUILD_RESULT" != "skipped" ) || \
+            ( "$RUST_RESULT" != "success" && "$RUST_RESULT" != "skipped" ) ]]; then
+            echo "CI failed: changes=$CHANGES_RESULT quality=$QUALITY_RESULT unit=$UNIT_RESULT worker=$WORKER_RESULT build=$BUILD_RESULT rust-shared=$RUST_RESULT"
             exit 1
           fi

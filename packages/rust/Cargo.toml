@@ -1,0 +1,16 @@
+# Rust built for the web app, apart from the native workspace
+# (native/rust), whose patched crates (native/rust/vendor) exist only
+# after its toolchain step. These crates reach the native crates by path, so
+# a plain checkout with stable Rust builds them (CI's `rust-shared` job).
+#
+# No Cargo.lock is committed: release-please bumps the native crates'
+# versions, and a lock here would go stale on every release. Versions that
+# must match a tool (ts-rs, wasm-bindgen) are pinned exactly instead.
+[workspace]
+resolver = "2"
+members = ["protocol-ts"]
+
+[workspace.package]
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
