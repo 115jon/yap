@@ -297,6 +297,44 @@ describe("chat actions read-state writes", () => {
     ]);
   });
 
+  it("keeps the saved Share my activity setting after a load", async () => {
+    const load = async (
+      served: boolean | undefined,
+      before: boolean | undefined,
+    ) => {
+      mocks.apiGet.mockImplementation((url: string) =>
+        url === "/api/users/me"
+          ? Promise.resolve({
+              id: "user-1",
+              username: "user",
+              media_content_filter: "standard",
+              theme_sync_enabled: 0,
+              share_activity: served,
+            })
+          : Promise.resolve([]),
+      );
+      let state: ChatState = {
+        ...initialState,
+        user: { id: "user-1", username: "user", share_activity: before },
+      };
+      const actions = createChatActions(
+        () => state,
+        (action) => {
+          state = chatReducer(state, action);
+        },
+      );
+      expect(await actions.loadCurrentUser("user-1")).toBe(true);
+      return state.user?.share_activity;
+    };
+
+    // SET_USER replaces the user, so the field has to be carried through
+    // or the toggle falls back to its default after every reload.
+    expect(await load(false, undefined)).toBe(false);
+    expect(await load(true, false)).toBe(true);
+    // A server that predates the setting leaves what the client already has.
+    expect(await load(undefined, false)).toBe(false);
+  });
+
   it("retries first-load AUTH_REQUIRED until the bearer lands", async () => {
     vi.useFakeTimers();
     const requestedUrls: string[] = [];
