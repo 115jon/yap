@@ -873,7 +873,7 @@ describe("a link a native app starts", () => {
     expect(malformed.status).toBe(400);
   });
 
-  it("begins in the browser: a fresh binding cookie, then Steam", async () => {
+  it("begins in the browser: the binding as its cookie, then Steam", async () => {
     const me = await newUser();
     const url = await startApp(me.token, "android");
     const begun = await begin(url);
@@ -893,19 +893,23 @@ describe("a link a native app starts", () => {
     expect(cookie).toMatch(/SameSite=Lax/);
     expect(cookie).toMatch(/Path=\/;/);
     expect(cookie).not.toMatch(/Domain=/i);
-    expect(begun.cookie).not.toBe(url.searchParams.get("binding"));
+    expect(begun.cookie).toBe(url.searchParams.get("binding"));
   });
 
-  it("works once, and a failed begin leaves the browser's cookies alone", async () => {
+  it("can be loaded twice (a browser's prefetch), and a failed begin leaves the cookies alone", async () => {
     const me = await newUser();
     const url = await startApp(me.token, "windows");
     await begin(url);
     const again = await begin(url);
     expect(again.response.status).toBe(303);
-    expect(again.location).toBe(
+    expect(again.location).toContain("steamcommunity.com");
+    // A newer start replaces the state: the old URL goes back to the app.
+    await startApp(me.token, "windows");
+    const stale = await begin(url);
+    expect(stale.location).toBe(
       "yap-native://connection?provider=steam&status=expired",
     );
-    expect(again.cookies).toEqual([]);
+    expect(stale.cookies).toEqual([]);
   });
 
   it("refuses a forged binding, a malformed state, another provider and no app", async () => {
@@ -1015,13 +1019,13 @@ describe("a link a native app starts", () => {
     expect((await complete(me.token, "short")).status).toBe(410);
   });
 
-  it("refuses the callback with the begin URL's own binding", async () => {
+  it("refuses a callback without the begin's cookie", async () => {
     const me = await newUser();
     const url = await startApp(me.token, "android");
     const begun = await begin(url);
     const done = await appCallback(
       assertion(begun.returnTo(), steamId64()),
-      url.searchParams.get("binding")!,
+      "B".repeat(43),
     );
     expect(done.location).toBe(
       "yap://connection?provider=steam&status=expired",
