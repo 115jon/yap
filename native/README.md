@@ -540,7 +540,9 @@ the decisions.
   rules are in `crates/yap-core/src/links.rs`): `invite/<code>`,
   `chat/@me`, `chat/@me/<dm>`, `chat/<server>`,
   `chat/<server>/<channel>[?message=<id>]` (a voice channel opens its
-  panel, never joins), `settings[/<panel>][?row=<row>]` and
+  panel, never joins), `room/<slug>` (a meeting room's join prompt, signed
+  in or not; the site's `https://.../room/<slug>` links open it too),
+  `settings[/<panel>][?row=<row>]` and
   `signin[?code=XXXX-XXXX]` (brings the window up and polls a waiting
   device sign-in at once; it never carries a token). Anything else is
   refused. A link on the command line, or one a second launch hands over
