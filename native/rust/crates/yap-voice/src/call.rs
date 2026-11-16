@@ -127,7 +127,9 @@ fn guest_cookie_of(set_cookies: &[String]) -> Option<String> {
 
 impl Admission {
     async fn room_admission(&self, body: &Value) -> Result<Value, ApiError> {
-        let mut headers = vec![("Origin", config::get().gateway_origin.clone())];
+        // The server compares it with the API's own origin.
+        let origin = config::get().api_base.trim_end_matches('/').to_owned();
+        let mut headers = vec![("Origin", origin)];
         let held = guest_cookie()
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

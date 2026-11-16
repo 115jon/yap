@@ -4674,7 +4674,9 @@ impl State {
 
     fn send_share_preview(&mut self, fx: &mut Effects, url: Option<String>) {
         let ready = self.session.as_ref().is_some_and(|s| s.gateway.ready);
-        let Some(call) = self.voice.as_mut() else {
+        // A meeting room's share is not the account's: no still on the
+        // gateway (the room refuses it on its own socket too).
+        let Some(call) = self.voice.as_mut().filter(|c| c.room.is_none()) else {
             return;
         };
         let url = url.filter(|url| call.joined && call.share.is_some() && view::is_still_url(url));
@@ -4790,6 +4792,7 @@ impl State {
                 return self.start_voice(fx, ended.server_id, ended.channel_id, None, None);
             }
             VoiceUpdate::Ended(error) => {
+                let ended_room = current.room.is_some();
                 // A forced end: the leave sound and presence leave only if
                 // the room had said Ready.
                 if let Some(ended) = self.voice.take() {
@@ -4810,7 +4813,11 @@ impl State {
                     self.sync_standby(fx);
                 }
                 if let Some(error) = error {
-                    self.voice_error = join_error_copy(&error);
+                    self.voice_error = if ended_room {
+                        room_error_copy(&error)
+                    } else {
+                        join_error_copy(&error)
+                    };
                     self.set_status(fx, format!("Left the call: {error}"));
                 }
             }
@@ -4859,6 +4866,25 @@ fn join_error_copy(error: &str) -> String {
         return "Couldn't reach Yap. Check your connection and try again.".to_owned();
     }
     "Couldn't join the call. Try again.".to_owned()
+}
+
+/// [`join_error_copy`] for a meeting room (`crate::rooms`).
+fn room_error_copy(error: &str) -> String {
+    let lower = error.to_ascii_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|n| lower.contains(n));
+    if has(&["429", "rate limit"]) {
+        // The server admits 12 room joins an hour per network.
+        return "Too many meeting joins from this network. Wait a while, then try again."
+            .to_owned();
+    }
+    if has(&["403", "forbidden"]) {
+        return "You can't join this meeting.".to_owned();
+    }
+    match join_error_copy(error).as_str() {
+        "Couldn't join the call. Try again." => "Couldn't join the meeting. Try again.".to_owned(),
+        "Couldn't reconnect to the call." => "Lost the connection to the meeting.".to_owned(),
+        other => other.to_owned(),
+    }
 }
 
 fn unexpected(response: &ApiResponse) -> ApiError {

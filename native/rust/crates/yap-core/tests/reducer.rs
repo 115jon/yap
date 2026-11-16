@@ -4482,6 +4482,16 @@ fn a_signed_in_user_should_join_a_room_without_presence() {
         update: VoiceUpdate::Connected,
     });
     assert!(!fx.iter().any(|e| matches!(e, Effect::GatewaySend(_))));
+    // A share's stills stay off the account's gateway.
+    client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::ShareStarted(yap_core::VoiceShare::default()),
+    });
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::SharePreview("data:image/jpeg;base64,AAAA".into()),
+    });
+    assert!(!fx.iter().any(|e| matches!(e, Effect::GatewaySend(_))));
     // A reset room ends the call rather than joining a channel.
     let fx = client.input(Input::Voice {
         call,
