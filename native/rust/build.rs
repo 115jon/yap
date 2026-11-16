@@ -185,6 +185,7 @@ const QML: &[&str] = &[
     "qml/screens/Settings/RowError.qml",
     "qml/screens/Settings/SegmentedField.qml",
     "qml/screens/Settings/SessionsPanel.qml",
+    "qml/screens/Settings/ConnectionsPanel.qml",
     "qml/screens/Settings/LoudPanel.qml",
     "qml/screens/Settings/SettingsCard.qml",
     "qml/screens/Settings/SettingsDialog.qml",

@@ -15,6 +15,7 @@ pub mod backgrounds;
 pub mod blocks;
 pub mod board;
 pub mod calls;
+pub mod connections;
 pub mod deletion;
 mod effect;
 pub mod embeds;

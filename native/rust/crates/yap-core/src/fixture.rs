@@ -184,6 +184,12 @@ impl Fixture {
                     })
                     .map(Box::new),
             ),
+            // Nothing linked; every change succeeds.
+            ApiRequest::Connections(request) => ApiResponse::Connections(
+                request
+                    .decode(serde_json::json!({ "connections": [] }))
+                    .unwrap_or(crate::connections::ConnectionsResponse::Done),
+            ),
             // No pins, no windows; a thread is empty.
             ApiRequest::Threads(request) => ApiResponse::Threads(
                 request

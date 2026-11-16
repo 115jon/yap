@@ -28,6 +28,7 @@
 //! | `yap://chat/<server>/<channel>[?message=<id>]` | a channel (voice: its panel, no join), at a message |
 //! | `yap://settings[/<panel>][?row=<row>]`         | Settings, on a panel and row        |
 //! | `yap://signin[?code=XXXX-XXXX]`                | the window; polls a waiting sign-in |
+//! | `yap://connection?provider=<p>&(code=<c>\|status=<s>)` | Connections, claiming a verified link or saying how it ended |
 //!
 //! `signin` never carries a token: the browser page that approved a device
 //! code opens it to bring the app forward, and the app, which polls that
@@ -68,6 +69,22 @@ pub enum Link {
     /// A device sign-in was approved in the browser: show the window, and
     /// poll now if `user_code` is the code this app is waiting on.
     SignIn { user_code: Option<String> },
+    /// A link this app started in the browser came back
+    /// ([`crate::connections`]): a one-time code to claim, or how it
+    /// ended. Never an account or a token.
+    Connection {
+        provider: String,
+        outcome: ConnectionOutcome,
+    },
+}
+
+/// What a `connection` link carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectionOutcome {
+    /// The provider verified an account: claim it with this code.
+    Code(String),
+    /// How it ended otherwise (one of `connections::STATUSES`).
+    Status(String),
 }
 
 impl Link {
@@ -84,6 +101,7 @@ impl Link {
             Link::Channel { .. } => "channel",
             Link::Settings { .. } => "settings",
             Link::SignIn { .. } => "signin",
+            Link::Connection { .. } => "connection",
         }
     }
 }
@@ -277,8 +295,31 @@ fn from_native(rest: &str) -> Option<Link> {
             };
             Some(Link::SignIn { user_code })
         }
+        ("connection", []) => {
+            let pairs = strict_query(query, &["provider", "code", "status"])?;
+            let provider = take(&pairs, "provider")?;
+            if !crate::connections::is_provider(&provider) {
+                return None;
+            }
+            let outcome = match (take(&pairs, "code"), take(&pairs, "status")) {
+                (Some(code), None) if is_link_code(&code) => ConnectionOutcome::Code(code),
+                (None, Some(status)) if crate::connections::STATUSES.contains(&status.as_str()) => {
+                    ConnectionOutcome::Status(status)
+                }
+                _ => return None,
+            };
+            Some(Link::Connection { provider, outcome })
+        }
         _ => None,
     }
+}
+
+/// A one-time code as the server makes them: 43 base64url characters.
+fn is_link_code(code: &str) -> bool {
+    code.len() == 43
+        && code
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// Settings on `panel` and `row`, as the web's `resolveSettingsLocation`:

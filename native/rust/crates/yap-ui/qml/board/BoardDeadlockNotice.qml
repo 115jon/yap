@@ -4,7 +4,8 @@ import Yap.Ui
 // The owner-only states (Deadlock.tsx NotLinkedPlate / OwnerNotice): not
 // linked ("Link Steam"), linked with no matches yet, and data deleted at
 // the source. Everyone else never gets these plates. The Link Steam key
-// raises the plate's linkSteamRequested(); the caller opens Connections.
+// raises the plate's linkSteamRequested(); the rack asks the shell for
+// Connections (ShellState.connectionsRequested).
 Item {
     id: view
 

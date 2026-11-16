@@ -119,7 +119,7 @@ Item {
             // One component per type; each binds the live cell, data and ctx.
             Component { id: c_now_playing; BoardNowPlaying { widget: slot.held; boardData: rack.boardData; ctx: rack.ctx } }
             Component { id: c_top_games; BoardTopGames { widget: slot.held; boardData: rack.boardData; ctx: rack.ctx } }
-            Component { id: c_deadlock; BoardDeadlock { widget: slot.held; boardData: rack.boardData; ctx: rack.ctx } }
+            Component { id: c_deadlock; BoardDeadlock { widget: slot.held; boardData: rack.boardData; ctx: rack.ctx; onLinkSteamRequested: ShellState.connectionsRequested() } }
             Component { id: c_voice_hours; BoardVoiceHours { widget: slot.held; boardData: rack.boardData; ctx: rack.ctx } }
             Component { id: c_listening; BoardListening { widget: slot.held; boardData: rack.boardData; ctx: rack.ctx } }
             Component { id: c_badges; BoardBadges { widget: slot.held; boardData: rack.boardData; ctx: rack.ctx } }

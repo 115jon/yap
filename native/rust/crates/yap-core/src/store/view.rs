@@ -1202,6 +1202,8 @@ pub enum ViewUpdate {
     Deletion(super::deletion::DeletionView),
     /// The site announcement to draw, or none.
     Announcement(Option<crate::site_config::Announcement>),
+    /// Settings › Connections.
+    Connections(Box<super::connections::ConnectionsView>),
     DeviceCode {
         user_code: String,
         url: String,

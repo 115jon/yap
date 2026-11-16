@@ -26,6 +26,21 @@ Item {
         }
     }
 
+    // Settings › Connections: the begin URL the core has for a Connect
+    // opens in the system browser; a link coming back from it, or the
+    // Deadlock widget's Link Steam, shows the panel.
+    ConnectionsModel {
+        driver: true
+        onOpenRequested: url => Files.openExternal(url)
+        onShowRequested: SettingsNav.show("connections", "")
+    }
+    Connections {
+        target: ShellState
+        function onConnectionsRequested() {
+            SettingsNav.show("connections", "steam-account")
+        }
+    }
+
     // A landing or settings a link opened while the shell was being built.
     Component.onCompleted: {
         if (JSON.parse(Invites.state).landing)
