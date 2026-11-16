@@ -15,7 +15,10 @@ import { resolveChannelAccess } from "@/lib/channel-access";
 import { PERMISSIONS, hasPermission } from "@/lib/permissions";
 import { getOrCreateDemoSession } from "@/lib/voice/demo-session";
 import { isPublicDemoRoomSlug } from "@/lib/voice/realtime-policy";
-import type { RealtimeAccessMode } from "@/lib/voice/socket-ticket";
+import {
+  isAuthSessionId,
+  type RealtimeAccessMode,
+} from "@/lib/voice/socket-ticket";
 import { openVoiceMoveGrant } from "@/lib/voice/voice-move-grant";
 import {
   Database,
@@ -28,7 +31,12 @@ import type {
   ServiceFailure,
   Unauthenticated,
 } from "@/server/errors";
-import { signedInUserId, type KovaAuth } from "@/server/kova-auth";
+import {
+  appSessionCredentials,
+  signedInIdentity,
+  signedInUserId,
+  type KovaAuth,
+} from "@/server/kova-auth";
 import {
   BLOCK_CALL_COPY,
   blockBetween,
@@ -60,6 +68,8 @@ export type SocketAdmission = {
   /** The channel the room reports its voice roster for (authenticated). */
   channelId?: string;
   subject: string;
+  /** The chat socket's Kova session id (SocketTicketClaims.authSession). */
+  authSession?: string;
 };
 
 /** What a call socket admission names; the request bodies' common fields. */
@@ -103,11 +113,21 @@ export function admitGlobalSocket(
   Unauthenticated | AuthUnavailable | ServiceFailure,
   KovaAuth
 > {
-  return Effect.map(signedInUserId(request), (userId) => ({
-    accessMode: "authenticated" as const,
-    roomSlug: "global-gateway",
-    subject: userId,
-  }));
+  // The credentials /api/sessions lists and revokes with (the bearer when
+  // there is one), so the ticket names the session a revoke will name.
+  return Effect.map(
+    signedInIdentity(request, appSessionCredentials(request)),
+    (identity) => ({
+      accessMode: "authenticated" as const,
+      roomSlug: "global-gateway",
+      subject: identity.user.id,
+      // A session id the ticket can carry: the gateway closes this socket when
+      // the session is signed out from another device.
+      ...(identity.session.id && isAuthSessionId(identity.session.id)
+        ? { authSession: identity.session.id }
+        : {}),
+    }),
+  );
 }
 
 function authorizeChannel(

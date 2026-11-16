@@ -8,6 +8,7 @@ use yap_core::settings::{
     row_matches, search, section_position, share_status, sign_in_method_labels, synced_theme,
     theme_seed, validate_display_name, AvatarCrop,
 };
+use yap_core::store::extras::ExtrasCommand;
 use yap_core::store::{
     reduce, ApiRequest, ApiResponse, Command, Dispatch, Effect, GatewayEvent, Input, Load,
     ProfileAsset, ProfileDraft, RequestId, SettingsView, State, ViewUpdate,
@@ -395,6 +396,62 @@ fn sessions_should_map_to_rows() {
     assert_eq!(
         (row.title.as_str(), row.location.as_str(), row.current),
         ("Desktop · Desktop client", "Unknown location", true)
+    );
+}
+
+#[test]
+fn sessions_should_say_when_other_devices_are_unsupported_or_unlisted() {
+    let cases = [
+        (json!({}), (true, true)),
+        (json!({ "othersListed": false }), (false, true)),
+        (
+            json!({ "othersListed": false, "othersSupported": false }),
+            (false, false),
+        ),
+    ];
+    for (flags, expected) in cases {
+        let mut client = Client::online();
+        let fx = client.command(Command::LoadSessions);
+        let (id, request) = find(&fx, |r| *r == ApiRequest::Sessions);
+        let mut body = json!({ "sessions": [{ "id": "s1", "isCurrent": true }] });
+        body.as_object_mut()
+            .expect("object")
+            .extend(flags.as_object().expect("object").clone());
+        let fx = client.respond(id, &request, body);
+        let view = settings(&fx).expect("view");
+        assert_eq!(
+            (
+                !view.sessions_others_unlisted,
+                !view.sessions_others_unsupported
+            ),
+            expected,
+            "{flags}"
+        );
+    }
+}
+
+#[test]
+fn signing_out_all_other_devices_should_leave_only_this_one() {
+    let mut client = Client::online();
+    let fx = client.command(Command::LoadSessions);
+    let (id, request) = find(&fx, |r| *r == ApiRequest::Sessions);
+    client.respond(
+        id,
+        &request,
+        json!({ "sessions": [
+            { "id": "here", "isCurrent": true },
+            { "id": "phone", "isCurrent": false },
+            { "id": "laptop", "isCurrent": false },
+        ] }),
+    );
+    let fx = client.command(Command::Extras(ExtrasCommand::RevokeOtherSessions));
+    let (id, request) = find(&fx, |r| matches!(r, ApiRequest::Extras(_)));
+    assert_eq!(request.body(), json!({ "allOthers": true }));
+    let fx = client.respond(id, &request, json!({ "revoked": 2 }));
+    let rows = settings(&fx).expect("view").sessions.ready().expect("rows");
+    assert_eq!(
+        rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        ["here"]
     );
 }
 

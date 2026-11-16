@@ -194,7 +194,9 @@ impl Fixture {
                     .decode(serde_json::Value::Null)
                     .unwrap_or(crate::store::FriendsResponse::Done),
             ),
-            ApiRequest::Sessions => ApiResponse::Sessions(Vec::new()),
+            ApiRequest::Sessions => {
+                ApiResponse::Sessions(Vec::new(), crate::store::SessionsOthers::default())
+            }
             ApiRequest::Deletion(_) => {
                 ApiResponse::Deletion(crate::account_deletion::DeletionStatus::Active)
             }

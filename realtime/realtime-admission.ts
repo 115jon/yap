@@ -1,4 +1,5 @@
 import {
+  isAuthSessionId,
   isParticipantId,
   type RealtimeAccessMode,
   type SocketTicketAudience,
@@ -23,6 +24,8 @@ export interface RealtimeAdmissionContext {
   media?: SocketTicketMedia;
   /** Voice sockets admitted by `/api/voice/admission`: who must identify. */
   boundParticipantId?: string;
+  /** Chat sockets: the Kova session that asked for the ticket. */
+  authSession?: string;
 }
 
 interface RealtimeAdmissionConfig {
@@ -63,6 +66,7 @@ export async function createRealtimeAdmissionContext(
     subject: claims.subject,
     ...(claims.media ? { media: claims.media } : {}),
     ...(claims.participant ? { boundParticipantId: claims.participant } : {}),
+    ...(claims.authSession ? { authSession: claims.authSession } : {}),
   };
 }
 
@@ -102,6 +106,9 @@ export function appendRealtimeAdmissionHeaders(
       context.boundParticipantId,
     );
   }
+  if (context.authSession) {
+    next.set(`${ADMISSION_HEADER_PREFIX}auth-session`, context.authSession);
+  }
   return next;
 }
 
@@ -130,6 +137,7 @@ export function getRealtimeAdmissionFromHeaders(
   const boundParticipantId = headers.get(
     `${ADMISSION_HEADER_PREFIX}bound-participant`,
   );
+  const authSession = headers.get(`${ADMISSION_HEADER_PREFIX}auth-session`);
   const expiresAt = Number(expiresAtRaw);
 
   if (accessMode !== "authenticated" && accessMode !== "public-demo")
@@ -157,6 +165,7 @@ export function getRealtimeAdmissionFromHeaders(
     subject,
     ...(media === "issued" || media === "held" ? { media } : {}),
     ...(isParticipantId(boundParticipantId) ? { boundParticipantId } : {}),
+    ...(isAuthSessionId(authSession) ? { authSession } : {}),
   };
 }
 

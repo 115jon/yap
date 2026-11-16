@@ -280,6 +280,8 @@ interface WsAttachment {
     media?: SocketTicketMedia;
     /** Cloudflare's IANA time zone for the client, stamped at upgrade. */
     timeZone?: string;
+    /** Chat sockets: the Kova session the ticket was issued to. */
+    authSession?: string;
   };
   id: string;
   name: string;
@@ -462,6 +464,15 @@ const PRESENCE_STATUSES: ReadonlySet<string> = new Set<PresenceStatus>([
 /** Admin introspection (see MeetingRoom.fetch); internal stub paths only. */
 export const ADMIN_INTROSPECT_PATH = "/admin/introspect";
 export const ADMIN_DISCONNECT_PATH = "/admin/disconnect-user";
+/**
+ * Kova sessions of one user were signed out from another device: close the
+ * chat sockets they opened (src/server/routes/sessions.ts). Body
+ * `{ user_id, auth_session_id }` for one session, or
+ * `{ user_id, except_auth_session_id }` for all but the caller's.
+ */
+export const SESSIONS_SIGNED_OUT_PATH = "/sessions/signed-out";
+/** A socket ticket's lifetime (SOCKET_TICKET_TTL_MS in socket-admission.ts). */
+const SIGNED_OUT_TICKET_WINDOW_MS = 60_000;
 
 function isPresenceStatus(status: string): status is PresenceStatus {
   return PRESENCE_STATUSES.has(status);
@@ -476,6 +487,17 @@ export class MeetingRoom extends DurableObject<Env> {
   private profileRequestCoordinator = new ProfileRequestCoordinator();
   /** Sockets whose close or error has been delivered (see handleIdentify). */
   private readonly closedSockets = new WeakSet<WebSocket>();
+  /**
+   * Recent sign-outs from another device (closeSignedOutSessions), kept for
+   * a ticket's lifetime so a ticket issued before one cannot reopen the
+   * socket it closed. In memory only: an eviction inside that minute lets
+   * such a ticket through, and its next reconnect then fails.
+   */
+  private signedOutTickets: Array<{
+    userId: string;
+    filter: { only: string } | { except: string };
+    at: number;
+  }> = [];
   private profileIdentities: Map<string, ProfileIdentity> = new Map();
   private resumableSessions: Map<string, WsAttachment> = new Map();
   /** Voice sessions another device took over: participantId -> replaced at. */
@@ -965,6 +987,9 @@ export class MeetingRoom extends DurableObject<Env> {
         return unauthorizedUpgrade();
       }
       const { admission } = admitted;
+      // A ticket issued before its session was signed out elsewhere: the
+      // client asks for a new one, which finds the session gone.
+      if (this.ticketSignedOut(admission)) return unauthorizedUpgrade();
       if (
         expectedAudience === "room" &&
         admission.accessMode === "authenticated" &&
@@ -994,6 +1019,9 @@ export class MeetingRoom extends DurableObject<Env> {
             subject: admission.subject,
             ...(admission.media ? { media: admission.media } : {}),
             ...(timeZone ? { timeZone } : {}),
+            ...(admission.authSession
+              ? { authSession: admission.authSession }
+              : {}),
           },
         },
         gatewayVersion,
@@ -1359,7 +1387,109 @@ export class MeetingRoom extends DurableObject<Env> {
       return Response.json({ closed, participant_ids: participantIds });
     }
 
+    if (
+      url.pathname === SESSIONS_SIGNED_OUT_PATH &&
+      request.method === "POST"
+    ) {
+      const body: unknown = await request.json().catch(() => null);
+      const record = this.isPlainObject(body) ? body : {};
+      const userId = typeof record.user_id === "string" ? record.user_id : "";
+      const only =
+        typeof record.auth_session_id === "string" && record.auth_session_id
+          ? record.auth_session_id
+          : null;
+      const except =
+        typeof record.except_auth_session_id === "string" &&
+        record.except_auth_session_id
+          ? record.except_auth_session_id
+          : null;
+      if (!userId || (only === null) === (except === null)) {
+        return Response.json({ error: "invalid" }, { status: 400 });
+      }
+      const closed = await this.closeSignedOutSessions(
+        userId,
+        only ? { only } : { except: except! },
+      );
+      this.flushDirtyStorage();
+      return Response.json({ closed });
+    }
+
     return new Response("Not found", { status: 404 });
+  }
+
+  /**
+   * Closes `userId`'s sockets whose Kova session was signed out, and drops
+   * the ones held for a resume. A socket from a ticket without a session
+   * (issued before tickets carried one) is closed only by `except`: it may be
+   * the signed-out device. The close is AuthenticationFailed, which clients
+   * retry: the retry's ticket request finds the session gone (401) and the
+   * client signs out, while a socket of a session still signed in (one
+   * `except` could not tell apart) just reconnects.
+   */
+  /** True when `admission`'s ticket predates its session's sign-out elsewhere. */
+  private ticketSignedOut(admission: {
+    subject: string;
+    expiresAt: number;
+    authSession?: string;
+  }): boolean {
+    const now = Date.now();
+    this.signedOutTickets = this.signedOutTickets.filter(
+      (entry) => now - entry.at < SIGNED_OUT_TICKET_WINDOW_MS,
+    );
+    const issuedAt = admission.expiresAt - SIGNED_OUT_TICKET_WINDOW_MS;
+    return this.signedOutTickets.some(
+      ({ userId, filter, at }) =>
+        userId === admission.subject &&
+        issuedAt <= at &&
+        ("only" in filter
+          ? admission.authSession === filter.only
+          : admission.authSession !== filter.except),
+    );
+  }
+
+  private async closeSignedOutSessions(
+    userId: string,
+    filter: { only: string } | { except: string },
+  ): Promise<number> {
+    this.signedOutTickets.push({ userId, filter, at: Date.now() });
+    const signedOut = (
+      attachment: Partial<WsAttachment> | null | undefined,
+    ): boolean => {
+      if (
+        attachment?.user_id !== userId &&
+        attachment?.admission?.subject !== userId
+      ) {
+        return false;
+      }
+      const session = attachment?.admission?.authSession;
+      return "only" in filter
+        ? session === filter.only
+        : session !== filter.except;
+    };
+    // Every accepted socket, identified or not: one that has not sent its
+    // Identify yet would otherwise still get in.
+    const sockets = this.ctx.getWebSockets().filter((ws) => {
+      if (this.closedSockets.has(ws)) return false;
+      const live = this.sessions.get(ws);
+      return signedOut(
+        live ?? (ws.deserializeAttachment() as Partial<WsAttachment> | null),
+      );
+    });
+    for (const ws of sockets) {
+      try {
+        ws.close(CloseCode.AuthenticationFailed, "Signed out");
+      } catch {
+        /* already closed */
+      }
+      if (this.sessions.has(ws)) await this.handleLeave(ws, true, false);
+    }
+    const held = [...this.resumableSessions]
+      .filter(([, session]) => signedOut(session))
+      .map(([sessionId]) => sessionId);
+    for (const sessionId of held) {
+      await this.disconnectSessionImmediately(userId, sessionId);
+    }
+    return sockets.length + held.length;
   }
 
   /** Who is on this object right now, for the admin console. No tokens. */

@@ -8,18 +8,25 @@
 // usual way (Kova's /:pk/revoke-session with its token), never here.
 //
 // Until Kova has the app-session endpoints (kova-auth.ts), GET answers the
-// caller's own session alone with `othersListed: false`, and DELETE 501. GET
-// does the same when the list call fails: the caller's own row is known.
+// caller's own session alone with `othersListed: false, othersSupported:
+// false`, and DELETE 501. GET also answers the caller's own row alone when
+// the list call fails (`othersListed: false, othersSupported: true`).
 //
 // A revoked session's push tokens are deleted with it (push.service
-// deleteSessionPushTokens), so the signed-out device stops getting pushes.
+// deleteSessionPushTokens), so the signed-out device stops getting pushes,
+// and its chat sockets are closed (user-sockets closeSignedOutSockets), so it
+// signs out on the reconnect instead of at its next API call.
+//
+// `othersSupported: false` means Kova has no app-session endpoints (404):
+// clients hide the other-devices part. `othersListed: false` with
+// `othersSupported: true` means the list failed this time.
 
 import { Effect, Option, Schema, type Layer } from "effect";
 
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 import { describeSessionClient, requestGeo } from "@/lib/session-activity";
 import { validateBody } from "@/lib/validate-body";
-import { Database } from "@/server/bindings";
+import { Database, WorkerEnv } from "@/server/bindings";
 import { runRoute, type RouteServices } from "@/server/edge";
 import {
   appSessionCredentials,
@@ -29,6 +36,7 @@ import {
   type KovaAuthSession,
 } from "@/server/kova-auth";
 import { deleteSessionPushTokens } from "@/services/push.service";
+import { closeSignedOutSockets } from "@/services/user-sockets.service";
 
 /** One row of `GET /api/sessions`. Earlier fields are what clients read. */
 export interface SessionRow {
@@ -139,17 +147,20 @@ const listSessions = Effect.fn("sessions.list")(function* (request: Request) {
   const credentials = appSessionCredentials(request);
   const identity = yield* signedInIdentity(request, credentials);
   const kova = yield* KovaAuth;
+  // Some: Kova listed them. None: this Kova has no app-session endpoints
+  // (404), so other devices cannot be listed or signed out at all. Null: the
+  // list call failed this time.
   const listed = yield* kova.listAppSessions(credentials).pipe(
     Effect.catchTags({
       AuthUnavailable: (error) =>
         Effect.logWarning("sessions.list_unavailable").pipe(
           Effect.annotateLogs({ reason: error.reason }),
-          Effect.as(Option.none()),
+          Effect.as(null),
         ),
       ServiceFailure: (error) =>
         Effect.logWarning("sessions.list_refused").pipe(
           Effect.annotateLogs({ code: error.code ?? null }),
-          Effect.as(Option.none()),
+          Effect.as(null),
         ),
     }),
   );
@@ -159,10 +170,13 @@ const listSessions = Effect.fn("sessions.list")(function* (request: Request) {
       sessions: sessionRows(
         request,
         identity.session,
-        Option.getOrElse(listed, () => []),
+        listed === null ? [] : Option.getOrElse(listed, () => []),
       ),
       // False when Kova could not list them: other devices may exist.
-      othersListed: Option.isSome(listed),
+      othersListed: listed !== null && Option.isSome(listed),
+      // False when Kova cannot list or sign out other devices at all (it has
+      // no app-session endpoints yet): clients hide that part.
+      othersSupported: listed === null || Option.isSome(listed),
     },
     200,
     request,
@@ -231,6 +245,16 @@ const revokeSessions = Effect.fn("sessions.revoke")(function* (
   if (signedOut) {
     yield* Effect.promise(() =>
       deleteSessionPushTokens(db, identity.user.id, signedOut),
+    );
+    // Their open chat sockets close now, so those devices sign out promptly
+    // instead of at their next API call. Best effort.
+    const env = yield* WorkerEnv;
+    yield* Effect.promise(() =>
+      closeSignedOutSockets(
+        env.MEETING_ROOM,
+        identity.user.id,
+        signedOut,
+      ).catch(() => null),
     );
   }
 

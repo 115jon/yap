@@ -295,6 +295,13 @@ impl State {
         }
     }
 
+    /// After "Sign out all other devices" only this device is left.
+    pub(super) fn forget_other_session_rows(&mut self) {
+        if let Load::Ready(list) = &mut self.settings.sessions {
+            list.retain(|s| s.is_current);
+        }
+    }
+
     pub(super) fn refresh_me(&mut self, fx: &mut Effects) {
         if self.pending.me.is_none() {
             self.pending.me = self.http(fx, ApiRequest::Me);
@@ -660,7 +667,10 @@ impl State {
             }
             2 => {
                 self.settings.sessions = match result {
-                    Ok(ApiResponse::Sessions(list)) => Load::Ready(list),
+                    Ok(ApiResponse::Sessions(list, others)) => {
+                        self.settings.sessions_others = others;
+                        Load::Ready(list)
+                    }
                     Ok(_) => Load::Ready(Vec::new()),
                     Err(error) => Load::Failed(describe_api_error(&error, "load your sessions")),
                 }
@@ -791,6 +801,8 @@ impl State {
             email: s.email.clone(),
             sign_in_methods: s.sign_in_methods.clone(),
             sessions: map_load(&s.sessions, |list| list.iter().map(session_row).collect()),
+            sessions_others_unlisted: !s.sessions_others.listed,
+            sessions_others_unsupported: !s.sessions_others.supported,
             shares: map_load(&s.shares, |list| {
                 list.iter()
                     .map(|share| share_row(share, &self.api_base))

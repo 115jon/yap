@@ -17,7 +17,8 @@ import Yap.Ui
 // (this phone's playback volume); Privacy and safety (Share my activity
 // and the media filter, saved to the account); Plan (the three plans,
 // read-only until billing ships); Devices (the account's sessions, others
-// signed out after a confirm, SessionsModel); About (and the open source
+// signed out one by one or all at once after a confirm, SessionsModel;
+// this phone alone while the sign-in service cannot list the others); About (and the open source
 // licences, LicensesPage); Sign out, confirmed in place; Delete account,
 // behind the username typed to confirm it (DeleteAccountState). Opened
 // from the account row at the drawer's foot.
@@ -607,9 +608,55 @@ Rectangle {
                     }
                 }
                 Repeater {
-                    // This phone first.
-                    model: root.devices.failed ? [] : root.devices.ordered
+                    // This phone first. While the sign-in service cannot
+                    // list other devices at all, this phone alone.
+                    model: root.devices.failed ? []
+                        : root.devices.othersSupported ? root.devices.ordered
+                        : root.devices.current
                     delegate: SessionItem {}
+                }
+                Text {
+                    visible: !root.devices.loadingFirst && !root.devices.failed
+                        && root.devices.othersSupported && root.devices.others.length === 0
+                    width: parent.width
+                    topPadding: 8
+                    textFormat: Text.PlainText
+                    text: root.devices.othersListed ? qsTr("No other devices are signed in.")
+                        : qsTr("Other signed-in devices can't be listed right now.")
+                    wrapMode: Text.Wrap
+                    color: Theme.ink2
+                    font: Theme.type.description
+                }
+                // Sign out all other devices, asking first.
+                Column {
+                    readonly property bool armed: root.devices.armed === root.devices.allOthers
+                    visible: !root.devices.failed && root.devices.othersSupported
+                        && root.devices.others.length > 0
+                    width: parent.width
+                    topPadding: 8
+                    spacing: 8
+                    KitButton {
+                        width: parent.width
+                        visible: !parent.armed
+                        variant: "secondary"
+                        text: qsTr("Sign out all other devices")
+                        onClicked: root.devices.arm(root.devices.allOthers)
+                    }
+                    Loader {
+                        width: parent.width
+                        active: parent.armed
+                        visible: active
+                        sourceComponent: InlineConfirm {
+                            consequence: root.devices.others.length === 1
+                                ? qsTr("Your other device will be signed out and need to sign in again.")
+                                : qsTr("Your %1 other devices will be signed out and need to sign in again.").arg(root.devices.others.length)
+                            confirmLabel: qsTr("Sign out all other devices")
+                            busy: root.devices.busy(root.devices.allOthers)
+                            error: root.devices.errorFor(root.devices.allOthers)
+                            onCancelled: root.devices.disarm()
+                            onConfirmed: root.devices.revoke(root.devices.allOthers)
+                        }
+                    }
                 }
             }
 

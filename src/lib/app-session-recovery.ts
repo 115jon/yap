@@ -17,7 +17,10 @@
 // token is cleared and the state turns "signed-out", which the connection UI
 // shows as a sign-in prompt instead of an endless "Reconnecting". The page
 // coming back (wake) checks again, so signing in in another tab heals this
-// one too. Desktop uses the same path; its webview usually has no cookie
+// one too. When Kova says this browser was signed out from another device
+// (401 `app_session_revoked`, Settings > Devices elsewhere), it is the same
+// "signed-out", and useSignedOutElsewhere() lets the UI say so. Desktop uses
+// the same path; its webview usually has no cookie
 // session, so a refused desktop token ends at the device-code sign-in.
 
 import { useSyncExternalStore } from "react";
@@ -56,14 +59,18 @@ export type AppSessionState = "active" | "unverified" | "signed-out";
 export const SESSION_RECOVERY_COOLDOWN_MS = 15_000;
 
 let state: AppSessionState = "active";
+/** Kova's reason for the last "signed-out": another device signed this one out. */
+let signedOutElsewhere = false;
 const listeners = new Set<() => void>();
 let inFlight: Promise<string | null> | null = null;
 let lastAttemptAt = Number.NEGATIVE_INFINITY;
 let stopWatchingTokens: (() => void) | null = null;
 
-function setState(next: AppSessionState): void {
-  if (state === next) return;
+function setState(next: AppSessionState, elsewhere = false): void {
+  const nextElsewhere = next === "signed-out" && elsewhere;
+  if (state === next && signedOutElsewhere === nextElsewhere) return;
   state = next;
+  signedOutElsewhere = nextElsewhere;
   if (next === "active") {
     stopWatchingTokens?.();
     stopWatchingTokens = null;
@@ -88,6 +95,15 @@ function subscribe(listener: () => void): () => void {
 
 export function useAppSessionState(): AppSessionState {
   return useSyncExternalStore(subscribe, getAppSessionState, () => "active");
+}
+
+/** True while signed out because another device signed this one out. */
+export function getSignedOutElsewhere(): boolean {
+  return signedOutElsewhere;
+}
+
+export function useSignedOutElsewhere(): boolean {
+  return useSyncExternalStore(subscribe, getSignedOutElsewhere, () => false);
 }
 
 /**
@@ -177,9 +193,20 @@ async function mintAppSessionToken(): Promise<string | null> {
       setState("active");
       return current;
     }
-    log.warn("Kova has no session to mint from: signed out");
+    // Kova's terminal answer for a browser another device signed out.
+    const body: unknown = await response.json().catch(() => null);
+    const elsewhere =
+      body !== null &&
+      typeof body === "object" &&
+      "error" in body &&
+      body.error === "app_session_revoked";
+    log.warn(
+      elsewhere
+        ? "Signed out from another device"
+        : "Kova has no session to mint from: signed out",
+    );
     clearDesktopAuthSession();
-    setState("signed-out");
+    setState("signed-out", elsewhere);
     return null;
   }
   if (!response.ok) {
@@ -219,6 +246,7 @@ async function mintAppSessionToken(): Promise<string | null> {
 
 export function resetAppSessionRecoveryForTests(): void {
   state = "active";
+  signedOutElsewhere = false;
   inFlight = null;
   lastAttemptAt = Number.NEGATIVE_INFINITY;
   stopWatchingTokens?.();

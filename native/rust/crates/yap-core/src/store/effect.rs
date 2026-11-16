@@ -15,6 +15,7 @@ pub use yap_cache::Write as CacheWrite;
 
 use super::{CallId, Input, RequestId, SessionId, SignInId, ViewUpdate, VoiceCommand, VoiceTarget};
 use crate::api::{ApiError, Token};
+use crate::store::state::SessionsOthers;
 
 /// One piece of I/O, or one update for the UI. The runner starts each in
 /// order; I/O runs concurrently and reports back as an [`super::Input`].
@@ -502,7 +503,9 @@ pub enum ApiResponse {
     Gifs(GifPage),
     GifCategories(Vec<GifCategory>),
     GifTerms(Vec<String>),
-    Sessions(Vec<SessionInfo>),
+    /// `GET /api/sessions`: the rows, and what the server knows of the
+    /// other devices (`othersListed`, `othersSupported`).
+    Sessions(Vec<SessionInfo>, SessionsOthers),
     Shares(Vec<ShareItem>),
     /// The account's email, when Kova has one.
     KovaEmail(Option<String>),
@@ -955,7 +958,15 @@ impl ApiRequest {
                     .map(|terms| terms.results)
                     .unwrap_or_default(),
             ),
-            Self::Sessions => ApiResponse::Sessions(lenient_list(take(&mut body, "sessions"))),
+            Self::Sessions => {
+                // Absent (an older server): listed and supported, as on the web.
+                let flag = |name: &str| body.get(name).and_then(Value::as_bool) != Some(false);
+                let others = SessionsOthers {
+                    listed: flag("othersListed"),
+                    supported: flag("othersSupported"),
+                };
+                ApiResponse::Sessions(lenient_list(take(&mut body, "sessions")), others)
+            }
             Self::BillingStatus => ApiResponse::BillingStatus(
                 body.get("enabled").and_then(Value::as_bool) == Some(true),
             ),
