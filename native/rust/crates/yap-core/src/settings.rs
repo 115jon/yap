@@ -292,7 +292,7 @@ pub const PANELS: &[PanelDef] = &[
         title: "Privacy & safety",
         icon: "privacy",
         headline: "What you see and what you share.",
-        blurb: "What others see you playing, the media you see, and the messages you've shared publicly.",
+        blurb: "What others see you playing, who can DM you, the media you see, and the messages you've shared publicly.",
         rail_rows: &[],
         sections: &[
             section(
@@ -311,6 +311,28 @@ pub const PANELS: &[PanelDef] = &[
                         "rich presence",
                         "status",
                         "detection",
+                    ],
+                )],
+            ),
+            section(
+                "direct-messages",
+                "Direct messages",
+                "Who can start a DM with you. A DM you've written in stays open whatever you pick, and blocking someone always closes it.",
+                &[row(
+                    "dm-permission",
+                    "Who can DM you",
+                    "Applies to new messages and calls from people you haven't talked with.",
+                    &[
+                        "dm",
+                        "direct message",
+                        "message requests",
+                        "privacy",
+                        "who can message",
+                        "friends",
+                        "server members",
+                        "strangers",
+                        "spam",
+                        "calls",
                     ],
                 )],
             ),

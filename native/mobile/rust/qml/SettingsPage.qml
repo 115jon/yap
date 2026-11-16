@@ -83,6 +83,16 @@ Rectangle {
     readonly property string mediaFilter: Settings.mediaFilterSaving.length > 0 ? Settings.mediaFilterSaving
         : Settings.mediaFilter.length > 0 ? Settings.mediaFilter : "high"
 
+    // Who can DM you (the core's dm_permission): the value being saved,
+    // else the account's.
+    readonly property var dmLevels: [
+        { value: "everyone", label: qsTr("Everyone"), desc: qsTr("Anyone on Yap can start a DM with you.") },
+        { value: "friends_and_servers", label: qsTr("Friends & servers"), desc: qsTr("Only your friends and people who share a server with you can start a DM.") },
+        { value: "nobody", label: qsTr("No one"), desc: qsTr("No one can start a new DM with you. Conversations you've written in stay open.") }
+    ]
+    readonly property string dmPermission: Settings.dmPermissionSaving.length > 0 ? Settings.dmPermissionSaving
+        : Settings.dmPermission.length > 0 ? Settings.dmPermission : "everyone"
+
     // The plan in force and the three plans (the core's plan_json).
     readonly property var plan: {
         try {
@@ -431,7 +441,7 @@ Rectangle {
                 }
             }
 
-            // Privacy and safety (the desktop's PrivacyPanel), both saved
+            // Privacy and safety (the desktop's PrivacyPanel), each saved
             // to the account at once and rolled back with the reason if it
             // does not take them.
             Section {
@@ -445,6 +455,47 @@ Rectangle {
                     onToggled: Settings.shareMyActivity(!Settings.shareActivity)
                 }
                 ErrorText { text: Settings.shareActivityError }
+                Item { width: 1; height: 12 }
+                Column {
+                    width: parent.width
+                    bottomPadding: 12
+                    spacing: 2
+                    Text {
+                        width: parent.width
+                        textFormat: Text.PlainText
+                        text: qsTr("Who can DM you")
+                        color: Theme.ink1
+                        font: Theme.type.setting
+                    }
+                    Text {
+                        width: parent.width
+                        textFormat: Text.PlainText
+                        text: qsTr("Applies to new messages and calls from people you haven't talked with. Blocking someone always closes a DM.")
+                        wrapMode: Text.Wrap
+                        color: Theme.ink3
+                        font: Theme.type.caption
+                    }
+                }
+                Segmented {
+                    width: parent.width
+                    accessibleName: qsTr("Who can DM you")
+                    options: root.dmLevels.map(level => level.label)
+                    current: Math.max(0, root.dmLevels.findIndex(level => level.value === root.dmPermission))
+                    onPicked: index => Settings.changeDmPermission(root.dmLevels[index].value)
+                }
+                Item { width: 1; height: 8 }
+                Text {
+                    readonly property var level: root.dmLevels.find(l => l.value === root.dmPermission) ?? root.dmLevels[0]
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    text: level.desc + (Settings.dmPermissionSaving.length > 0 ? " " + qsTr("Saving…") : "")
+                    wrapMode: Text.Wrap
+                    color: Theme.ink3
+                    font: Theme.type.caption
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: text
+                }
+                ErrorText { text: Settings.dmPermissionError }
                 Item { width: 1; height: 12 }
                 Column {
                     width: parent.width
@@ -1144,6 +1195,11 @@ Rectangle {
                         horizontalAlignment: Text.AlignHCenter
                         textFormat: Text.PlainText
                         text: cell.modelData
+                        // A long label ("Friends & servers") shrinks a
+                        // little to fit a narrow phone before it elides.
+                        fontSizeMode: Text.HorizontalFit
+                        minimumPixelSize: 11
+                        minimumPointSize: 8
                         elide: Text.ElideRight
                         color: cell.on ? Theme.primaryFillInk : Theme.ink1
                         font: Theme.type.controlSm

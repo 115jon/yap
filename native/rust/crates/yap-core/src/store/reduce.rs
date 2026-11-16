@@ -1730,6 +1730,7 @@ impl State {
             Command::SaveProfile(draft) => self.save_profile(fx, &draft),
             Command::SetMediaFilter(level) => self.set_media_filter(fx, &level),
             Command::SetShareActivity(on) => self.set_share_activity(fx, on),
+            Command::SetDmPermission(value) => self.set_dm_permission(fx, &value),
             Command::SetGameActivity(activity) => self.set_game_activity(activity.map(|a| *a)),
             Command::SaveTheme { theme, sync } => self.save_theme(fx, theme, sync),
             Command::JoinVoice(id) => self.join_voice(fx, id),
@@ -3475,8 +3476,11 @@ impl State {
                     self.remove_row(fx, &pending_id(nonce));
                     self.note_dm_refusal(fx, &channel_id, &error);
                 } else if toast_reply.is_some() {
+                    // The server's sentence names the person for the setting.
                     if let Some(block) = super::blocks::dm_refusal(&error) {
-                        fx.view(ViewUpdate::Notice(block.notice().to_owned()));
+                        let notice = super::blocks::block_sentence(&error)
+                            .map_or_else(|| block.notice(""), str::to_owned);
+                        fx.view(ViewUpdate::Notice(notice));
                     }
                 }
             }
@@ -4097,6 +4101,14 @@ impl State {
         }
         let at = message.created_at.clone();
         let mine = self.me().is_some_and(|me| me.id == message.author_id);
+        // The other person wrote in a DM whose "who can DM you" setting
+        // refused us: the server now lets us reply, so the composer opens.
+        if !mine
+            && self.friends.dm_refusals.get(&channel) == Some(&super::blocks::DmBlock::NotAccepting)
+        {
+            self.friends.dm_refusals.remove(&channel);
+            self.emit_active_dm(fx);
+        }
         // Typers are the open channel's: a post elsewhere leaves them.
         let here = self.active_channel.as_deref() == Some(channel.as_str());
         if here && self.typing.iter().any(|t| t.user_id == message.author_id) {

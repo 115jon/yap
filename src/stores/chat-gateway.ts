@@ -70,7 +70,13 @@ import type {
 import type { ChatRestActions } from "./chat-actions";
 import { toast } from "@/components/ui/toast";
 import { CALL_BLOCKED_COPY, hasBlocked } from "@/lib/blocks";
+import {
+  dmNotAcceptingCall,
+  isDmPermission,
+  RING_NOT_ACCEPTING_REASON,
+} from "@/lib/dm-permission";
 import { useCallStore } from "./useCallStore";
+import { useDmBlockStore } from "./useDmBlockStore";
 import { useDesktopSettingsStore } from "./useDesktopSettingsStore";
 
 const chatLog = clog("ChatGW");
@@ -329,6 +335,11 @@ export function createChatGateway(
       case "MESSAGE_CREATE": {
         const msg = d.data as Message;
         dispatch({ type: "APPEND_MESSAGE", message: msg });
+        // The other person wrote in a DM whose "who can DM you" setting
+        // refused us: the server now lets us reply, so the composer opens.
+        if (msg.author_id && msg.author_id !== get().user?.id) {
+          useDmBlockStore.getState().clearNotAccepting(msg.channel_id);
+        }
         dispatch({
           type: "CLEAR_TYPING",
           channelId: msg.channel_id,
@@ -656,6 +667,8 @@ export function createChatGateway(
           pronouns?: string | null;
           /** Own sessions only (the profile route sends it to the user). */
           share_activity?: boolean;
+          /** Own sessions only, like share_activity. */
+          dm_permission?: string;
           updated_at?: string;
         };
         dispatch({
@@ -682,6 +695,9 @@ export function createChatGateway(
             typeof p.share_activity === "boolean"
               ? p.share_activity
               : undefined,
+          dm_permission: isDmPermission(p.dm_permission)
+            ? p.dm_permission
+            : undefined,
           updated_at: p.updated_at,
         });
         break;
@@ -1023,10 +1039,19 @@ export function createChatGateway(
           break;
         }
 
-        // A null id is our op 36 being refused (busy, unavailable, blocked).
+        // A null id is our op 36 being refused (busy, unavailable, blocked,
+        // or the callee's "who can DM you" setting, which sends its sentence).
         if (call_id === null) initiatingChannelId = null;
         if (call_id === null && reason === "blocked") {
           toast.error(CALL_BLOCKED_COPY);
+        }
+        if (call_id === null && reason === RING_NOT_ACCEPTING_REASON) {
+          const message = (d.data as { message?: unknown }).message;
+          toast.error(
+            typeof message === "string" && message.trim()
+              ? message
+              : dmNotAcceptingCall(null),
+          );
         }
 
         playRingStop();
@@ -1066,6 +1091,7 @@ export function createChatGateway(
             reason !== "busy" &&
             reason !== "unavailable" &&
             reason !== "blocked" &&
+            reason !== RING_NOT_ACCEPTING_REASON &&
             reason !== "invalid" &&
             reason !== "declined"
           ) {

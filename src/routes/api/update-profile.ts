@@ -31,6 +31,7 @@ import {
 import { getEntitlement } from "@/services/entitlement.service";
 import { findUserAvatarUploadByUrl } from "@/services/user-avatar.service";
 import { ProfileIdentityPatchSchema } from "@/lib/validations";
+import { dmPermissionOf, isDmPermission } from "@/lib/dm-permission";
 
 const log = clog("update-profile");
 
@@ -43,6 +44,7 @@ const profilePatchSchema = looseStruct({
   themeSyncEnabled: Schema.optional(Schema.Unknown),
   mediaContentFilter: Schema.optional(Schema.Unknown),
   shareActivity: Schema.optional(Schema.Unknown),
+  dmPermission: Schema.optional(Schema.Unknown),
   avatarDisplay: Schema.optional(Schema.Unknown),
   avatarUrl: Schema.optional(Schema.Unknown),
   removeAvatar: Schema.optional(Schema.Unknown),
@@ -72,6 +74,7 @@ export const PATCH = async ({ request: req }: any) => {
     themeSyncEnabled,
     mediaContentFilter,
     shareActivity,
+    dmPermission,
     avatarDisplay,
     avatarUrl,
     removeAvatar,
@@ -98,6 +101,10 @@ export const PATCH = async ({ request: req }: any) => {
 
   if (shareActivity !== undefined && typeof shareActivity !== "boolean") {
     return apiError("Invalid activity sharing flag", 400);
+  }
+
+  if (dmPermission !== undefined && !isDmPermission(dmPermission)) {
+    return apiError("Invalid DM permission", 400);
   }
 
   if (removeAvatar !== undefined && typeof removeAvatar !== "boolean") {
@@ -308,6 +315,11 @@ export const PATCH = async ({ request: req }: any) => {
       binds.push(shareActivity ? 1 : 0);
     }
 
+    if (dmPermission !== undefined) {
+      updates.push("dm_permission = ?");
+      binds.push(dmPermission);
+    }
+
     if (normalizedProfileAccentColor !== undefined) {
       updates.push("profile_accent_color = ?");
       binds.push(resolvedSubmittedProfileTheme.profile_accent_color);
@@ -384,7 +396,7 @@ export const PATCH = async ({ request: req }: any) => {
     // Read back the updated profile
     const updatedUser = await db
       .prepare(
-        `SELECT id, username, display_name, avatar_url, avatar_display, banner_url, banner_content_type, nameplate_url, nameplate_content_type, profile_accent_color, profile_background_color, profile_banner_color, display_name_style, theme_preference, theme_sync_enabled, media_content_filter, share_activity, updated_at, bio, pronouns FROM users WHERE id = ?`,
+        `SELECT id, username, display_name, avatar_url, avatar_display, banner_url, banner_content_type, nameplate_url, nameplate_content_type, profile_accent_color, profile_background_color, profile_banner_color, display_name_style, theme_preference, theme_sync_enabled, media_content_filter, share_activity, dm_permission, updated_at, bio, pronouns FROM users WHERE id = ?`,
       )
       .bind(userId)
       .first<{
@@ -405,6 +417,7 @@ export const PATCH = async ({ request: req }: any) => {
         theme_sync_enabled: number;
         media_content_filter: string;
         share_activity: number | null;
+        dm_permission: string | null;
         updated_at: string | null;
         bio: string | null;
         pronouns: string | null;
@@ -480,6 +493,17 @@ export const PATCH = async ({ request: req }: any) => {
       });
     }
 
+    // Private as well: only the user's own sessions hear who may DM them.
+    if (dmPermission !== undefined) {
+      await broadcastToUser(userId, "USER_PROFILE_UPDATE", {
+        user_id: userId,
+        dm_permission: dmPermissionOf(
+          updatedUser?.dm_permission ?? dmPermission,
+        ),
+        updated_at: updatedUser?.updated_at ?? null,
+      });
+    }
+
     return apiSuccess({
       user: {
         username: updatedUser?.username,
@@ -498,6 +522,7 @@ export const PATCH = async ({ request: req }: any) => {
         theme_sync_enabled: updatedUser?.theme_sync_enabled === 1,
         media_content_filter: updatedUser?.media_content_filter,
         share_activity: updatedUser ? updatedUser.share_activity !== 0 : true,
+        dm_permission: dmPermissionOf(updatedUser?.dm_permission),
         bio: updatedUser?.bio,
         pronouns: updatedUser?.pronouns,
         updated_at: updatedUser?.updated_at,

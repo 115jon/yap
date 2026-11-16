@@ -7,6 +7,11 @@ import { Tabs, tabId } from "@/components/ui/tabs";
 import { apiDelete, apiGet, apiPatch } from "@/lib/api-client";
 import { describeApiError } from "@/lib/api-errors";
 import {
+  DM_PERMISSION_OPTIONS,
+  dmPermissionOf,
+  type DmPermission,
+} from "@/lib/dm-permission";
+import {
   MEDIA_CONTENT_FILTER_OPTIONS,
   type MediaContentFilter,
 } from "@/lib/media-content-filter";
@@ -87,6 +92,79 @@ function ShareActivityRow() {
           labelledBy={ids.labelId}
           describedBy={ids.descId}
           disabled={!chatUser?.id || saving}
+        />
+      )}
+    </SettingsRow>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Direct messages                                                      */
+/* ------------------------------------------------------------------ */
+
+function DmPermissionRow() {
+  const chatUser = useChatStore((state) => state.user);
+  const dispatch = useChatStore((state) => state.dispatch);
+  const [saving, setSaving] = useState<DmPermission | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSessionEnded, setSaveSessionEnded] = useState(false);
+  // Older /api/users/me answers have no field: everyone, as before.
+  const current = dmPermissionOf(chatUser?.dm_permission);
+
+  const handleChange = async (next: DmPermission) => {
+    if (!chatUser?.id || saving || next === current) return;
+    setSaveError(null);
+    setSaveSessionEnded(false);
+    setSaving(next);
+    dispatch({
+      type: "UPDATE_MEMBER_PROFILE",
+      userId: chatUser.id,
+      dm_permission: next,
+    });
+    try {
+      await apiPatch("/api/update-profile", { dmPermission: next });
+    } catch (error) {
+      dispatch({
+        type: "UPDATE_MEMBER_PROFILE",
+        userId: chatUser.id,
+        dm_permission: current,
+      });
+      setSaveError(describeApiError(error, "save who can DM you"));
+      setSaveSessionEnded(isSessionEnded(error));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <SettingsRow
+      id="dm-permission"
+      layout="block"
+      footer={
+        saveError ? (
+          <>
+            <RowError>{saveError}</RowError>
+            {saveSessionEnded ? (
+              <div className="mt-2">
+                <RecoverButton sessionEnded onRetry={() => {}} />
+              </div>
+            ) : null}
+          </>
+        ) : null
+      }
+    >
+      {(ids) => (
+        <SegmentedField
+          ids={ids}
+          value={current}
+          options={DM_PERMISSION_OPTIONS.map((option) => ({
+            value: option.value,
+            label: option.label,
+            desc: option.description,
+          }))}
+          busyValue={saving}
+          disabled={!chatUser?.id}
+          onChange={(value) => void handleChange(value)}
         />
       )}
     </SettingsRow>
@@ -521,6 +599,9 @@ export default function PrivacyPanel() {
     <>
       <SettingsCard id="activity">
         <ShareActivityRow />
+      </SettingsCard>
+      <SettingsCard id="direct-messages">
+        <DmPermissionRow />
       </SettingsCard>
       <SettingsCard id="media-filter">
         <MediaFilterRow />

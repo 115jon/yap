@@ -258,6 +258,7 @@ describe("chat actions read-state writes", () => {
             username: "user",
             media_content_filter: "standard",
             theme_sync_enabled: 0,
+            dm_permission: "nobody",
             connections: [
               {
                 provider: "steam",
@@ -284,6 +285,8 @@ describe("chat actions read-state writes", () => {
     );
 
     expect(await actions.loadCurrentUser("user-1")).toBe(true);
+    // "Who can DM you" comes from the account, so the picker shows it.
+    expect(state.user?.dm_permission).toBe("nobody");
     expect(state.user?.connections).toEqual([
       {
         provider: "steam",

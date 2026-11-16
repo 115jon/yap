@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { broadcastToChannel, getDB, requireAuth } from "@/lib/api-helpers";
 import { requireChannelAccess } from "@/lib/require-channel-access";
-import { dmBlockState } from "@/services/block.service";
+import { dmContactRefusal } from "@/services/dm-permission.service";
 
 // POST /api/channels/:id/typing — send typing indicator
 const POST = async ({ request: _request, params }: any) => {
@@ -16,10 +16,11 @@ const POST = async ({ request: _request, params }: any) => {
   const accessResult = await requireChannelAccess(userId, channelId);
   if (accessResult instanceof Response) return accessResult;
 
-  // Nobody can type into a 1:1 DM closed by a block: drop it quietly.
+  // Nobody can type into a 1:1 DM closed by a block or by the recipient's
+  // "who can DM you" setting: drop it quietly.
   if (
     accessResult.serverId === null &&
-    (await dmBlockState(getDB(), userId, channelId))
+    (await dmContactRefusal(getDB(), userId, channelId))
   ) {
     return new Response(null, { status: 204 });
   }
