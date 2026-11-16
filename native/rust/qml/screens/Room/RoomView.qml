@@ -17,12 +17,25 @@ Rectangle {
     readonly property bool inRoom: Voice.room.length > 0
     readonly property bool focused: inRoom && ShellState.focusedTile.length > 0
     property bool peopleShown: true
+    // The failed room had connected: it dropped rather than refused.
+    property bool wasLive: false
     property bool copied: false
 
     signal retryRequested(string room)
     signal closeRequested()
 
     color: Theme.ply0
+    // Nothing behind it takes a click, a wheel or a key (the shell or the
+    // sign-in page stays loaded under it).
+    focus: true
+    Keys.onPressed: event => event.accepted = true
+    Component.onCompleted: forceActiveFocus()
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+        hoverEnabled: true
+        onWheel: wheel => wheel.accepted = true
+    }
 
     onInRoomChanged: if (!inRoom) {
         ShellState.focusedTile = ""
@@ -95,7 +108,7 @@ Rectangle {
                 size: "sm"
                 variant: "secondary"
                 iconName: root.copied ? "check" : "link"
-                text: root.copied ? qsTr("Link copied") : qsTr("Copy invite link")
+                text: root.copied ? qsTr("Link copied") : qsTr("Copy meeting link")
                 onClicked: {
                     clip.copyText(Voice.roomLink(Voice.room))
                     root.copied = true
@@ -251,7 +264,7 @@ Rectangle {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
-            text: qsTr("Couldn't join the meeting")
+            text: root.wasLive ? qsTr("Lost the meeting") : qsTr("Couldn't join the meeting")
             color: Theme.ink1
             font: Theme.type.dialogTitle
             Accessible.role: Accessible.Heading

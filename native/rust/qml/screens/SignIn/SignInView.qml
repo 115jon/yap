@@ -65,7 +65,7 @@ Rectangle {
         : view === "expired" ? qsTr("That code expired")
         : view === "denied" ? qsTr("Sign-in declined")
         : qsTr("Couldn't sign in")
-    readonly property string bodyText: joining ? qsTr("No account needed. Paste the link you were sent and pick a name.")
+    readonly property string bodyText: joining ? qsTr("No account needed. Paste the link or code you were sent and pick a name.")
         : view === "idle" ? qsTr("Your browser opens to confirm it's you, then you're back here.")
         : view === "pending" ? qsTr("Make sure it shows this same code, then confirm.")
         : view === "expired" ? qsTr("Codes only last a few minutes. Get a fresh one to keep going.")
@@ -104,7 +104,7 @@ Rectangle {
         onTriggered: root.takeRoomNow()
     }
     function takeRoomNow() {
-        if (Session.phase !== Session.SignedOut && Session.phase !== Session.DeviceCode)
+        if (Session.phase !== Session.SignedOut)
             return
         const slug = Invites.roomRequest
         if (slug.length === 0)
@@ -155,8 +155,10 @@ Rectangle {
     Connections {
         target: Session
         function onPhaseChanged() {
-            if (Session.phase === Session.SignedOut)
+            if (Session.phase === Session.SignedOut) {
                 Qt.callLater(root.capture)
+                root.takeRoom()
+            }
             else if (Session.phase === Session.DeviceCode)
                 root.cancelled = false
         }

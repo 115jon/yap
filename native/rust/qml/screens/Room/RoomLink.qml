@@ -14,6 +14,8 @@ Item {
     // The room of the last join, kept while its failure shows.
     property string lastRoom: ""
     property bool failed: false
+    // The last room connected before it ended.
+    property bool wasLive: false
 
     function route() {
         const slug = Invites.roomRequest
@@ -42,10 +44,15 @@ Item {
     }
     Connections {
         target: Voice
+        function onLiveChanged() {
+            if (Voice.live && Voice.room.length > 0)
+                link.wasLive = true
+        }
         function onRoomChanged() {
             if (Voice.room.length > 0) {
                 link.lastRoom = Voice.room
                 link.failed = false
+                link.wasLive = false
             } else {
                 link.failed = Voice.error.length > 0 && link.lastRoom.length > 0
             }
@@ -59,13 +66,15 @@ Item {
         active: Voice.room.length > 0 || link.failed
         sourceComponent: RoomView {
             failedRoom: link.lastRoom
+            wasLive: link.wasLive
             onCloseRequested: link.failed = false
+            // The prompt first: clearing `failed` unloads this view.
             onRetryRequested: room => {
-                link.failed = false
                 if (Session.phase === Session.Ready)
                     dialog.load()?.ask(room, false)
                 else
                     Invites.openLink("yap://room/" + room)
+                link.failed = false
             }
         }
     }
