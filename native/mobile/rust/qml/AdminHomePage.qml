@@ -8,7 +8,8 @@ import Yap.Ui
 // a list of pages): the server's icon and name, then the pages this user
 // may open: Overview; Channels with Manage channels; Roles with Manage
 // roles; Members with Kick, Ban or Manage roles; Invites with Manage
-// server; Bans with Ban members. Opened from the server's menu, which
+// server; Bans with Ban members; Audit log with View audit log (or Manage
+// server). Opened from the server's menu, which
 // shows it only with one of those. The settings stay open while any of its
 // pages is.
 AdminPage {
@@ -113,6 +114,13 @@ AdminPage {
             text: qsTr("Bans")
             hint: qsTr("People who can't rejoin")
             onOpened: Router.open("AdminBansPage")
+        }
+        AdminRow {
+            visible: root.pages.includes("audit")
+            iconName: "auditLog"
+            text: qsTr("Audit log")
+            hint: qsTr("Who changed what, and when")
+            onOpened: Router.open("AdminAuditPage")
         }
     }
 

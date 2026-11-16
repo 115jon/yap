@@ -53,6 +53,9 @@ SettingsFrame {
         { page: "SettingsVoicePage", label: qsTr("Camera"), words: "front back video selfie" },
         { page: "SettingsVoicePage", label: qsTr("Data saver"), words: "camera video quality mobile data" },
         { page: "SettingsSoundboardPage", label: qsTr("Soundboard volume"), words: "sounds loud" },
+        { page: "SettingsSoundboardPage", label: qsTr("Join and leave sounds"), words: "voice channel server soundboard override" },
+        { page: "SettingsSoundboardPage", label: qsTr("Join sound"), words: "voice channel enter soundboard play" },
+        { page: "SettingsSoundboardPage", label: qsTr("Leave sound"), words: "voice channel exit soundboard play" },
         { page: "SettingsAppearancePage", label: qsTr("Theme"), words: "dark light colour color mode match system" },
         { page: "SettingsAppearancePage", label: qsTr("Use on all my devices"), words: "theme sync" },
         { page: "SettingsAppearancePage", label: qsTr("Text size"), words: "font bigger smaller zoom scale" },
@@ -80,7 +83,7 @@ SettingsFrame {
             return []
         const words = query.split(/\s+/)
         return index.filter(entry => {
-            if (entry.page === "SettingsSoundboardPage" && !hasSoundboard)
+            if (entry.label === qsTr("Soundboard volume") && !hasSoundboard)
                 return false
             const haystack = (entry.label + " " + pages[entry.page].title + " " + entry.words).toLowerCase()
             return words.every(word => haystack.includes(word))
@@ -285,9 +288,8 @@ SettingsFrame {
             hint: qsTr("Output, mic and camera")
         }
         HubRow {
-            visible: root.hasSoundboard
             page: "SettingsSoundboardPage"
-            hint: qsTr("Playback volume")
+            hint: root.hasSoundboard ? qsTr("Volume, join and leave sounds") : qsTr("Join and leave sounds")
         }
     }
 

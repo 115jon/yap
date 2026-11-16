@@ -37,6 +37,8 @@ use crate::wordle::{self, Completion};
 /// The playback id previews use (`local-preview`, `settings-preview`).
 const PREVIEW: &str = "local-preview";
 const SETTINGS_PREVIEW: &str = "settings-preview";
+/// The server key settings previews play under (no call's room).
+const SETTINGS_PREVIEW_KEY: &str = "settings";
 
 /// File types the upload route takes by extension
 /// (`SOUNDBOARD_AUDIO_TYPES_BY_EXTENSION`).
@@ -773,7 +775,13 @@ impl State {
                     }
                 }
             }
-            AppsCommand::LoadCatalog(server_id) => self.load_catalog(fx, &server_id),
+            AppsCommand::LoadCatalog(server_id) => {
+                // Settings: the members say whether we may upload there.
+                if !server_id.is_empty() {
+                    self.request_members(fx, &server_id);
+                }
+                self.load_catalog(fx, &server_id);
+            }
             AppsCommand::Play(sound_id) => self.play_sound(fx, &sound_id),
             AppsCommand::Preview(sound_id) => self.preview_sound(fx, &sound_id),
             AppsCommand::StopPlayback(playback_id) => {
@@ -796,6 +804,8 @@ impl State {
                 sound_name,
                 emoji,
                 volume,
+                server_id,
+                then_pick,
             } => self.upload_sound(
                 fx,
                 UploadDraft {
@@ -806,6 +816,8 @@ impl State {
                     sound_name,
                     emoji,
                     volume,
+                    server_id,
+                    then_pick,
                 },
             ),
             AppsCommand::Delete(sound) => match SoundRef::parse(&sound) {
@@ -964,6 +976,11 @@ impl State {
             } => self.set_trigger(fx, trigger, &scope, enabled, sound.as_deref(), clear),
             AppsCommand::PreviewTrigger { trigger, scope } => {
                 self.preview_trigger(fx, trigger, &scope);
+            }
+            AppsCommand::PreviewPick(pick) => {
+                if let Some(sound) = trigger_sound(&pick, &self.apps.soundboard.catalogs) {
+                    self.preview_trigger_sound(fx, sound);
+                }
             }
             AppsCommand::StartActivity { activity, now_ms } => {
                 self.apps.listen.now_ms = now_ms;
@@ -1730,10 +1747,35 @@ impl State {
         }
     }
 
+    /// A channel of `server_id` to upload a soundboard sound through (the
+    /// server takes any of its channels we can open): the call's when it is
+    /// there, else the first of the server's we know.
+    fn upload_channel(&self, server_id: &str) -> Option<String> {
+        if let Some((call_server, channel_id)) = self.apps_call() {
+            if call_server == server_id {
+                return Some(channel_id);
+            }
+        }
+        self.channels
+            .get(server_id)?
+            .channels
+            .first()
+            .map(|channel| channel.id.clone())
+    }
+
     fn upload_sound(&mut self, fx: &mut Effects, draft: UploadDraft) {
-        let Some((server_id, channel_id)) = self.apps_call() else {
-            self.apps.soundboard.error =
-                "Join a voice channel before uploading soundboard audio.".into();
+        let target = if draft.server_id.is_empty() {
+            self.apps_call()
+        } else {
+            self.upload_channel(&draft.server_id)
+                .map(|channel_id| (draft.server_id.clone(), channel_id))
+        };
+        let Some((server_id, channel_id)) = target else {
+            self.apps.soundboard.error = if draft.server_id.is_empty() {
+                "Join a voice channel before uploading soundboard audio.".into()
+            } else {
+                "Open that server once before uploading a sound to it.".into()
+            };
             return;
         };
         let soundboard = &mut self.apps.soundboard;
@@ -1771,6 +1813,7 @@ impl State {
             id,
             AppsOp::Upload {
                 server_id: server_id.clone(),
+                then_pick: draft.then_pick,
                 sound: ServerSound {
                     server_id,
                     user_id: self.apps_me(),
@@ -1861,6 +1904,15 @@ impl State {
         let Some(sound) = resolve_trigger(map, scope).and_then(|c| c.sound.clone()) else {
             return;
         };
+        self.preview_trigger_sound(fx, sound);
+    }
+
+    /// A join or leave sound heard alone, at the UI sound volume.
+    fn preview_trigger_sound(&mut self, fx: &mut Effects, sound: TriggerSound) {
+        let s = &self.apps.soundboard;
+        if !s.sounds_enabled {
+            return;
+        }
         let level = f64::from(s.sound_volume) / 100.0;
         let (source, volume) = match sound.source.as_str() {
             "default" => (ClipSource::Tone(sound.sound_id.clone()), sound.volume),
@@ -1877,11 +1929,12 @@ impl State {
             }
             _ => return,
         };
-        let server_key = wire::server_key(sound.server_id.as_deref());
+        // One key for every settings preview, so a new one replaces the
+        // last (a server sound and a tone would otherwise overlap).
         let name = format!("Preview: {}", sound.name);
         self.play_local(
             fx,
-            &server_key,
+            SETTINGS_PREVIEW_KEY,
             SETTINGS_PREVIEW,
             &name,
             source,
@@ -2412,7 +2465,11 @@ impl State {
             return true;
         };
         match op {
-            AppsOp::Upload { server_id, sound } => {
+            AppsOp::Upload {
+                server_id,
+                sound,
+                then_pick,
+            } => {
                 self.apps.soundboard.uploading = false;
                 match result {
                     Ok(ApiResponse::Uploaded(file)) => {
@@ -2434,16 +2491,25 @@ impl State {
                             .catalogs
                             .entry(server_id.clone())
                             .or_default();
+                        let sound_id = sound.id.clone();
                         list.retain(|s| s.id != sound.id);
                         list.insert(0, sound);
                         eprintln!("[soundboard] uploaded {}", catalog.name);
-                        self.send_app(
-                            fx,
-                            &AppCommand::SoundboardCatalogUpdated {
-                                server_key: wire::server_key(Some(&server_id)),
-                                sound: catalog,
-                            },
-                        );
+                        // The call's room hears of it when it is that
+                        // server's (a settings upload may be for another).
+                        if self.apps_call().is_some_and(|(call, _)| call == server_id) {
+                            self.send_app(
+                                fx,
+                                &AppCommand::SoundboardCatalogUpdated {
+                                    server_key: wire::server_key(Some(&server_id)),
+                                    sound: catalog,
+                                },
+                            );
+                        }
+                        if let Some((trigger, scope)) = then_pick {
+                            let pick = format!("server:{server_id}:{sound_id}");
+                            self.set_trigger(fx, trigger, &scope, None, Some(&pick), false);
+                        }
                     }
                     Ok(_) => {}
                     Err(error) => {
@@ -2917,6 +2983,7 @@ impl State {
                             emoji: sound.and_then(|x| x.emoji.clone()).unwrap_or_default(),
                             has_sound: sound.is_some(),
                             inherited: scope != ALL_SERVERS && own.is_none(),
+                            pick: sound.map(trigger_pick).unwrap_or_default(),
                         },
                     )
                 })
@@ -2956,6 +3023,15 @@ impl State {
             uploading: s.uploading,
             sound_error: s.error.clone(),
             catalogs,
+            upload_servers: self
+                .servers
+                .iter()
+                .filter(|server| {
+                    self.soundboard_rights(&server.id).0
+                        && self.upload_channel(&server.id).is_some()
+                })
+                .map(|server| server.id.clone())
+                .collect(),
             joins: rows(&s.joins),
             leaves: rows(&s.leaves),
             activity,
@@ -3098,6 +3174,16 @@ impl State {
     }
 }
 
+/// A chosen join or leave sound as its chooser entry (`trigger_sound`'s
+/// input).
+fn trigger_pick(sound: &TriggerSound) -> String {
+    match (sound.source.as_str(), sound.server_id.as_deref()) {
+        ("default", _) => format!("default:{}", sound.sound_id),
+        ("server", Some(server)) => format!("server:{server}:{}", sound.sound_id),
+        _ => String::new(),
+    }
+}
+
 enum PlaybackControl {
     Stop,
     Pause(bool),
@@ -3112,4 +3198,6 @@ struct UploadDraft {
     sound_name: String,
     emoji: String,
     volume: f64,
+    server_id: String,
+    then_pick: Option<(Trigger, String)>,
 }
