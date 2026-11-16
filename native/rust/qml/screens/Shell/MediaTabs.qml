@@ -22,19 +22,19 @@ Item {
     id: root
 
     required property string tab
-    readonly property var view: JSON.parse(Extras.media)
-    readonly property bool current: view.tab === tab && view.channelId === Nav.activeChannelId
-    readonly property var rows: current ? view.rows : []
-    readonly property bool loading: !current || (view.loading && rows.length === 0)
+    // The list and its state (MediaTabsCore, shared with the phone's
+    // MediaPage); MemberPanel makes the jump as the details close.
+    readonly property MediaTabsCore core: MediaTabsCore {
+        tab: root.tab
+    }
+    readonly property var rows: core.rows
+    readonly property bool loading: core.loading
 
     signal jumpRequested(string messageId)
 
     function load() {
-        Extras.loadMedia(root.tab)
+        core.load()
     }
-
-    Component.onCompleted: load()
-    onTabChanged: load()
 
     // Every tile, pictures and videos alike, opens the in-app viewer at its
     // place in the list (MemberList.tsx handleMediaClick): a video plays
@@ -56,9 +56,9 @@ Item {
     }
 
     function openLink(url) {
-        if (Invites.openLink(url))
+        if (root.core.openOwn(url))
             return
-        if (/^https?:/i.test(url))
+        if (root.core.isWeb(url))
             Files.openExternal(url)
     }
 
@@ -76,8 +76,8 @@ Item {
             id: tile
             required property var modelData
             required property int index
-            readonly property bool webp: /\.webp($|[?#])/i.test(modelData.url)
-            readonly property bool animated: !modelData.video && (modelData.gif === true || webp)
+            readonly property bool webp: root.core.isWebp(modelData.url)
+            readonly property bool animated: root.core.isAnimated(modelData)
             width: grid.cellWidth
             height: grid.cellHeight
             hoverEnabled: true
@@ -342,8 +342,8 @@ Item {
         spacing: 12
         Icon {
             anchors.horizontalCenter: parent.horizontalCenter
-            visible: root.view.error.length === 0
-            name: root.tab === "media" ? "image" : root.tab === "links" ? "link" : "fileText"
+            visible: !root.core.failed
+            name: root.core.emptyIcon
             size: Theme.icon2xl
             color: Theme.ink3
         }
@@ -352,15 +352,13 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
-            text: root.view.error.length > 0 ? root.view.error
-                : root.tab === "media" ? qsTr("No media shared yet")
-                : root.tab === "links" ? qsTr("No links shared yet") : qsTr("No files shared yet")
-            color: root.view.error.length > 0 ? Theme.dangerInk : Theme.ink2
+            text: root.core.failed ? root.core.error : root.core.emptyText
+            color: root.core.failed ? Theme.dangerInk : Theme.ink2
             font: Theme.type.description
         }
         KitButton {
             anchors.horizontalCenter: parent.horizontalCenter
-            visible: root.view.error.length > 0
+            visible: root.core.failed
             size: "sm"
             iconName: "refresh"
             text: qsTr("Try again")

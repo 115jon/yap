@@ -1187,6 +1187,18 @@ public final class NativeShim {
      * app's settings page opens instead.
      */
     public static void saveToGallery(final String path, final String mime) {
+        save(path, mime, false);
+    }
+
+    /**
+     * As saveToGallery, for any file: into Downloads/Yap (the Files app),
+     * its type kept. The result goes back through nativeImageSaved.
+     */
+    public static void saveToDownloads(final String path, final String mime) {
+        save(path, mime, true);
+    }
+
+    private static void save(final String path, final String mime, final boolean downloads) {
         final File file = new File(path);
         final File folder = file.getParentFile();
         if (activity == null || !file.isFile()) {
@@ -1202,7 +1214,7 @@ public final class NativeShim {
             return;
         }
         new Thread(() -> {
-            boolean ok = writeToGallery(file, mime);
+            boolean ok = writeToStore(file, mime, downloads);
             if (folder != null) deleteTree(folder);
             nativeImageSaved(path, ok ? SAVE_OK : SAVE_FAILED);
         }, "yap-save-image").start();
@@ -1238,31 +1250,37 @@ public final class NativeShim {
         return true;
     }
 
-    private static boolean writeToGallery(File file, String mime) {
+    private static boolean writeToStore(File file, String mime, boolean downloads) {
         ContentResolver resolver = activity.getContentResolver();
         String type = mime;
-        if (type == null || !type.startsWith("image/")) {
+        String wanted = downloads ? "" : "image/";
+        if (type == null || type.isEmpty() || !type.startsWith(wanted)) {
             String name = file.getName();
             int dot = name.lastIndexOf('.');
             String ext = dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);
             type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
-            if (type == null || !type.startsWith("image/")) type = "image/jpeg";
+            if (type == null || !type.startsWith(wanted)) {
+                type = downloads ? "application/octet-stream" : "image/jpeg";
+            }
         }
+        String folder = downloads ? Environment.DIRECTORY_DOWNLOADS : Environment.DIRECTORY_PICTURES;
         ContentValues values = new ContentValues();
         values.put(MediaStore.MediaColumns.DISPLAY_NAME, file.getName());
         values.put(MediaStore.MediaColumns.MIME_TYPE, type);
         Uri collection;
         if (Build.VERSION.SDK_INT >= 29) {
-            values.put(MediaStore.MediaColumns.RELATIVE_PATH,
-                    Environment.DIRECTORY_PICTURES + "/" + GALLERY_FOLDER);
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, folder + "/" + GALLERY_FOLDER);
             values.put(MediaStore.MediaColumns.IS_PENDING, 1);
-            collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+            collection = downloads
+                    ? MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                    : MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
         } else {
-            File dir = new File(Environment.getExternalStoragePublicDirectory(
-                    Environment.DIRECTORY_PICTURES), GALLERY_FOLDER);
+            File dir = new File(Environment.getExternalStoragePublicDirectory(folder), GALLERY_FOLDER);
             if (!dir.mkdirs() && !dir.isDirectory()) return false;
             values.put(MediaStore.MediaColumns.DATA, unusedFile(dir, file.getName()).getAbsolutePath());
-            collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+            collection = downloads
+                    ? MediaStore.Files.getContentUri("external")
+                    : MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
         }
         Uri uri;
         try {
