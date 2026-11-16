@@ -3990,7 +3990,7 @@ checksum = "2f45bb2c13fec6a6cb4c0f76a7e94839e110a14ec803ec2940777a94c347bc52"
 
 [[package]]
 name = "yap-anim"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "gif",
  "image",
@@ -4000,7 +4000,7 @@ dependencies = [
 
 [[package]]
 name = "yap-audio"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "reqwest 0.13.5",
  "rubato",
@@ -4014,7 +4014,7 @@ dependencies = [
 
 [[package]]
 name = "yap-cache"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "rusqlite",
  "serde",
@@ -4026,7 +4026,7 @@ dependencies = [
 
 [[package]]
 name = "yap-capture"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "png",
  "serde",
@@ -4039,7 +4039,7 @@ dependencies = [
 
 [[package]]
 name = "yap-core"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "futures-util",
  "keyring",
@@ -4057,7 +4057,7 @@ dependencies = [
 
 [[package]]
 name = "yap-games"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "flate2",
  "serde",
@@ -4069,7 +4069,7 @@ dependencies = [
 
 [[package]]
 name = "yap-hotkeys"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4078,7 +4078,7 @@ dependencies = [
 
 [[package]]
 name = "yap-protocol"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4087,7 +4087,7 @@ dependencies = [
 
 [[package]]
 name = "yap-realtime"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "futures-util",
  "serde_json",
@@ -4099,7 +4099,7 @@ dependencies = [
 
 [[package]]
 name = "yap-segment"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "ort",
  "windows-sys 0.61.2",
@@ -4108,7 +4108,7 @@ dependencies = [
 
 [[package]]
 name = "yap-speaker"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "ndk",
  "windows",
@@ -4117,7 +4117,7 @@ dependencies = [
 
 [[package]]
 name = "yap-ui"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "cxx",
  "cxx-qt",
@@ -4138,7 +4138,7 @@ dependencies = [
 
 [[package]]
 name = "yap-voice"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "anyhow",
  "cc",
@@ -4164,7 +4164,7 @@ dependencies = [
 
 [[package]]
 name = "yap-webm"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "thiserror 2.0.21",
  "webm-iterable",
@@ -4172,7 +4172,7 @@ dependencies = [
 
 [[package]]
 name = "yap_native"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "crash-handler",
  "cxx",
