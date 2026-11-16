@@ -10,7 +10,8 @@ import Yap.Ui
 // widget with its glyph, name, one line and the sizes it takes. A type at
 // its cap says "Added" (or "2 of 2"), a full board says so, and Custom
 // carries the Loud lock on a free plan: it can still be added, as a draft
-// only you see, as on the web.
+// only you see, as on the web. The rules are Yap.Ui BoardPickerCore's,
+// shared with the phone's catalogue sheet.
 T.Popup {
     id: picker
 
@@ -20,6 +21,13 @@ T.Popup {
     property int max: 12
 
     signal picked(string kind)
+
+    readonly property BoardPickerCore core: BoardPickerCore {
+        catalog: picker.catalog
+        categories: picker.categories
+        used: picker.used
+        max: picker.max
+    }
 
     width: 400
     // Never taller than the window (less the 8 px margins): a long list
@@ -83,7 +91,7 @@ T.Popup {
                     required property var modelData
                     width: column.width
                     spacing: 6
-                    readonly property var items: picker.catalog.filter(item => item.category === modelData.id)
+                    readonly property var items: picker.core.itemsOf(modelData.id)
                     Text {
                         textFormat: Text.PlainText
                         text: group.modelData.label
@@ -95,16 +103,15 @@ T.Popup {
                         delegate: Rectangle {
                             id: row
                             required property var modelData
-                            readonly property bool full: picker.used >= picker.max
-                            readonly property bool capped: modelData.remaining === 0
-                            readonly property bool can: !capped
+                            readonly property bool capped: picker.core.capped(modelData)
+                            readonly property bool can: picker.core.canAdd(modelData)
                             width: group.width
                             height: 56
                             radius: Theme.radius
                             color: rowHover.hovered && can ? Theme.tint2 : "transparent"
                             opacity: can ? 1 : 0.55
                             Accessible.role: Accessible.Button
-                            Accessible.name: modelData.name + (modelData.locked ? qsTr(", Loud") : "") + (capped ? (full ? qsTr(", board is full") : qsTr(", added")) : "")
+                            Accessible.name: picker.core.spokenName(modelData)
                             Accessible.description: modelData.blurb
 
                             Rectangle {
@@ -167,8 +174,7 @@ T.Popup {
                                 Text {
                                     textFormat: Text.PlainText
                                     anchors.verticalCenter: parent.verticalCenter
-                                    text: row.capped ? (row.full ? qsTr("Full") : row.modelData.max > 1 ? qsTr("%1 of %1").arg(row.modelData.max) : qsTr("Added"))
-                                        : row.modelData.locked ? qsTr("Loud") : ""
+                                    text: picker.core.tag(row.modelData)
                                     color: row.modelData.locked && !row.capped ? Theme.accentInk : Theme.ink3
                                     font: Theme.type.silk
                                 }
@@ -188,7 +194,7 @@ T.Popup {
 
             Text {
                 width: parent.width
-                visible: picker.catalog.some(item => item.locked)
+                visible: picker.core.anyLocked
                 textFormat: Text.PlainText
                 text: qsTr("Custom widgets show to others with Yap Loud. You can still build one now: it stays a draft only you see.")
                 wrapMode: Text.Wrap

@@ -44,6 +44,12 @@ export interface SocketTicketClaims {
    * VoiceIdentify names another participant (1013, retryable).
    */
   participant?: string;
+  /**
+   * Chat (global) tickets: the caller's Kova session id, never its token.
+   * When that session is signed out from another device, the gateway closes
+   * the sockets it admitted (`/sessions/signed-out`).
+   */
+  authSession?: string;
 }
 
 export interface SocketTicketVerificationContext {
@@ -242,12 +248,23 @@ function isValidClaims(value: SocketTicketClaims): boolean {
     (value.media === undefined ||
       (value.audience === "room" && isSocketTicketMedia(value.media))) &&
     (value.participant === undefined ||
-      (value.audience === "voice" && isParticipantId(value.participant)))
+      (value.audience === "voice" && isParticipantId(value.participant))) &&
+    (value.authSession === undefined || isAuthSessionId(value.authSession))
   );
 }
 
 function isSocketTicketMedia(value: unknown): value is SocketTicketMedia {
   return value === "issued" || value === "held";
+}
+
+/** A Kova session id: URL-safe, 1–200 chars. */
+export function isAuthSessionId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 1 &&
+    value.length <= 200 &&
+    ticketTokenPattern.test(value)
+  );
 }
 
 /** A participant id as tickets mint them (a nonce): URL-safe, 8–200 chars. */
@@ -283,6 +300,9 @@ function parseClaims(bytes: Uint8Array): SocketTicketClaims | null {
         : {}),
       ...(value.participant !== undefined
         ? { participant: value.participant as string }
+        : {}),
+      ...(value.authSession !== undefined
+        ? { authSession: value.authSession as string }
         : {}),
     };
 

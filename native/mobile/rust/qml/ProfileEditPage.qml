@@ -221,8 +221,6 @@ Rectangle {
         contentHeight: body.height + root.bottomSpace
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        flickDeceleration: Native.flingDeceleration
-        maximumFlickVelocity: Native.maxFlingVelocity
 
         Column {
             id: body

@@ -18,6 +18,36 @@ const DISCONNECT_URL = "https://internal/admin/disconnect-user";
 const DISCONNECT_PARTICIPANT_URL = "https://internal/disconnect-participant";
 const GATEWAY_TIMEOUT_MS = 3000;
 
+/** The global gateway's path for Kova sessions signed out elsewhere (meeting-room.ts SESSIONS_SIGNED_OUT_PATH). */
+const SESSIONS_SIGNED_OUT_URL = "https://internal/sessions/signed-out";
+
+/**
+ * Closes the chat sockets of `userId`'s Kova sessions that were just signed
+ * out from another device: one session, or every one but the caller's. The
+ * device's reconnect then finds its session gone and signs out. Sockets
+ * closed, or null when the gateway could not be asked. Call rooms are left
+ * alone: a call ends when its client signs out.
+ */
+export async function closeSignedOutSockets(
+  meetingRooms: Namespace,
+  userId: string,
+  signedOut: { sessionId: string } | { allExcept: string },
+): Promise<number | null> {
+  const response = await post(
+    meetingRooms,
+    "global-gateway",
+    SESSIONS_SIGNED_OUT_URL,
+    "sessionId" in signedOut
+      ? { user_id: userId, auth_session_id: signedOut.sessionId }
+      : { user_id: userId, except_auth_session_id: signedOut.allExcept },
+  );
+  if (!response) return null;
+  const body = (await response.json().catch(() => ({}))) as {
+    closed?: number;
+  };
+  return typeof body.closed === "number" ? body.closed : 0;
+}
+
 /** The global gateway's internal path that ends any ring between two users. */
 export const CALL_STOP_BETWEEN_PATH = "/calls/stop-between";
 

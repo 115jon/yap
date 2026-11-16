@@ -20,6 +20,32 @@ const claims: SocketTicketClaims = {
 };
 
 describe("socket tickets", () => {
+  it("carries a chat ticket's Kova session id, and refuses a malformed one", async () => {
+    const chat: SocketTicketClaims = {
+      ...claims,
+      audience: "global",
+      roomSlug: "global-gateway",
+      authSession: "kova_session-1",
+    };
+    const context = {
+      accessMode: "authenticated" as const,
+      audience: "global" as const,
+      now: chat.expiresAt - 1,
+      roomSlug: "global-gateway",
+    };
+
+    await expect(
+      verifySocketTicket(
+        await issueSocketTicket(chat, secret),
+        secret,
+        context,
+      ),
+    ).resolves.toEqual({ ok: true, claims: chat });
+    await expect(
+      issueSocketTicket({ ...chat, authSession: "a b" }, secret),
+    ).rejects.toThrow("invalid socket ticket");
+  });
+
   it("verifies a ticket for its bound room and audience", async () => {
     const ticket = await issueSocketTicket(claims, secret);
 

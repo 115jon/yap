@@ -187,8 +187,6 @@ Item {
                 clip: true
                 interactive: contentHeight > height
                 boundsBehavior: Flickable.StopAtBounds
-                maximumFlickVelocity: Native.maxFlingVelocity
-                flickDeceleration: Native.flingDeceleration
                 // The custom status field stays in view as the keyboard
                 // cuts the card shorter.
                 function reveal() {

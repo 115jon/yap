@@ -6,7 +6,10 @@ import Yap.Ui
 // Sessions (SessionsPanel.tsx): this device, then every other one, from
 // `/api/sessions`; placeholder rows while they load, the error with Try
 // again when they don't. Another device has Sign out, which asks first
-// (`DELETE /api/sessions {sessionId}`); a refusal stays in its strip.
+// (`DELETE /api/sessions {sessionId}`); a refusal stays in its strip. Below
+// them, Sign out all other devices asks the same way (`{allOthers: true}`).
+// The other-devices card is hidden while the sign-in service cannot list
+// them at all (`othersSupported` false).
 Column {
     id: root
 
@@ -71,6 +74,7 @@ Column {
     }
 
     SettingsCard {
+        available: root.model.othersSupported
         width: parent.width
         sectionId: "other-devices"
         SettingsRow {
@@ -85,7 +89,8 @@ Column {
                     width: parent.width
                     textFormat: Text.PlainText
                     text: root.failed ? qsTr("Your other devices show here once your sessions load.")
-                        : qsTr("No other devices are signed in.")
+                        : root.model.othersListed ? qsTr("No other devices are signed in.")
+                        : qsTr("Other signed-in devices can't be listed right now.")
                     wrapMode: Text.Wrap
                     color: Theme.ink2
                     font: Theme.type.description
@@ -106,6 +111,33 @@ Column {
                         Item { width: 1; height: other.index > 0 ? 12 : 0 }
                         SessionItem { modelData: other.modelData }
                         Item { width: 1; height: 12 }
+                    }
+                }
+                Column {
+                    visible: !root.failed && root.others.length > 0
+                    width: parent.width
+                    spacing: 12
+                    Rectangle { width: parent.width; height: 1; color: Theme.line }
+                    KitButton {
+                        visible: root.model.armed !== root.model.allOthers
+                        variant: "secondary"
+                        size: "sm"
+                        text: qsTr("Sign out all other devices")
+                        onClicked: root.model.arm(root.model.allOthers)
+                    }
+                    Loader {
+                        width: parent.width
+                        active: root.model.armed === root.model.allOthers
+                        sourceComponent: ConfirmStrip {
+                            consequence: root.others.length === 1
+                                ? qsTr("Your other device will be signed out and need to sign in again.")
+                                : qsTr("Your %1 other devices will be signed out and need to sign in again.").arg(root.others.length)
+                            confirmLabel: qsTr("Sign out all other devices")
+                            busy: root.model.busy(root.model.allOthers)
+                            error: root.model.errorFor(root.model.allOthers)
+                            onCancelled: root.model.disarm()
+                            onConfirmed: root.model.revoke(root.model.allOthers)
+                        }
                     }
                 }
             }

@@ -112,7 +112,8 @@ describe("socket ticket route", () => {
       }),
     ).resolves.toMatchObject({
       ok: true,
-      claims: { subject: "user-123" },
+      // The Kova session, so signing it out elsewhere closes this socket.
+      claims: { subject: "user-123", authSession: "session-user-123" },
     });
   });
 

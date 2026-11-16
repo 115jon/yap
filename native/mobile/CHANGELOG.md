@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/115jon/yap/compare/qt-android-v0.13.1...qt-android-v0.13.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **native:** lists follow the finger and fling as far as android's, and sheets drag from the handle ([#359](https://github.com/115jon/yap/issues/359)) ([b963c60](https://github.com/115jon/yap/commit/b963c609c74ec46cd7332a1c3d91b8c748ce1622))
+
 ## [0.13.1](https://github.com/115jon/yap/compare/qt-android-v0.13.0...qt-android-v0.13.1) (2026-11-15)
 
 

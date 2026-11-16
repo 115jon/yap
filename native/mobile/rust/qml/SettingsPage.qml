@@ -17,7 +17,8 @@ import Yap.Ui
 // (this phone's playback volume); Privacy and safety (Share my activity
 // and the media filter, saved to the account); Plan (the three plans,
 // read-only until billing ships); Devices (the account's sessions, others
-// signed out after a confirm, SessionsModel); About (and the open source
+// signed out one by one or all at once after a confirm, SessionsModel;
+// this phone alone while the sign-in service cannot list the others); About (and the open source
 // licences, LicensesPage); Sign out, confirmed in place; Delete account,
 // behind the username typed to confirm it (DeleteAccountState). Opened
 // from the account row at the drawer's foot.
@@ -139,8 +140,6 @@ Rectangle {
         contentHeight: body.height
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        flickDeceleration: Native.flingDeceleration
-        maximumFlickVelocity: Native.maxFlingVelocity
         // The sign-out question opens under the page's last key: the page
         // follows it down once, or its two keys sat under the gesture bar.
         property bool revealEnd: false
@@ -609,9 +608,55 @@ Rectangle {
                     }
                 }
                 Repeater {
-                    // This phone first.
-                    model: root.devices.failed ? [] : root.devices.ordered
+                    // This phone first. While the sign-in service cannot
+                    // list other devices at all, this phone alone.
+                    model: root.devices.failed ? []
+                        : root.devices.othersSupported ? root.devices.ordered
+                        : root.devices.current
                     delegate: SessionItem {}
+                }
+                Text {
+                    visible: !root.devices.loadingFirst && !root.devices.failed
+                        && root.devices.othersSupported && root.devices.others.length === 0
+                    width: parent.width
+                    topPadding: 8
+                    textFormat: Text.PlainText
+                    text: root.devices.othersListed ? qsTr("No other devices are signed in.")
+                        : qsTr("Other signed-in devices can't be listed right now.")
+                    wrapMode: Text.Wrap
+                    color: Theme.ink2
+                    font: Theme.type.description
+                }
+                // Sign out all other devices, asking first.
+                Column {
+                    readonly property bool armed: root.devices.armed === root.devices.allOthers
+                    visible: !root.devices.failed && root.devices.othersSupported
+                        && root.devices.others.length > 0
+                    width: parent.width
+                    topPadding: 8
+                    spacing: 8
+                    KitButton {
+                        width: parent.width
+                        visible: !parent.armed
+                        variant: "secondary"
+                        text: qsTr("Sign out all other devices")
+                        onClicked: root.devices.arm(root.devices.allOthers)
+                    }
+                    Loader {
+                        width: parent.width
+                        active: parent.armed
+                        visible: active
+                        sourceComponent: InlineConfirm {
+                            consequence: root.devices.others.length === 1
+                                ? qsTr("Your other device will be signed out and need to sign in again.")
+                                : qsTr("Your %1 other devices will be signed out and need to sign in again.").arg(root.devices.others.length)
+                            confirmLabel: qsTr("Sign out all other devices")
+                            busy: root.devices.busy(root.devices.allOthers)
+                            error: root.devices.errorFor(root.devices.allOthers)
+                            onCancelled: root.devices.disarm()
+                            onConfirmed: root.devices.revoke(root.devices.allOthers)
+                        }
+                    }
                 }
             }
 
@@ -1142,80 +1187,6 @@ Rectangle {
         Rectangle { x: parent.width * 0.42; y: parent.height * 0.58; width: parent.width * 0.26; height: 4; color: mock.t.text; opacity: 0.85 }
         Rectangle { x: parent.width * 0.42; y: parent.height * 0.72; width: parent.width * 0.4; height: 3; color: mock.t.dim }
         Rectangle { x: parent.width * 0.06 - 2; y: parent.height * 0.14; width: 4; height: 4; color: mock.t.accent }
-    }
-
-    // A choice of two to four (DESIGN.md Segmented rail): a 2 px ink-1 rail,
-    // cells split by 2 px rules, the chosen cell lit in primary-fill.
-    component Segmented: Rectangle {
-        id: rail
-        property var options: []
-        property int current: 0
-        property string accessibleName
-        signal picked(int index)
-        height: 48
-        radius: Theme.radius
-        color: "transparent"
-        border.width: 2
-        border.color: Theme.ink1
-        Accessible.role: Accessible.Grouping
-        Accessible.name: accessibleName
-        Row {
-            x: 2
-            y: 2
-            width: parent.width - 4
-            height: parent.height - 4
-            Repeater {
-                model: rail.options
-                delegate: Item {
-                    id: cell
-                    required property int index
-                    required property string modelData
-                    readonly property bool on: rail.current === index
-                    width: parent.width / rail.options.length
-                    height: parent.height
-                    Accessible.role: Accessible.RadioButton
-                    Accessible.name: modelData
-                    Accessible.checkable: true
-                    Accessible.checked: on
-                    Accessible.onPressAction: rail.picked(index)
-                    Rectangle {
-                        anchors.fill: parent
-                        color: cell.on ? Theme.primaryFill : cellTap.pressed ? Theme.tint2 : "transparent"
-                        Behavior on color { ColorAnimation { duration: Theme.dur1 } }
-                    }
-                    Rectangle {
-                        visible: cell.index > 0
-                        width: 2
-                        height: parent.height
-                        color: Theme.ink1
-                    }
-                    Text {
-                        anchors.centerIn: parent
-                        width: parent.width - 8
-                        horizontalAlignment: Text.AlignHCenter
-                        textFormat: Text.PlainText
-                        text: cell.modelData
-                        // A long label ("Friends & servers") shrinks a
-                        // little to fit a narrow phone before it elides.
-                        fontSizeMode: Text.HorizontalFit
-                        minimumPixelSize: 11
-                        minimumPointSize: 8
-                        elide: Text.ElideRight
-                        color: cell.on ? Theme.primaryFillInk : Theme.ink1
-                        font: Theme.type.controlSm
-                    }
-                    TapHandler {
-                        id: cellTap
-                        onTapped: {
-                            if (cell.on)
-                                return
-                            Native.haptic(Native.Tick)
-                            rail.picked(cell.index)
-                        }
-                    }
-                }
-            }
-        }
     }
 
     // A device signed in to the account: its glyph, name, where and when;

@@ -1,12 +1,12 @@
 import QtQuick
-import Yap.Mobile
 
-// A ListView with the platform's scroll feel. Fling speed and friction come
-// from the device (Android's ViewConfiguration through Native, in logical
-// px). At an edge, Android 12+ stretches the content instead of letting it
-// slide: the list keeps its content in place (StopAtBounds) and scales it
-// from the far edge by the overshoot, as EdgeEffect's stretch does. iOS
-// would keep Qt's own rubber band (DragAndOvershootBounds, FollowBoundsBehavior).
+// A ListView with the platform's scroll feel. The drag and the fling are
+// every Flickable's, set for the whole window (cpp/fling.h: the finger's
+// speed as Android reads it, and OverScroller's distance). At an edge,
+// Android 12+ stretches the content instead of letting it slide: the list
+// keeps its content in place (StopAtBounds) and scales it from the far edge
+// by the overshoot, as EdgeEffect's stretch does. iOS would keep Qt's own
+// rubber band (DragAndOvershootBounds, FollowBoundsBehavior).
 ListView {
     id: list
 
@@ -16,8 +16,6 @@ ListView {
 
     boundsBehavior: Flickable.DragAndOvershootBounds
     boundsMovement: stretch ? Flickable.StopAtBounds : Flickable.FollowBoundsBehavior
-    maximumFlickVelocity: Native.maxFlingVelocity
-    flickDeceleration: Native.flingDeceleration
     pixelAligned: true
     reuseItems: true
     cacheBuffer: Math.max(0, height)
