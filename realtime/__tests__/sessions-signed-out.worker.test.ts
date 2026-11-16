@@ -17,12 +17,8 @@ function gateway(name: string) {
 }
 
 /** One accepted chat socket for `subject`, from a ticket naming `authSession`. */
-async function chatSocket(
-  name: string,
-  subject: string,
-  authSession?: string,
-): Promise<{ socket: WebSocket; closed: Promise<number> }> {
-  const context = await createRealtimeAdmissionContext({
+async function chatTicket(subject: string, authSession?: string) {
+  return createRealtimeAdmissionContext({
     accessMode: "authenticated",
     audience: "global",
     expiresAt: Date.now() + 60_000,
@@ -31,15 +27,26 @@ async function chatSocket(
     subject,
     ...(authSession ? { authSession } : {}),
   });
-  const response = await gateway(name).fetch(
-    "https://internal/api/gateway?v=1",
-    {
-      headers: appendRealtimeAdmissionHeaders(
-        new Headers({ Upgrade: "websocket" }),
-        context,
-      ),
-    },
-  );
+}
+
+function upgrade(
+  name: string,
+  context: Awaited<ReturnType<typeof chatTicket>>,
+) {
+  return gateway(name).fetch("https://internal/api/gateway?v=1", {
+    headers: appendRealtimeAdmissionHeaders(
+      new Headers({ Upgrade: "websocket" }),
+      context,
+    ),
+  });
+}
+
+async function chatSocket(
+  name: string,
+  subject: string,
+  authSession?: string,
+): Promise<{ socket: WebSocket; closed: Promise<number> }> {
+  const response = await upgrade(name, await chatTicket(subject, authSession));
   const socket = response.webSocket;
   if (!socket) throw new Error(`no socket (${response.status})`);
   socket.accept();
@@ -102,6 +109,22 @@ describe("/sessions/signed-out", () => {
     expect(await closeCode(legacy.closed)).toBe(4004);
     expect(await closeCode(caller.closed)).toBeNull();
     caller.socket.close(1000);
+  });
+
+  it("refuses a ticket issued before its session was signed out, not a later one", async () => {
+    const name = `gateway-${crypto.randomUUID()}`;
+    const early = await chatTicket(USER, "sess-phone");
+    const keeper = await chatTicket(USER, "sess-here");
+
+    await signedOut(name, { user_id: USER, auth_session_id: "sess-phone" });
+
+    const refused = await upgrade(name, early);
+    expect(refused.status).toBe(401);
+    expect(refused.webSocket).toBeNull();
+    const kept = await upgrade(name, keeper);
+    expect(kept.webSocket).not.toBeNull();
+    kept.webSocket?.accept();
+    kept.webSocket?.close(1000);
   });
 
   it("refuses a body without a user or with both filters", async () => {

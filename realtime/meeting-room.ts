@@ -461,6 +461,8 @@ export const ADMIN_DISCONNECT_PATH = "/admin/disconnect-user";
  * `{ user_id, except_auth_session_id }` for all but the caller's.
  */
 export const SESSIONS_SIGNED_OUT_PATH = "/sessions/signed-out";
+/** A socket ticket's lifetime (SOCKET_TICKET_TTL_MS in socket-admission.ts). */
+const SIGNED_OUT_TICKET_WINDOW_MS = 60_000;
 
 function isPresenceStatus(status: string): status is PresenceStatus {
   return PRESENCE_STATUSES.has(status);
@@ -475,6 +477,17 @@ export class MeetingRoom extends DurableObject<Env> {
   private profileRequestCoordinator = new ProfileRequestCoordinator();
   /** Sockets whose close or error has been delivered (see handleIdentify). */
   private readonly closedSockets = new WeakSet<WebSocket>();
+  /**
+   * Recent sign-outs from another device (closeSignedOutSessions), kept for
+   * a ticket's lifetime so a ticket issued before one cannot reopen the
+   * socket it closed. In memory only: an eviction inside that minute lets
+   * such a ticket through, and its next reconnect then fails.
+   */
+  private signedOutTickets: Array<{
+    userId: string;
+    filter: { only: string } | { except: string };
+    at: number;
+  }> = [];
   private profileIdentities: Map<string, ProfileIdentity> = new Map();
   private resumableSessions: Map<string, WsAttachment> = new Map();
   /** Voice sessions another device took over: participantId -> replaced at. */
@@ -964,6 +977,9 @@ export class MeetingRoom extends DurableObject<Env> {
         return unauthorizedUpgrade();
       }
       const { admission } = admitted;
+      // A ticket issued before its session was signed out elsewhere: the
+      // client asks for a new one, which finds the session gone.
+      if (this.ticketSignedOut(admission)) return unauthorizedUpgrade();
       if (
         expectedAudience === "room" &&
         admission.accessMode === "authenticated" &&
@@ -1400,10 +1416,32 @@ export class MeetingRoom extends DurableObject<Env> {
    * client signs out, while a socket of a session still signed in (one
    * `except` could not tell apart) just reconnects.
    */
+  /** True when `admission`'s ticket predates its session's sign-out elsewhere. */
+  private ticketSignedOut(admission: {
+    subject: string;
+    expiresAt: number;
+    authSession?: string;
+  }): boolean {
+    const now = Date.now();
+    this.signedOutTickets = this.signedOutTickets.filter(
+      (entry) => now - entry.at < SIGNED_OUT_TICKET_WINDOW_MS,
+    );
+    const issuedAt = admission.expiresAt - SIGNED_OUT_TICKET_WINDOW_MS;
+    return this.signedOutTickets.some(
+      ({ userId, filter, at }) =>
+        userId === admission.subject &&
+        issuedAt <= at &&
+        ("only" in filter
+          ? admission.authSession === filter.only
+          : admission.authSession !== filter.except),
+    );
+  }
+
   private async closeSignedOutSessions(
     userId: string,
     filter: { only: string } | { except: string },
   ): Promise<number> {
+    this.signedOutTickets.push({ userId, filter, at: Date.now() });
     const signedOut = (
       attachment: Partial<WsAttachment> | null | undefined,
     ): boolean => {

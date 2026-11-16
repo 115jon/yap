@@ -289,6 +289,34 @@ describe("DELETE /api/sessions", () => {
     ]);
   });
 
+  it("still answers the revoke when the gateway cannot be asked", async () => {
+    const routes = sessionRoutes(
+      testServices({
+        auth: memoryAuth(SESSIONS, {
+          revokeAppSessions: () => Effect.succeed(Option.some(1)),
+        }),
+        db: createMockD1(),
+        env: {
+          MEETING_ROOM: {
+            idFromName: (name: string) => name,
+            get: () => ({
+              fetch: async () => {
+                throw new Error("gateway down");
+              },
+            }),
+          } as never,
+        },
+      }),
+    );
+
+    const response = await routes.DELETE({
+      request: call("DELETE", { sessionId: "phone" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await read(response)).toEqual({ revoked: 1 });
+  });
+
   it("refuses the caller's own session and an ambiguous or bad body", async () => {
     const { asked, db, routes } = revoking(Option.some(1));
 

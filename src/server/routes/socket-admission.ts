@@ -32,6 +32,7 @@ import type {
   Unauthenticated,
 } from "@/server/errors";
 import {
+  appSessionCredentials,
   signedInIdentity,
   signedInUserId,
   type KovaAuth,
@@ -112,16 +113,21 @@ export function admitGlobalSocket(
   Unauthenticated | AuthUnavailable | ServiceFailure,
   KovaAuth
 > {
-  return Effect.map(signedInIdentity(request), (identity) => ({
-    accessMode: "authenticated" as const,
-    roomSlug: "global-gateway",
-    subject: identity.user.id,
-    // A session id the ticket can carry: the gateway closes this socket when
-    // the session is signed out from another device.
-    ...(identity.session.id && isAuthSessionId(identity.session.id)
-      ? { authSession: identity.session.id }
-      : {}),
-  }));
+  // The credentials /api/sessions lists and revokes with (the bearer when
+  // there is one), so the ticket names the session a revoke will name.
+  return Effect.map(
+    signedInIdentity(request, appSessionCredentials(request)),
+    (identity) => ({
+      accessMode: "authenticated" as const,
+      roomSlug: "global-gateway",
+      subject: identity.user.id,
+      // A session id the ticket can carry: the gateway closes this socket when
+      // the session is signed out from another device.
+      ...(identity.session.id && isAuthSessionId(identity.session.id)
+        ? { authSession: identity.session.id }
+        : {}),
+    }),
+  );
 }
 
 function authorizeChannel(
