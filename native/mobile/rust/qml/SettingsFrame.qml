@@ -23,6 +23,9 @@ Rectangle {
     // Set before a confirm opens under the page's last key: the page
     // follows it down once, or its keys sat under the gesture bar.
     property bool revealEnd: false
+    // Asked before the header's Back closes the page: true when it handled
+    // Back itself (the hub clears a search first).
+    property var beforeBack: null
 
     // The window's insets where this page meets its edges, read once here.
     readonly property real leftInset: SafeArea.margins.left
@@ -54,7 +57,11 @@ Rectangle {
         topInset: root.topInset
         leftInset: root.leftInset
         rightInset: root.rightInset
-        onBackRequested: root.closeRequested()
+        onBackRequested: {
+            if (root.beforeBack && root.beforeBack())
+                return
+            root.closeRequested()
+        }
     }
 
     Flickable {

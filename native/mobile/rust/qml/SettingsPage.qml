@@ -1,6 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import Yap.Mobile
 import com.yap.mobile
 import Yap.Ui
@@ -46,35 +46,60 @@ SettingsFrame {
         { page: "SettingsNotificationsPage", label: qsTr("Push notifications"), words: "alerts notify" },
         { page: "SettingsNotificationsPage", label: qsTr("Sound effects"), words: "sounds volume chime mute" },
         { page: "SettingsNotificationsPage", label: qsTr("Notification sounds"), words: "mentions replies dm chime" },
+        { page: "SettingsNotificationsPage", label: qsTr("Sound volume"), words: "sounds loud" },
+        { page: "SettingsNotificationsPage", label: qsTr("Voice join and leave"), words: "sounds tone voice channel" },
+        { page: "SettingsNotificationsPage", label: qsTr("Connect and disconnect"), words: "sounds chime voice channel" },
+        { page: "SettingsNotificationsPage", label: qsTr("Mute and deafen"), words: "sounds click" },
+        { page: "SettingsNotificationsPage", label: qsTr("Calls"), words: "sounds ringback ringtone dm call" },
+        { page: "SettingsNotificationsPage", label: qsTr("Screen share"), words: "sounds stream tone" },
         { page: "SettingsNotificationsPage", label: qsTr("Test notification sound"), words: "sound play" },
         { page: "SettingsAboutPage", label: qsTr("Version"), words: "about update build" },
         { page: "SettingsAboutPage", label: qsTr("Open source licences"), words: "licenses notices" },
         { page: "SettingsAboutPage", label: qsTr("Privacy"), words: "policy" }
     ]
     readonly property bool hasSoundboard: Apps.soundboardVolume() >= 0
-    readonly property string query: searchField.text.trim().toLowerCase()
-    readonly property var results: query.length === 0 ? [] : index.filter(entry => {
-        if (entry.page === "SettingsSoundboardPage" && !hasSoundboard)
-            return false
-        const page = pages[entry.page]
-        return entry.label.toLowerCase().includes(query)
-            || page.title.toLowerCase().includes(query)
-            || entry.words.includes(query)
-    })
+    // The word in progress counts: the IME has not committed it.
+    readonly property string query: (searchField.text + searchField.preeditText).trim().toLowerCase()
+    // Every word of the query, each in the setting's name, its page's name
+    // or its keywords.
+    readonly property var results: {
+        if (query.length === 0)
+            return []
+        const words = query.split(/\s+/)
+        return index.filter(entry => {
+            if (entry.page === "SettingsSoundboardPage" && !hasSoundboard)
+                return false
+            const haystack = (entry.label + " " + pages[entry.page].title + " " + entry.words).toLowerCase()
+            return words.every(word => haystack.includes(word))
+        })
+    }
     readonly property string status: Session.meStatus.length > 0 ? Session.meStatus : "online"
     readonly property string themeName: Settings.theme === "system" ? qsTr("Match system") : Theme.themeLabel(Theme.themeId)
 
     // A search takes Back (and its predictive gesture) to clear it, while
     // this page is on top.
-    readonly property bool holdsLayer: query.length > 0 && StackView.status === StackView.Active
+    // Activating too: a second Back while the page over this one leaves
+    // still clears first.
+    readonly property bool holdsLayer: query.length > 0
+        && (StackView.status === StackView.Active || StackView.status === StackView.Activating)
     onHoldsLayerChanged: holdsLayer ? Native.pushBackLayer(root) : Native.popBackLayer(root)
     Component.onDestruction: Native.popBackLayer(root)
     function backProgressed(progress) {}
     function backCancelled() {}
     function backInvoked() {
+        clearSearch()
+    }
+    function clearSearch() {
         searchField.text = ""
         searchField.focus = false
         Qt.inputMethod.hide()
+    }
+    // The header's Back too.
+    beforeBack: () => {
+        if (query.length === 0)
+            return false
+        clearSearch()
+        return true
     }
 
     function open(page) {
@@ -94,7 +119,7 @@ SettingsFrame {
             leftPadding: 44
             rightPadding: clearKey.visible ? 48 : 14
             placeholderText: qsTr("Search settings")
-            inputMethodHints: Qt.ImhNoAutoUppercase
+            inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
             EnterKey.type: Qt.EnterKeySearch
             Accessible.name: qsTr("Search settings")
             onAccepted: Qt.inputMethod.hide()
@@ -110,10 +135,13 @@ SettingsFrame {
             id: clearKey
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            visible: searchField.text.length > 0
+            visible: root.query.length > 0
             iconName: "close"
             tip: qsTr("Clear search")
-            onClicked: searchField.text = ""
+            onClicked: {
+                Qt.inputMethod.reset()
+                searchField.text = ""
+            }
         }
     }
 
@@ -137,7 +165,7 @@ SettingsFrame {
             topPadding: 24
             horizontalAlignment: Text.AlignHCenter
             textFormat: Text.PlainText
-            text: qsTr("No settings match “%1”.").arg(searchField.text.trim())
+            text: qsTr("No settings match “%1”.").arg(root.query)
             wrapMode: Text.Wrap
             color: Theme.ink3
             font: Theme.type.description
