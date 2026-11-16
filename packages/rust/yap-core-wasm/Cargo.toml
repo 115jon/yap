@@ -1,0 +1,13 @@
+[package]
+name = "yap-core-wasm"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "yap-core's pure half (no I/O, no async runtime) built for wasm32-unknown-unknown."
+
+[dependencies]
+# No `runtime`: no tokio, reqwest, keyring or SQLite. CI checks this crate
+# for wasm32-unknown-unknown, which keeps the store and the rules modules
+# free of them.
+yap-core = { path = "../../../native/rust/crates/yap-core", default-features = false }
