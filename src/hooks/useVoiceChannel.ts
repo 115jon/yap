@@ -109,10 +109,7 @@ import {
 } from "@ralph/voice";
 import { createSfuPublicationReconciler } from "@/lib/voice/publication-media";
 import {
-  attachScreenPreview,
   createWebScreenShare,
-  getCustomPickerDesktopStream,
-  screenShareVideoConstraints,
   screenSourceState,
   webScreenShareRequest,
   type WebScreenCapture,
@@ -182,13 +179,6 @@ function failedOn(
 function disposeVoiceActivityStream(stream: MediaStream | null): void {
   stream?.getTracks().forEach((track) => track.stop());
 }
-
-export {
-  getCustomPickerDesktopStream,
-  resolvePreviewStartState,
-  type PreviewStartDecision,
-  type ScreenSharePreviewKind,
-} from "@/lib/voice/screen-share-sources";
 
 export interface ScreenVideoSubscriptionDecisionInput {
   /** The viewer pressed Watch on this share. */
@@ -280,109 +270,6 @@ export function removeRemoteTrackStream(
   }
 
   return next;
-}
-
-export interface PreviewResumeOutcome {
-  /** Resulting `isPreviewHidden` for the session after the resume attempt. */
-  isPreviewHidden: boolean;
-  /** Stream to attach to the local tile (newly opened, CEF fallback, or null). */
-  stream: MediaStream | null;
-  /** True when a fresh native preview stream was opened (caller wires `onended`). */
-  openedStream: boolean;
-  /** True when a native reopen was attempted but failed (caller may warn). */
-  reopenFailed: boolean;
-}
-
-export interface PreviewHideDecision {
-  /** True when the current preview stream must stay alive while hidden. */
-  preserveStream: boolean;
-}
-
-export type PreviewResumeMechanism =
-  | "desktop-loopback"
-  | "reopen-selected-source"
-  | "restore-existing-stream";
-
-/**
- * Chooses how the local preview should resume.
- *
- * Desktop hook/native shares must continue to use the dedicated loopback PC so
- * the preview reflects the actual encoded desktop output. Browser shares do not
- * have that native loopback path, so they either reopen a reusable selected
- * source or simply restore the already-captured local stream.
- */
-export function resolvePreviewResumeMechanism(args: {
-  isHookActive: boolean;
-  hasReusablePreviewSource: boolean;
-}): PreviewResumeMechanism {
-  if (args.isHookActive) return "desktop-loopback";
-  if (args.hasReusablePreviewSource) return "reopen-selected-source";
-  return "restore-existing-stream";
-}
-
-/**
- * Pure hide decision for the local preview pause flow.
- *
- * Browser `getDisplayMedia` shares have no reusable source identifier, so once
- * their preview stream is stopped there is nothing we can reopen without
- * prompting the user again. In that case we hide the tile but keep the current
- * preview stream alive. Native/hook-backed previews can be recreated later, so
- * they still tear down the preview stream to save resources.
- */
-export function resolvePreviewHideState(args: {
-  isHookActive: boolean;
-  hasReusablePreviewSource: boolean;
-}): PreviewHideDecision {
-  return {
-    preserveStream: !args.isHookActive && !args.hasReusablePreviewSource,
-  };
-}
-
-/**
- * Pure resume decision for the `togglePreviewHidden` un-hide path (Req 5.3).
- *
- * When the share is native and the source is known (`canReopenNativePreview`),
- * the existing flow reopens the CEF preview for that source via the injected
- * `openPreviewStream` opener. On success the preview is shown with the new
- * stream; on failure it stays paused. For a non-native (CEF) share the existing
- * share's local stream is restored without opening anything new.
- *
- * Extracting the decision here keeps the side-effectful pieces (ref assignment,
- * `onended` teardown wiring, dispatch) in the hook while making the resume
- * branching unit-testable without a DOM or the full hook environment.
- */
-export async function resolvePreviewResume(args: {
-  /** True when we know the native source and can reopen its CEF preview. */
-  canReopenNativePreview: boolean;
-  /** Opens a CEF preview MediaStream for the known native source. */
-  openPreviewStream: () => Promise<MediaStream | null>;
-  /** Existing preview/local stream to fall back to when nothing is reopened. */
-  existingPreviewStream: MediaStream | null;
-}): Promise<PreviewResumeOutcome> {
-  if (args.canReopenNativePreview) {
-    try {
-      const stream = await args.openPreviewStream();
-      return {
-        isPreviewHidden: false,
-        stream,
-        openedStream: true,
-        reopenFailed: false,
-      };
-    } catch {
-      return {
-        isPreviewHidden: true,
-        stream: null,
-        openedStream: false,
-        reopenFailed: true,
-      };
-    }
-  }
-  return {
-    isPreviewHidden: false,
-    stream: args.existingPreviewStream,
-    openedStream: false,
-    reopenFailed: false,
-  };
 }
 
 export interface UseVoiceChannelProps {
@@ -1060,7 +947,6 @@ export function useVoiceChannel({
     createLocalMediaOwner(),
   );
   const standbyMediaOwnerRef = useRef<LocalMediaOwner | null>(null);
-  const alwaysShowStreamPreviewRef = useRef(false);
   // The one owner of this session's screen share (packages/voice,
   // SCREEN_SHARE.md); it publishes through the client's reconciler.
   // Created for a client on first use and disposed by the teardown.
@@ -1086,27 +972,19 @@ export function useVoiceChannel({
         sfu: client,
         publication: publicationFor(client),
         participantId: () => myIdRef.current,
-        alwaysShowPreview: () => alwaysShowStreamPreviewRef.current,
       });
       share.subscribe(
         (event: ScreenShareEvent<WebScreenSource, WebScreenCapture>) => {
           switch (event.type) {
             case "started":
             case "updated": {
-              const { request, capture, path } = event.share;
+              const { request, capture } = event.share;
               voiceDispatch({
                 type: "SET_SCREEN_SHARING",
                 payload: true,
                 stream: capture.stream,
                 audio: request.audio,
               });
-              if (event.type === "started" && path === "native") {
-                voiceDispatch({
-                  type: "SET_PREVIEW_HIDDEN",
-                  payload: capture.previewHidden,
-                  stream: capture.stream,
-                });
-              }
               voiceDispatch({
                 type: "SET_SCREEN_QUALITY",
                 payload: request.quality,
@@ -1261,7 +1139,6 @@ export function useVoiceChannel({
       };
     }),
   );
-  alwaysShowStreamPreviewRef.current = alwaysShowStreamPreview;
   const noiseReductionSupported = isNoiseReductionProviderSupported(
     noiseReductionProvider,
   );
@@ -2689,7 +2566,7 @@ export function useVoiceChannel({
         // The media session has no publications: everything wanted is
         // published afresh, including a capture sync's track still on its
         // way (it commits its own processor when its publish converges) and
-        // a browser screen share (a native one reconnects on its own).
+        // a browser screen share.
         const publication = existingPublication(sfu);
         if (publication) {
           // The republish applies the mute as it is now.
@@ -4324,88 +4201,16 @@ export function useVoiceChannel({
   );
 
   // ── Toggle local preview capture ───────────────────────────────────────────
-  // Stops or restarts the CEF preview MediaStream entirely for performance.
-  // The native hardware share pipeline is NOT touched — only the local tile feed.
+  // Hides the local tile's feed or shows it again. A getDisplayMedia capture
+  // has no source id to reopen from, so the stream stays alive while hidden.
   const togglePreviewHidden = useCallback(async () => {
-    const client = sfuRef.current;
-    const share = existingScreenShare(client);
-    const capture = share?.live?.capture ?? null;
-    const hasReusablePreviewSource =
-      !!currentScreenSource?.sourceId && isScreenSharing;
-    if (!isPreviewHidden) {
-      const hideDecision = resolvePreviewHideState({
-        isHookActive: false,
-        hasReusablePreviewSource,
-      });
-      if (hideDecision.preserveStream) {
-        voiceDispatch({
-          type: "SET_PREVIEW_HIDDEN",
-          payload: true,
-          stream: capture?.stream ?? localScreenStream,
-        });
-        return;
-      }
-      // Stop all preview tracks to release the WGC session.
-      if (capture) {
-        capture.stream?.getTracks().forEach((t) => {
-          t.onended = null;
-          t.stop();
-        });
-        attachScreenPreview(capture, null, null);
-      }
-      voiceDispatch({
-        type: "SET_PREVIEW_HIDDEN",
-        payload: true,
-        stream: null,
-      });
-      return;
-    }
-
-    const resumeMechanism = resolvePreviewResumeMechanism({
-      isHookActive: false,
-      hasReusablePreviewSource,
-    });
-    // Re-open preview only when the selected desktop source is reusable.
-    const src = currentScreenSource;
-    const outcome = await resolvePreviewResume({
-      canReopenNativePreview: resumeMechanism === "reopen-selected-source",
-      existingPreviewStream: capture?.stream ?? localScreenStream,
-      openPreviewStream: async () => {
-        const { browserVideoConstraints, desktopMandatoryConstraints } =
-          screenShareVideoConstraints(currentScreenQuality);
-        return getCustomPickerDesktopStream({
-          sourceId: src!.sourceId!,
-          captureId: src!.captureId ?? undefined,
-          sourceKind: src!.sourceKind ?? undefined,
-          withAudio: false,
-          videoConstraints: browserVideoConstraints,
-          desktopMandatoryConstraints,
-        });
-      },
-    });
-
-    if (outcome.openedStream && outcome.stream && capture) {
-      // Closing the source still ends the share.
-      attachScreenPreview(capture, outcome.stream, (ended) =>
-        share?.captureEnded(ended),
-      );
-    } else if (outcome.reopenFailed) {
-      // Non-fatal; stay hidden if re-open fails.
-      previewLog.warn("Failed to re-open preview stream");
-    }
+    const capture = existingScreenShare(sfuRef.current)?.live?.capture ?? null;
     voiceDispatch({
       type: "SET_PREVIEW_HIDDEN",
-      payload: outcome.isPreviewHidden,
-      stream: outcome.stream,
+      payload: !isPreviewHidden,
+      stream: capture?.stream ?? localScreenStream,
     });
-  }, [
-    existingScreenShare,
-    isPreviewHidden,
-    isScreenSharing,
-    currentScreenSource,
-    currentScreenQuality,
-    localScreenStream,
-  ]);
+  }, [existingScreenShare, isPreviewHidden, localScreenStream]);
 
   const onToggleAlwaysShowStreamPreview = useCallback(() => {
     const nextAlwaysShowStreamPreview = !alwaysShowStreamPreview;
@@ -4434,9 +4239,7 @@ export function useVoiceChannel({
     togglePreviewHidden,
   ]);
 
-  // Browser shares flip their audio track in place; a native share restarts
-  // its pipeline with the flag flipped (serialized, latest wins). Nothing
-  // to do without a share.
+  // A share flips its audio track in place. Nothing to do without a share.
   const onToggleStreamAudio = useCallback(async () => {
     const share = existingScreenShare(sfuRef.current);
     if (!share) return;
@@ -4518,9 +4321,8 @@ export function useVoiceChannel({
       });
 
       if (isScreenSharing) {
-        // For CEF screen share: localScreenStream has live tracks → render the preview.
-        // For native HW share: localScreenStream is null (no CEF MediaStream) → still
-        //   add the tile so the UI shows a "Sharing" placeholder.
+        // localScreenStream has live tracks → render the preview; otherwise
+        // still add the tile so the UI shows a "Sharing" placeholder.
         const localScreenHasTracks =
           !!localScreenStream &&
           localScreenStream

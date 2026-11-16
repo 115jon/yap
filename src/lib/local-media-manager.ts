@@ -582,8 +582,8 @@ export function releaseLocalStream(owner?: LocalMediaOwner): void {
 // ── Private: post-acquire label refresh ───────────────────────────────────
 /**
  * Re-enumerate devices after getUserMedia has been called.
- * Desktop CEF's enumerateDevices returns full labels after the stream is
- * acquired and its permission/content setting has been recorded.
+ * enumerateDevices returns full labels once the stream is acquired and the
+ * permission has been recorded.
  * This is called automatically after every successful acquire.
  */
 async function refreshDeviceLabels(state: LocalMediaState): Promise<void> {
@@ -609,7 +609,7 @@ async function refreshDeviceLabels(state: LocalMediaState): Promise<void> {
     });
 
     lmLog.debug(
-      `Labels refreshed: ${resolvedMics.length} mics, ${snapshot.videoInputs.length} cams, ${snapshot.audioOutputs.length} outputs, ${snapshot.nativeAudioDevices.length} native audio devices`,
+      `Labels refreshed: ${resolvedMics.length} mics, ${snapshot.videoInputs.length} cams, ${snapshot.audioOutputs.length} outputs`,
     );
   } catch {
     // Not critical — labels stay stale from the slow initial enumerate

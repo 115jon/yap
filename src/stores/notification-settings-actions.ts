@@ -35,8 +35,6 @@ export function createNotificationSettingsActions(
   get: () => ChatState,
   dispatch: (action: ChatAction) => void,
   options: {
-    /** Called after any change, so the tray badge can follow. */
-    onChange?: () => void;
     /** Reports a save that failed (a toast in the app). */
     onSaveError?: () => void;
   } = {},
@@ -70,7 +68,6 @@ export function createNotificationSettingsActions(
         nowMs: Math.max(now(), next),
       });
       scheduleExpiry();
-      options.onChange?.();
     }, delay);
   };
 
@@ -80,7 +77,6 @@ export function createNotificationSettingsActions(
     );
     dispatch({ type: "UPSERT_NOTIFICATION_SETTING", setting, nowMs: now() });
     scheduleExpiry();
-    options.onChange?.();
   };
 
   const loadNotificationSettings = async () => {
@@ -112,7 +108,6 @@ export function createNotificationSettingsActions(
         nowMs: now(),
       });
       scheduleExpiry();
-      options.onChange?.();
     } catch {
       /* keep what we have; the next Ready loads again */
     }
@@ -151,7 +146,6 @@ export function createNotificationSettingsActions(
             nowMs: now(),
           });
           scheduleExpiry();
-          options.onChange?.();
         }
       }
       options.onSaveError?.();
