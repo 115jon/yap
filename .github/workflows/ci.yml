@@ -74,6 +74,8 @@ jobs:
             rust:
               - 'native/rust/Cargo.toml'
               - 'native/rust/crates/yap-protocol/**'
+              - 'native/rust/crates/yap-core/**'
+              - 'native/rust/crates/yap-cache/**'
               - 'packages/rust/**'
               - 'packages/protocol/src/generated/**'
               - '.github/workflows/ci.yml'
@@ -92,7 +94,9 @@ jobs:
         uses: ./.github/actions/setup-pnpm
 
       - name: Setup Rust
-        run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy --target wasm32-unknown-unknown
+          rustup default stable
 
       # packages/protocol/src/generated is written from yap-protocol's Rust
       # types (packages/rust/protocol-ts). Regenerate and fail on any change,
@@ -108,6 +112,12 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --manifest-path packages/rust/Cargo.toml --all-targets -- -D warnings
+
+      # yap-core without its `runtime` feature (the store and the rules
+      # modules) must build for the browser: no tokio, reqwest, keyring or
+      # SQLite in it. packages/rust/yap-core-wasm depends on exactly that.
+      - name: Check yap-core's pure half builds for wasm
+        run: cargo clippy --manifest-path packages/rust/Cargo.toml -p yap-core-wasm --target wasm32-unknown-unknown -- -D warnings
 
   quality:
     name: quality

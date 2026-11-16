@@ -12,15 +12,19 @@
 //! dedicated thread and coalesces writes (write-behind).
 
 pub mod catalog;
+#[cfg(feature = "sqlite")]
 mod db;
 pub mod profile;
 pub mod settings;
 pub mod voice;
+#[cfg(feature = "sqlite")]
 mod writer;
 
 use std::path::PathBuf;
 
+#[cfg(feature = "sqlite")]
 pub use db::{Batch, Cache, SCHEMA_VERSION};
+#[cfg(feature = "sqlite")]
 pub use writer::Writer;
 pub use yap_protocol::rest::{ChannelsResponse, Message, Server, User};
 
@@ -33,6 +37,7 @@ pub const CHANNEL_WINDOWS: usize = 32;
 /// Why a cache call failed. Callers treat every error as "no cache".
 #[derive(Debug, thiserror::Error)]
 pub enum CacheError {
+    #[cfg(feature = "sqlite")]
     #[error("cache database: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("cache file: {0}")]

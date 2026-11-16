@@ -7,11 +7,18 @@ publish.workspace = true
 description = "Yap local snapshot cache: the last session's me, servers, channels, route and newest messages per user, in SQLite. No tokens."
 
 [dependencies]
-rusqlite = { version = "0.41", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"], optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 yap-protocol.workspace = true
+
+[features]
+# The SQLite store ([`Cache`], [`Writer`]). Without it the crate is the
+# snapshot types and the JSON settings files, which build for
+# wasm32-unknown-unknown (yap-core's pure half, packages/rust).
+default = ["sqlite"]
+sqlite = ["dep:rusqlite"]
 
 [dev-dependencies]
 tempfile = "3.27.0"

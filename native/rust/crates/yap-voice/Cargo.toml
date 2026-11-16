@@ -37,7 +37,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uuid = { version = "1.29.0", features = ["v4"] }
-yap-cache = { workspace = true, optional = true }
+yap-cache = { workspace = true, features = ["sqlite"], optional = true }
 # Path dependencies, not the workspace ones: those keep their default
 # (native-tls, desktop) features, and the mobile app builds this crate on
 # rustls without them.

@@ -3,8 +3,8 @@
 //! attachment or an X GIF, and its identity (`provider:id`), which is how
 //! the star knows it is already saved.
 
-use reqwest::Url;
 use serde_json::{json, Value};
+use url::Url;
 
 /// What a favourite is made from (`AnimatedFavoriteInput` and
 /// `AttachmentFavoriteInput`).

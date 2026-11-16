@@ -11,6 +11,7 @@
 //! switches channels. `YAP_FIXTURE_MEDIA=<http base>` serves the avatars
 //! and media from a local server (`tools/p4/media-server.mjs`).
 
+#[cfg(feature = "runtime")]
 pub mod soak;
 
 use yap_protocol::rest::{
