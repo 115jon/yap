@@ -467,6 +467,8 @@ pub enum ApiRequest {
     Deletion(crate::account_deletion::DeletionRequest),
     /// `GET /api/site-config`: the announcement banner.
     SiteConfig,
+    /// `/api/connections`.
+    Connections(crate::connections::ConnectionsRequest),
 }
 
 /// A page of messages, oldest first.
@@ -532,6 +534,7 @@ pub enum ApiResponse {
     Deletion(crate::account_deletion::DeletionStatus),
     /// The announcement `/api/site-config` says runs, if any.
     SiteConfig(Option<Box<crate::site_config::Announcement>>),
+    Connections(crate::connections::ConnectionsResponse),
     /// A call whose body the store does not read.
     Done,
 }
@@ -595,6 +598,7 @@ impl ApiRequest {
             Self::Notify(request) => request.method(),
             Self::Backgrounds(request) => request.method(),
             Self::Deletion(request) => request.method(),
+            Self::Connections(request) => request.method(),
             Self::RemoveEmbeds { .. } => Method::Patch,
             Self::VoiceMove(_) => Method::Post,
             Self::SendMessage { .. }
@@ -652,6 +656,7 @@ impl ApiRequest {
             Self::Notify(request) => request.path(),
             Self::Backgrounds(request) => request.path(),
             Self::Deletion(request) => request.path(),
+            Self::Connections(request) => request.path(),
             Self::RemoveEmbeds { channel_id, .. } => format!("/api/channels/{channel_id}/messages"),
             Self::VoiceMove(_) => "/api/voice/move".into(),
             Self::Me => "/api/users/me".into(),
@@ -784,6 +789,7 @@ impl ApiRequest {
             Self::Notify(request) => request.body(),
             Self::Backgrounds(request) => request.body(),
             Self::Deletion(request) => request.body(),
+            Self::Connections(request) => request.body(),
             Self::VoiceMove(request) => serde_json::to_value(request).unwrap_or(Value::Null),
             Self::RemoveEmbeds { message_id, .. } => {
                 json!({ "message_id": message_id, "embeds": [] })
@@ -898,6 +904,7 @@ impl ApiRequest {
             Self::Notify(request) => ApiResponse::Notify(request.decode(body)?),
             Self::Backgrounds(request) => ApiResponse::Backgrounds(request.decode(body)?),
             Self::Deletion(request) => ApiResponse::Deletion(request.decode(body)?),
+            Self::Connections(request) => ApiResponse::Connections(request.decode(body)?),
             Self::RemoveEmbeds { .. } | Self::VoiceMove(_) => ApiResponse::Done,
             Self::Me => ApiResponse::Me(Box::new(
                 serde_json::from_value(body).map_err(|e| ApiError::Decode(format!("me: {e}")))?,

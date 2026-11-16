@@ -17,6 +17,7 @@ pub mod collectibles;
 pub mod color;
 pub mod command_menu;
 pub mod config;
+pub mod connections;
 pub mod custom_sounds;
 pub mod dm_permission;
 pub mod emoji;

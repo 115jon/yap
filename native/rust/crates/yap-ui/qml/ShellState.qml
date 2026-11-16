@@ -185,6 +185,9 @@ QtObject {
     // page, channel settings, the create dialogs, the invite dialog, and
     // the confirms for deletes and moderation.
     signal serverSettingsRequested(string page)
+    // Settings › Connections (the Deadlock widget's Link Steam): the
+    // desktop opens the settings panel, the phone its Connections page.
+    signal connectionsRequested()
     signal channelSettingsRequested(string channelId)
     signal createChannelRequested(string categoryId)
     signal createCategoryRequested()

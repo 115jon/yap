@@ -6,6 +6,7 @@ mod apps;
 mod backgrounds;
 mod board;
 mod calls;
+mod connections;
 mod deletion;
 mod embeds;
 mod extras;
@@ -155,6 +156,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
     state.sync_apps(&mut fx);
     state.sync_deletion(&mut fx);
     state.sync_site(&mut fx);
+    state.sync_connections(&mut fx);
     fx.0
 }
 
@@ -1852,6 +1854,7 @@ impl State {
             Command::Extras(command) => self.on_extras(fx, command),
             Command::Deletion(command) => self.on_deletion(fx, command),
             Command::Site(command) => self.on_site(fx, command),
+            Command::Connections(command) => self.on_connections(fx, command),
             Command::Calls(command) => self.on_calls(fx, command),
             Command::Quit => {
                 if let Some(standby) = self.standby.take() {
@@ -2089,6 +2092,7 @@ impl State {
 
     fn end_session(&mut self, fx: &mut Effects, revoke: bool) {
         self.reset_deletion();
+        self.reset_connections();
         // A sign-out during a drop: the next session starts with no strip.
         self.set_link(fx, 0, false);
         // The next account registers the push token again.
@@ -2267,6 +2271,7 @@ impl State {
         let mut answer = Some(result);
         if self.route_deletion_http(fx, id, &mut answer)
             || self.route_site_http(fx, id, &mut answer)
+            || self.route_connections_http(fx, id, &mut answer)
             || self.route_push_http(id, &mut answer)
             || self.route_prefetch(fx, id, &mut answer)
             || self.route_calls_http(fx, id, &mut answer)

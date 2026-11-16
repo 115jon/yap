@@ -149,6 +149,9 @@ public:
   // `title` heads the share sheet (empty: the system's own).
   Q_INVOKABLE void share(const QString& text, const QString& title = QString()) const;
   Q_INVOKABLE void copy(const QString& text) const;
+  // An http(s) page in a Custom Tab over the app (BrowserTab.java): the
+  // browser's own session, and back returns here. Elsewhere, the browser.
+  Q_INVOKABLE void openTab(const QString& url) const;
   // The third-party licence texts the APK carries (assets/licenses, put
   // there by tools/gather-licenses.ps1): their file names, the notices
   // first, and one file's text ("" for a name not among them).
