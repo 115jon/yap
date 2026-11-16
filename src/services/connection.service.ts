@@ -9,6 +9,14 @@
  * A link state is a random nonce (in the provider's return_to) and a random
  * browser binding (an HttpOnly cookie). Only their SHA-256 hashes are
  * stored, and a state is consumed by DELETE … RETURNING, so it works once.
+ *
+ * A link the native apps start (their session is not a browser cookie)
+ * reaches the system browser through the begin route instead: it carries
+ * the nonce and the binding once, and rebindLinkState swaps the binding for
+ * a fresh one that only that browser's cookie knows, so the URL works once.
+ * Its callback links nothing: holdLinkResult keeps the verified account
+ * behind a one-time code the browser hands to the app, and takeLinkResult
+ * gives it only to the account that started the link (migration 050).
  */
 
 import {
@@ -130,6 +138,126 @@ export async function createLinkState(
       ),
   ]);
   return { nonce, binding, returnTo };
+}
+
+export type ReboundLinkState =
+  | { ok: true; binding: string; returnTo: string }
+  | { ok: false; reason: "expired" | "invalid" };
+
+/**
+ * The begin route's half of a native link: a state still pending, for this
+ * provider, whose binding matches, gets a new binding (returned, for the
+ * browser's cookie). The old binding no longer matches anything, so the
+ * begin URL works once. The state itself stays for the callback.
+ */
+export async function rebindLinkState(
+  db: D1Database,
+  input: {
+    provider: ConnectionProvider;
+    nonce: unknown;
+    binding: unknown;
+    now?: number;
+  },
+): Promise<ReboundLinkState> {
+  if (!isLinkToken(input.nonce) || !isLinkToken(input.binding)) {
+    return { ok: false, reason: "invalid" };
+  }
+  const now = input.now ?? Date.now();
+  const binding = randomToken();
+  const [stateHash, oldHash, newHash] = await Promise.all([
+    sha256Hex(input.nonce),
+    sha256Hex(input.binding),
+    sha256Hex(binding),
+  ]);
+  const row = await db
+    .prepare(
+      `UPDATE connection_link_states SET binding_hash = ?
+       WHERE state_hash = ? AND provider = ? AND binding_hash = ? AND expires_at >= ?
+       RETURNING return_to`,
+    )
+    .bind(newHash, stateHash, input.provider, oldHash, now)
+    .first<{ return_to: string }>();
+  if (!row) return { ok: false, reason: "expired" };
+  return { ok: true, binding, returnTo: row.return_to };
+}
+
+/**
+ * Keeps a verified account for the app that started the link, behind a
+ * one-time code (returned; only its hash is stored).
+ */
+export async function holdLinkResult(
+  db: D1Database,
+  input: {
+    userId: string;
+    provider: ConnectionProvider;
+    account: VerifiedAccount;
+    now?: number;
+  },
+): Promise<string> {
+  const now = input.now ?? Date.now();
+  const code = randomToken();
+  await db.batch([
+    db
+      .prepare(`DELETE FROM connection_link_results WHERE expires_at < ?`)
+      .bind(now),
+    db
+      .prepare(
+        `INSERT INTO connection_link_results (code_hash, user_id, provider, account, expires_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        await sha256Hex(code),
+        input.userId,
+        input.provider,
+        JSON.stringify(input.account),
+        now + LINK_STATE_TTL_MS,
+        new Date(now).toISOString(),
+      ),
+  ]);
+  return code;
+}
+
+export type TakenLinkResult =
+  | { ok: true; account: VerifiedAccount }
+  | { ok: false; reason: "expired" | "invalid" | "other_account" };
+
+/**
+ * Claims a held result, once: unknown, used, expired, another provider's,
+ * or started by another account all fail, and the code is gone either way.
+ */
+export async function takeLinkResult(
+  db: D1Database,
+  input: {
+    userId: string;
+    provider: ConnectionProvider;
+    code: unknown;
+    now?: number;
+  },
+): Promise<TakenLinkResult> {
+  if (!isLinkToken(input.code)) return { ok: false, reason: "invalid" };
+  const now = input.now ?? Date.now();
+  const row = await db
+    .prepare(
+      `DELETE FROM connection_link_results WHERE code_hash = ?
+       RETURNING user_id, provider, account, expires_at`,
+    )
+    .bind(await sha256Hex(input.code))
+    .first<{
+      user_id: string;
+      provider: string;
+      account: string;
+      expires_at: number;
+    }>();
+  if (!row || row.expires_at < now) return { ok: false, reason: "expired" };
+  if (row.provider !== input.provider) return { ok: false, reason: "invalid" };
+  if (row.user_id !== input.userId) {
+    return { ok: false, reason: "other_account" };
+  }
+  try {
+    return { ok: true, account: JSON.parse(row.account) as VerifiedAccount };
+  } catch {
+    return { ok: false, reason: "invalid" };
+  }
 }
 
 export type ConsumedLinkState =

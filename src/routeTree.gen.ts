@@ -103,7 +103,9 @@ import { Route as ApiMessagesIdShareRouteImport } from './routes/api/messages/$i
 import { Route as ApiInvitesCodeJoinRouteImport } from './routes/api/invites/$code/join'
 import { Route as ApiEmojisAssetsIdRouteImport } from './routes/api/emojis/assets/$id'
 import { Route as ApiConnectionsProviderStartRouteImport } from './routes/api/connections/$provider/start'
+import { Route as ApiConnectionsProviderCompleteRouteImport } from './routes/api/connections/$provider/complete'
 import { Route as ApiConnectionsProviderCallbackRouteImport } from './routes/api/connections/$provider/callback'
+import { Route as ApiConnectionsProviderBeginRouteImport } from './routes/api/connections/$provider/begin'
 import { Route as ApiChannelsIdVoiceStatusMediaRouteImport } from './routes/api/channels/$id/voice-status-media'
 import { Route as ApiChannelsIdVoiceStatusRouteImport } from './routes/api/channels/$id/voice-status'
 import { Route as ApiChannelsIdVoiceDisconnectRouteImport } from './routes/api/channels/$id/voice-disconnect'
@@ -614,10 +616,22 @@ const ApiConnectionsProviderStartRoute =
     path: '/start',
     getParentRoute: () => ApiConnectionsProviderRoute,
   } as any)
+const ApiConnectionsProviderCompleteRoute =
+  ApiConnectionsProviderCompleteRouteImport.update({
+    id: '/complete',
+    path: '/complete',
+    getParentRoute: () => ApiConnectionsProviderRoute,
+  } as any)
 const ApiConnectionsProviderCallbackRoute =
   ApiConnectionsProviderCallbackRouteImport.update({
     id: '/callback',
     path: '/callback',
+    getParentRoute: () => ApiConnectionsProviderRoute,
+  } as any)
+const ApiConnectionsProviderBeginRoute =
+  ApiConnectionsProviderBeginRouteImport.update({
+    id: '/begin',
+    path: '/begin',
     getParentRoute: () => ApiConnectionsProviderRoute,
   } as any)
 const ApiChannelsIdVoiceStatusMediaRoute =
@@ -897,7 +911,9 @@ export interface FileRoutesByFullPath {
   '/api/channels/$id/voice-disconnect': typeof ApiChannelsIdVoiceDisconnectRoute
   '/api/channels/$id/voice-status': typeof ApiChannelsIdVoiceStatusRoute
   '/api/channels/$id/voice-status-media': typeof ApiChannelsIdVoiceStatusMediaRoute
+  '/api/connections/$provider/begin': typeof ApiConnectionsProviderBeginRoute
   '/api/connections/$provider/callback': typeof ApiConnectionsProviderCallbackRoute
+  '/api/connections/$provider/complete': typeof ApiConnectionsProviderCompleteRoute
   '/api/connections/$provider/start': typeof ApiConnectionsProviderStartRoute
   '/api/emojis/assets/$id': typeof ApiEmojisAssetsIdRoute
   '/api/invites/$code/join': typeof ApiInvitesCodeJoinRoute
@@ -1028,7 +1044,9 @@ export interface FileRoutesByTo {
   '/api/channels/$id/voice-disconnect': typeof ApiChannelsIdVoiceDisconnectRoute
   '/api/channels/$id/voice-status': typeof ApiChannelsIdVoiceStatusRoute
   '/api/channels/$id/voice-status-media': typeof ApiChannelsIdVoiceStatusMediaRoute
+  '/api/connections/$provider/begin': typeof ApiConnectionsProviderBeginRoute
   '/api/connections/$provider/callback': typeof ApiConnectionsProviderCallbackRoute
+  '/api/connections/$provider/complete': typeof ApiConnectionsProviderCompleteRoute
   '/api/connections/$provider/start': typeof ApiConnectionsProviderStartRoute
   '/api/emojis/assets/$id': typeof ApiEmojisAssetsIdRoute
   '/api/invites/$code/join': typeof ApiInvitesCodeJoinRoute
@@ -1160,7 +1178,9 @@ export interface FileRoutesById {
   '/api/channels/$id/voice-disconnect': typeof ApiChannelsIdVoiceDisconnectRoute
   '/api/channels/$id/voice-status': typeof ApiChannelsIdVoiceStatusRoute
   '/api/channels/$id/voice-status-media': typeof ApiChannelsIdVoiceStatusMediaRoute
+  '/api/connections/$provider/begin': typeof ApiConnectionsProviderBeginRoute
   '/api/connections/$provider/callback': typeof ApiConnectionsProviderCallbackRoute
+  '/api/connections/$provider/complete': typeof ApiConnectionsProviderCompleteRoute
   '/api/connections/$provider/start': typeof ApiConnectionsProviderStartRoute
   '/api/emojis/assets/$id': typeof ApiEmojisAssetsIdRoute
   '/api/invites/$code/join': typeof ApiInvitesCodeJoinRoute
@@ -1293,7 +1313,9 @@ export interface FileRouteTypes {
     | '/api/channels/$id/voice-disconnect'
     | '/api/channels/$id/voice-status'
     | '/api/channels/$id/voice-status-media'
+    | '/api/connections/$provider/begin'
     | '/api/connections/$provider/callback'
+    | '/api/connections/$provider/complete'
     | '/api/connections/$provider/start'
     | '/api/emojis/assets/$id'
     | '/api/invites/$code/join'
@@ -1424,7 +1446,9 @@ export interface FileRouteTypes {
     | '/api/channels/$id/voice-disconnect'
     | '/api/channels/$id/voice-status'
     | '/api/channels/$id/voice-status-media'
+    | '/api/connections/$provider/begin'
     | '/api/connections/$provider/callback'
+    | '/api/connections/$provider/complete'
     | '/api/connections/$provider/start'
     | '/api/emojis/assets/$id'
     | '/api/invites/$code/join'
@@ -1555,7 +1579,9 @@ export interface FileRouteTypes {
     | '/api/channels/$id/voice-disconnect'
     | '/api/channels/$id/voice-status'
     | '/api/channels/$id/voice-status-media'
+    | '/api/connections/$provider/begin'
     | '/api/connections/$provider/callback'
+    | '/api/connections/$provider/complete'
     | '/api/connections/$provider/start'
     | '/api/emojis/assets/$id'
     | '/api/invites/$code/join'
@@ -2340,11 +2366,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiConnectionsProviderStartRouteImport
       parentRoute: typeof ApiConnectionsProviderRoute
     }
+    '/api/connections/$provider/complete': {
+      id: '/api/connections/$provider/complete'
+      path: '/complete'
+      fullPath: '/api/connections/$provider/complete'
+      preLoaderRoute: typeof ApiConnectionsProviderCompleteRouteImport
+      parentRoute: typeof ApiConnectionsProviderRoute
+    }
     '/api/connections/$provider/callback': {
       id: '/api/connections/$provider/callback'
       path: '/callback'
       fullPath: '/api/connections/$provider/callback'
       preLoaderRoute: typeof ApiConnectionsProviderCallbackRouteImport
+      parentRoute: typeof ApiConnectionsProviderRoute
+    }
+    '/api/connections/$provider/begin': {
+      id: '/api/connections/$provider/begin'
+      path: '/begin'
+      fullPath: '/api/connections/$provider/begin'
+      preLoaderRoute: typeof ApiConnectionsProviderBeginRouteImport
       parentRoute: typeof ApiConnectionsProviderRoute
     }
     '/api/channels/$id/voice-status-media': {
@@ -2610,13 +2650,17 @@ const ApiCameraBackgroundsRouteWithChildren =
   ApiCameraBackgroundsRoute._addFileChildren(ApiCameraBackgroundsRouteChildren)
 
 interface ApiConnectionsProviderRouteChildren {
+  ApiConnectionsProviderBeginRoute: typeof ApiConnectionsProviderBeginRoute
   ApiConnectionsProviderCallbackRoute: typeof ApiConnectionsProviderCallbackRoute
+  ApiConnectionsProviderCompleteRoute: typeof ApiConnectionsProviderCompleteRoute
   ApiConnectionsProviderStartRoute: typeof ApiConnectionsProviderStartRoute
 }
 
 const ApiConnectionsProviderRouteChildren: ApiConnectionsProviderRouteChildren =
   {
+    ApiConnectionsProviderBeginRoute: ApiConnectionsProviderBeginRoute,
     ApiConnectionsProviderCallbackRoute: ApiConnectionsProviderCallbackRoute,
+    ApiConnectionsProviderCompleteRoute: ApiConnectionsProviderCompleteRoute,
     ApiConnectionsProviderStartRoute: ApiConnectionsProviderStartRoute,
   }
 
