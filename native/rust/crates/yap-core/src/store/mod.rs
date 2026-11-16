@@ -57,9 +57,9 @@ pub use reduce::{reduce, SUSPEND_GRACE};
 pub use search::{SearchCommand, SearchRequest, SearchScope, SearchState, SearchView};
 pub use state::{
     live_status, pending_id, Divider, GatewayStatus, GifBrowse, MessageLog, Outgoing, Phase,
-    Presence, ProfileStep, ReactionChange, ServerChannels, Session, SettingsState, State, Typer,
-    Upload, UploadStatus, VoiceCall, VoicePrefs, WarmCache, WarmEntry, WARM_BYTES, WARM_ENTRIES,
-    WARM_FRESH_MS, WARM_WINDOW,
+    Presence, ProfileStep, ReactionChange, ServerChannels, Session, SessionsOthers, SettingsState,
+    State, Typer, Upload, UploadStatus, VoiceCall, VoicePrefs, WarmCache, WarmEntry, WARM_BYTES,
+    WARM_ENTRIES, WARM_FRESH_MS, WARM_WINDOW,
 };
 pub use time::LocalOffset;
 pub use view::{

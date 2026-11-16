@@ -166,4 +166,84 @@ describe("SessionsPanel", () => {
     );
     expect(screen.queryByText(/D1_ERROR/)).toBeNull();
   });
+
+  it("hides other devices while the sign-in service cannot list them at all", async () => {
+    vi.mocked(apiGet).mockResolvedValue({
+      sessions: [{ id: "here", isCurrent: true, lastActiveAt: Date.now() }],
+      othersListed: false,
+      othersSupported: false,
+    });
+
+    render(<SessionsPanel />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(/Active now/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Other signed-in devices can't be listed/),
+    ).toBeNull();
+    expect(screen.queryByText("No other devices are signed in.")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Sign out all other devices" }),
+    ).toBeNull();
+  });
+
+  it("signs out all other devices after asking, and keeps this one", async () => {
+    vi.mocked(apiGet).mockResolvedValue({
+      sessions: [
+        {
+          id: "here",
+          isCurrent: true,
+          activity: { browserName: "Firefox", deviceType: "Desktop" },
+        },
+        {
+          id: "phone",
+          isCurrent: false,
+          lastActiveAt: Date.now(),
+          activity: { browserName: "Yap mobile app", deviceType: "Mobile" },
+        },
+        {
+          id: "laptop",
+          isCurrent: false,
+          lastActiveAt: Date.now(),
+          activity: { browserName: "Chrome", deviceType: "Desktop" },
+        },
+      ],
+      othersListed: true,
+      othersSupported: true,
+    });
+    vi.mocked(apiDelete).mockReset().mockResolvedValue({ revoked: 2 });
+
+    render(<SessionsPanel />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Sign out all other devices" }),
+    );
+    expect(
+      screen.getByRole("group", {
+        name: "Your 2 other devices will be signed out and need to sign in again.",
+      }),
+    ).toBeInTheDocument();
+    expect(apiDelete).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Sign out all other devices" }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiDelete).toHaveBeenCalledWith("/api/sessions", {
+      allOthers: true,
+    });
+    expect(screen.queryByText(/Yap mobile app/)).toBeNull();
+    expect(screen.getByText("No other devices are signed in.")).toBeVisible();
+    expect(screen.getByText(/Desktop · Firefox/)).toBeVisible();
+  });
 });

@@ -183,6 +183,11 @@ pub mod qobject {
         #[cxx_name = "revokeSession"]
         fn revoke_session(self: &Extras, session_id: &QString);
 
+        /// Signs out every other device; `account.revoking` is `*` meanwhile.
+        #[qinvokable]
+        #[cxx_name = "revokeOtherSessions"]
+        fn revoke_other_sessions(self: &Extras);
+
         #[qinvokable]
         #[cxx_name = "channelInvite"]
         fn channel_invite(self: &Extras, server_id: &QString, channel_id: &QString);
@@ -477,6 +482,10 @@ impl qobject::Extras {
 
     pub fn revoke_session(&self, session_id: &QString) {
         send(ExtrasCommand::RevokeSession(text(session_id)));
+    }
+
+    pub fn revoke_other_sessions(&self) {
+        send(ExtrasCommand::RevokeOtherSessions);
     }
 
     pub fn channel_invite(&self, server_id: &QString, channel_id: &QString) {

@@ -48,6 +48,11 @@ pub mod qobject {
         #[qproperty(QString, sessions_error, cxx_name = "sessionsError")]
         /// `[{id, title, detail, mobile, current}]`.
         #[qproperty(QString, sessions)]
+        /// False: other devices could not be listed this time.
+        #[qproperty(bool, sessions_others_listed, cxx_name = "sessionsOthersListed")]
+        /// False: other devices cannot be listed or signed out at all yet
+        /// (the sign-in service lacks it): the pages hide that part.
+        #[qproperty(bool, sessions_others_supported, cxx_name = "sessionsOthersSupported")]
         #[qproperty(QString, shares_state, cxx_name = "sharesState")]
         #[qproperty(QString, shares_error, cxx_name = "sharesError")]
         /// `[{id, url, author, content, status, createdAt, expiresAt, views}]`
@@ -273,6 +278,8 @@ pub struct SettingsRust {
     sessions_state: QString,
     sessions_error: QString,
     sessions: QString,
+    sessions_others_listed: bool,
+    sessions_others_supported: bool,
     shares_state: QString,
     shares_error: QString,
     shares: QString,
@@ -491,6 +498,10 @@ fn apply(mut object: Pin<&mut qobject::Settings>, view: &SettingsView) {
     o.as_mut().set_sessions(q(&sessions_json(view, now)));
     o.as_mut().set_sessions_error(q(view.sessions.error()));
     o.as_mut().set_sessions_state(q(view.sessions.state()));
+    o.as_mut()
+        .set_sessions_others_listed(!view.sessions_others_unlisted);
+    o.as_mut()
+        .set_sessions_others_supported(!view.sessions_others_unsupported);
     o.as_mut().set_shares(q(&shares_json(view, now)));
     o.as_mut().set_shares_error(q(view.shares.error()));
     o.as_mut().set_shares_state(q(view.shares.state()));

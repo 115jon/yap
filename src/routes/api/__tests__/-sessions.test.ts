@@ -24,6 +24,7 @@ const SECRET = "raw-session-token-value";
 interface Answer {
   sessions: SessionRow[];
   othersListed: boolean;
+  othersSupported: boolean;
   revoked?: number | null;
   code?: string;
 }
@@ -103,6 +104,7 @@ describe("GET /api/sessions", () => {
 
     expect(response.status).toBe(200);
     expect(body.othersListed).toBe(true);
+    expect(body.othersSupported).toBe(true);
     expect(body.sessions.map((s) => s.id)).toEqual([
       CURRENT,
       "phone",
@@ -141,6 +143,8 @@ describe("GET /api/sessions", () => {
 
     expect(response.status).toBe(200);
     expect(body.othersListed).toBe(false);
+    // Kova has no app-session endpoints: clients hide other devices.
+    expect(body.othersSupported).toBe(false);
     expect(body.sessions).toHaveLength(1);
     expect(body.sessions[0]).toMatchObject({
       id: CURRENT,
@@ -170,6 +174,8 @@ describe("GET /api/sessions", () => {
 
     expect(down.status).toBe(200);
     expect(body.othersListed).toBe(false);
+    // A failed list is not a missing feature.
+    expect(body.othersSupported).toBe(true);
     expect(body.sessions.map((s) => s.id)).toEqual([CURRENT]);
   });
 
@@ -207,9 +213,25 @@ describe("GET /api/sessions", () => {
 });
 
 describe("DELETE /api/sessions", () => {
+  /** The global gateway's stub: records what it was asked to close. */
+  function gatewayNamespace() {
+    const posts: Array<{ name: string; url: string; body: unknown }> = [];
+    const namespace = {
+      idFromName: (name: string) => name,
+      get: (name: string) => ({
+        fetch: async (url: string, init: RequestInit) => {
+          posts.push({ name, url, body: JSON.parse(String(init.body)) });
+          return Response.json({ closed: 1 });
+        },
+      }),
+    };
+    return { namespace, posts };
+  }
+
   function revoking(answer: Option.Option<number | null>) {
     const asked: AppSessionRevocation[] = [];
     const db = createMockD1();
+    const gateway = gatewayNamespace();
     const routes = sessionRoutes(
       testServices({
         auth: memoryAuth(SESSIONS, {
@@ -219,13 +241,14 @@ describe("DELETE /api/sessions", () => {
           },
         }),
         db,
+        env: { MEETING_ROOM: gateway.namespace as never },
       }),
     );
-    return { asked, db, routes };
+    return { asked, db, routes, posts: gateway.posts };
   }
 
-  it("signs out one other session and deletes its push tokens", async () => {
-    const { asked, db, routes } = revoking(Option.some(1));
+  it("signs out one other session, deletes its push tokens and closes its chat sockets", async () => {
+    const { asked, db, routes, posts } = revoking(Option.some(1));
 
     const response = await routes.DELETE({
       request: call("DELETE", { sessionId: "phone" }),
@@ -239,10 +262,17 @@ describe("DELETE /api/sessions", () => {
       /DELETE FROM push_tokens\s+WHERE user_id = \? AND \(session_id = \? OR session_id IS NULL\)/,
       ["user-1", "phone"],
     );
+    expect(posts).toEqual([
+      {
+        name: "global-gateway",
+        url: "https://internal/sessions/signed-out",
+        body: { user_id: "user-1", auth_session_id: "phone" },
+      },
+    ]);
   });
 
-  it("signs out all other sessions and keeps only the caller's push tokens", async () => {
-    const { asked, db, routes } = revoking(Option.some(3));
+  it("signs out all other sessions and keeps only the caller's push tokens and sockets", async () => {
+    const { asked, db, routes, posts } = revoking(Option.some(3));
 
     const response = await routes.DELETE({
       request: call("DELETE", { allOthers: true }),
@@ -254,6 +284,37 @@ describe("DELETE /api/sessions", () => {
       /DELETE FROM push_tokens\s+WHERE user_id = \? AND \(session_id != \? OR session_id IS NULL\)/,
       ["user-1", CURRENT],
     );
+    expect(posts.map((post) => post.body)).toEqual([
+      { user_id: "user-1", except_auth_session_id: CURRENT },
+    ]);
+  });
+
+  it("still answers the revoke when the gateway cannot be asked", async () => {
+    const routes = sessionRoutes(
+      testServices({
+        auth: memoryAuth(SESSIONS, {
+          revokeAppSessions: () => Effect.succeed(Option.some(1)),
+        }),
+        db: createMockD1(),
+        env: {
+          MEETING_ROOM: {
+            idFromName: (name: string) => name,
+            get: () => ({
+              fetch: async () => {
+                throw new Error("gateway down");
+              },
+            }),
+          } as never,
+        },
+      }),
+    );
+
+    const response = await routes.DELETE({
+      request: call("DELETE", { sessionId: "phone" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await read(response)).toEqual({ revoked: 1 });
   });
 
   it("refuses the caller's own session and an ambiguous or bad body", async () => {
@@ -281,7 +342,7 @@ describe("DELETE /api/sessions", () => {
   });
 
   it("answers 501 while Kova cannot revoke another session", async () => {
-    const { db, routes } = revoking(Option.none());
+    const { db, routes, posts } = revoking(Option.none());
 
     const response = await routes.DELETE({
       request: call("DELETE", { sessionId: "phone" }),
@@ -290,6 +351,7 @@ describe("DELETE /api/sessions", () => {
     expect(response.status).toBe(501);
     expect((await read(response)).code).toBe("SESSION_REVOKE_UNSUPPORTED");
     expect(db.calls).toHaveLength(0);
+    expect(posts).toEqual([]);
   });
 });
 
@@ -356,7 +418,9 @@ describe("Kova's app-session endpoints over HTTP", () => {
       new Response("404 Not Found", { status: 404 }),
     );
     const listed = await missing.routes.GET({ request: call("GET") });
-    expect((await read(listed)).othersListed).toBe(false);
+    const answer = await read(listed);
+    expect(answer.othersListed).toBe(false);
+    expect(answer.othersSupported).toBe(false);
 
     for (const status of [401, 403]) {
       const refused = kovaAnswering(
@@ -394,6 +458,7 @@ describe("Kova's app-session endpoints over HTTP", () => {
 
     expect(response.status).toBe(200);
     expect(body.othersListed).toBe(false);
+    expect(body.othersSupported).toBe(true);
     expect(body.sessions).toHaveLength(1);
   });
 

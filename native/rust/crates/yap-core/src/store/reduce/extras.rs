@@ -11,7 +11,7 @@ use crate::api::ApiError;
 use crate::settings::describe_api_error;
 use crate::store::extras::{
     self as x, created_ms, ExtrasCommand, ExtrasOp, ExtrasRequest, ExtrasResponse, ExtrasView,
-    Fetch, MediaTab, UsernameCheck,
+    Fetch, MediaTab, UsernameCheck, ALL_OTHER_SESSIONS,
 };
 use crate::store::state::State;
 use crate::store::time::{format_rfc3339, parse_rfc3339};
@@ -247,6 +247,20 @@ impl State {
                         self.extras.revoking = Some(session_id);
                         self.extras.revoke_error = None;
                     }
+                }
+            }
+            ExtrasCommand::RevokeOtherSessions => {
+                if self.extras.revoking.is_none()
+                    && self
+                        .extras_http(
+                            fx,
+                            ExtrasRequest::RevokeOtherSessions,
+                            ExtrasOp::RevokeOtherSessions,
+                        )
+                        .is_some()
+                {
+                    self.extras.revoking = Some(ALL_OTHER_SESSIONS.to_owned());
+                    self.extras.revoke_error = None;
                 }
             }
             ExtrasCommand::ChannelInvite {
@@ -1027,6 +1041,21 @@ impl State {
                     Err(error) => {
                         self.extras.revoke_error =
                             Some((session, describe_api_error(&error, "sign out this device")));
+                    }
+                }
+            }
+            (ExtrasOp::RevokeOtherSessions, result) => {
+                self.extras.revoking = None;
+                match result {
+                    Ok(_) => {
+                        self.forget_other_session_rows();
+                        self.sync_settings(fx);
+                    }
+                    Err(error) => {
+                        self.extras.revoke_error = Some((
+                            ALL_OTHER_SESSIONS.to_owned(),
+                            describe_api_error(&error, "sign out your other devices"),
+                        ));
                     }
                 }
             }

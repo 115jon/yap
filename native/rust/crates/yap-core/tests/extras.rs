@@ -5,7 +5,9 @@
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
-use yap_core::store::extras::{ExtrasCommand, ExtrasRequest, ExtrasView, MediaTab};
+use yap_core::store::extras::{
+    ExtrasCommand, ExtrasRequest, ExtrasView, MediaTab, ALL_OTHER_SESSIONS,
+};
 use yap_core::store::{
     reduce, ApiRequest, ApiResponse, Command, Dispatch, Effect, GatewayEvent, Input, ProfileDraft,
     RequestId, State, ViewUpdate,
@@ -461,6 +463,37 @@ fn a_refused_revoke_should_stay_on_its_row() {
         (
             "s2",
             "Unable to sign out this device. Try again in a moment."
+        )
+    );
+}
+
+#[test]
+fn signing_out_all_other_devices_should_ask_for_all_others_and_say_why_it_failed() {
+    let mut client = Client::online();
+    let fx = client.command(ExtrasCommand::RevokeOtherSessions);
+    let (id, request) = extras_request(&fx);
+    assert_eq!(request.body(), json!({ "allOthers": true }));
+    assert_eq!(
+        view(&fx).expect("view").account.revoking,
+        ALL_OTHER_SESSIONS
+    );
+    // One sign-out at a time.
+    assert!(client
+        .command(ExtrasCommand::RevokeSession("s2".into()))
+        .iter()
+        .all(|e| !matches!(e, Effect::Http { .. })));
+    let fx = client.answer(id, Err(http_error(502, "refused")));
+    let account = view(&fx).expect("view").account;
+    assert_eq!(
+        (
+            account.revoking.as_str(),
+            account.revoke_error_id.as_str(),
+            account.revoke_error.as_str()
+        ),
+        (
+            "",
+            ALL_OTHER_SESSIONS,
+            "Unable to sign out your other devices. Try again in a moment."
         )
     );
 }
