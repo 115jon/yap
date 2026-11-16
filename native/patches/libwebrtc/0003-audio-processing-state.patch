@@ -1,0 +1,32 @@
+--- a/src/native/peer_connection_factory.rs
++++ b/src/native/peer_connection_factory.rs
+@@ -85,6 +85,12 @@
+         self.sys_handle.zero_playout_delay_enabled()
+     }
+ 
++    /// Yap patch (native/patches/libwebrtc): the shared audio processing
++    /// module's state as one log line.
++    pub fn audio_processing_state(&self) -> String {
++        self.sys_handle.audio_processing_state()
++    }
++
+     pub fn create_peer_connection(
+         &self,
+         config: RtcConfiguration,
+--- a/src/peer_connection_factory.rs
++++ b/src/peer_connection_factory.rs
+@@ -114,6 +114,14 @@
+     pub fn get_rtp_receiver_capabilities(&self, media_type: MediaType) -> RtpCapabilities {
+         self.handle.get_rtp_receiver_capabilities(media_type)
+     }
++
++    /// Yap patch (native/patches/libwebrtc): the shared audio processing
++    /// module's state as one log line (what runs per component: WebRTC's
++    /// software APM, the platform's effect, or nothing).
++    #[cfg(not(target_arch = "wasm32"))]
++    pub fn audio_processing_state(&self) -> String {
++        self.handle.audio_processing_state()
++    }
+ }
+ 
+ #[cfg(all(test, not(target_arch = "wasm32")))]

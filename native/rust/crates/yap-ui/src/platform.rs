@@ -149,6 +149,33 @@ pub trait Platform: Send + Sync + 'static {
     /// (`Settings.playTestSound`).
     fn play_test_sound(&self) {}
 
+    /// The mic's processing settings as JSON, under the desktop `Audio`
+    /// object's names (`{inputProfile, noiseSuppression, echoCancellation,
+    /// highFidelity, noiseReduction}`, plus `noiseReductionSupported`, which
+    /// the desktop has no use for), for an app
+    /// whose shell has no `Audio` object (`Settings.voiceSettings`). `None`:
+    /// the app shows them elsewhere (the desktop's `Audio`).
+    fn voice_settings_json(&self) -> Option<String> {
+        None
+    }
+
+    /// Sets one processing switch by the desktop's `Audio.setSwitch` key
+    /// (`noiseSuppression`, `echoCancellation`, `highFidelity`), with the
+    /// switches it turns off alongside; saved and heard in the call at once.
+    /// Returns the settings as [`Self::voice_settings_json`] reads them.
+    fn set_voice_switch(&self, key: &str, on: bool) -> Option<String> {
+        let _ = (key, on);
+        None
+    }
+
+    /// Picks the input profile (`standard`, `studio`, `custom`) as the
+    /// desktop's `Audio.setProfile`; returns the settings as
+    /// [`Self::voice_settings_json`] reads them.
+    fn set_voice_profile(&self, profile: &str) -> Option<String> {
+        let _ = profile;
+        None
+    }
+
     /// Whether the system has a network, when the app can ask (`None`:
     /// it cannot). A phone app in the background can have its own network
     /// blocked while the device's is up: a host name that does not resolve

@@ -1,0 +1,83 @@
+--- a/include/livekit/peer_connection_factory.h
++++ b/include/livekit/peer_connection_factory.h
+@@ -77,6 +77,11 @@
+   std::shared_ptr<AudioDeviceController> audio_device() const;
+   bool zero_playout_delay_enabled() const;
+ 
++  // Yap patch (native/patches/webrtc-sys): the shared audio processing
++  // module's state (PeerConnectionFactoryInterface::GetAudioProcessingState)
++  // as one log line.
++  rust::String audio_processing_state() const;
++
+  private:
+   // Declaration order matters: rtc_runtime_ must be declared before
+   // adm_proxy_/audio_device_ so it is destroyed last. Releasing the proxy
+--- a/src/peer_connection_factory.cpp
++++ b/src/peer_connection_factory.cpp
+@@ -35,6 +35,7 @@
+ #include "api/video_codecs/builtin_video_encoder_factory.h"
+ #include "api/audio/audio_device.h"
+ #include "api/audio_options.h"
++#include "api/audio/audio_processing_state.h"
+ #include "livekit/adm_proxy.h"
+ #include "livekit/audio_track.h"
+ #include "livekit/peer_connection.h"
+@@ -285,6 +286,45 @@
+          kForcePlayoutDelayValue;
+ }
+ 
++// Yap patch (native/patches/webrtc-sys): per component, what runs
++// (sw: WebRTC's APM, hw: the platform's effect, sw+hw, off) and how it got
++// there: req is the track's request, sw the APM's live config, hw the
++// platform effect (avail/active). "?" is unknown.
++rust::String PeerConnectionFactory::audio_processing_state() const {
++  webrtc::AudioProcessingState state = peer_factory_->GetAudioProcessingState();
++  auto flag = [](const std::optional<bool>& v) -> const char* {
++    return !v.has_value() ? "?" : *v ? "1" : "0";
++  };
++  auto effective = [](webrtc::AudioProcessingImplementation i) -> const char* {
++    switch (i) {
++      case webrtc::AudioProcessingImplementation::kDisabled:
++        return "off";
++      case webrtc::AudioProcessingImplementation::kSoftware:
++        return "sw";
++      case webrtc::AudioProcessingImplementation::kPlatform:
++        return "hw";
++      case webrtc::AudioProcessingImplementation::kSoftwareAndPlatform:
++        return "sw+hw";
++      default:
++        return "?";
++    }
++  };
++  auto component = [&](const char* name,
++                       const webrtc::AudioProcessingComponentState& c) {
++    return std::string(name) + "=" + effective(c.effective) + "(req " +
++           flag(c.requested_enabled) + " sw " + flag(c.software_active) +
++           " hw " + (c.platform_available ? "avail/" : "none/") +
++           flag(c.platform_active) + ")";
++  };
++  std::string line = std::string("apm ") +
++                     (state.has_audio_processing_module ? "yes" : "no") + " " +
++                     component("aec", state.echo_cancellation) + " " +
++                     component("ns", state.noise_suppression) + " " +
++                     component("agc", state.auto_gain_control) + " " +
++                     component("hpf", state.high_pass_filter);
++  return rust::String(line);
++}
++
+ std::shared_ptr<PeerConnectionFactory> create_peer_connection_factory() {
+   return std::make_shared<PeerConnectionFactory>(RtcRuntime::create());
+ }
+--- a/src/peer_connection_factory.rs
++++ b/src/peer_connection_factory.rs
+@@ -97,6 +97,10 @@
+ 
+         fn zero_playout_delay_enabled(self: &PeerConnectionFactory) -> bool;
+ 
++        // Yap patch (native/patches/webrtc-sys): the shared APM's state as
++        // one log line.
++        fn audio_processing_state(self: &PeerConnectionFactory) -> String;
++
+         fn create_peer_connection(
+             self: &PeerConnectionFactory,
+             config: RtcConfiguration,
