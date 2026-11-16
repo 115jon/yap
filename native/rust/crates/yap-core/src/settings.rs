@@ -88,7 +88,7 @@ const fn section(
 pub const NAV_GROUPS: &[NavGroup] = &[
     NavGroup {
         title: "You",
-        ids: &["account", "loud", "sessions", "privacy"],
+        ids: &["account", "connections", "loud", "sessions", "privacy"],
     },
     NavGroup {
         title: "Calls",
@@ -199,6 +199,65 @@ pub const PANELS: &[PanelDef] = &[
                 )],
             ),
         ],
+    },
+    PanelDef {
+        id: "connections",
+        title: "Connections",
+        icon: "connections",
+        headline: "Your other accounts.",
+        blurb: "Link accounts you own on other services and choose which ones your profile shows.",
+        rail_rows: &[],
+        // One card per provider (crate::connections): its account, then
+        // the profile switch once something is linked.
+        sections: &[section(
+            "connection-steam",
+            "Steam",
+            "Sign in through Steam to prove the account is yours. Yap never sees your Steam password.",
+            &[
+                row(
+                    "steam-account",
+                    "Steam account",
+                    "",
+                    &[
+                        "steam",
+                        "valve",
+                        "game",
+                        "games",
+                        "deadlock",
+                        "pc",
+                        "connection",
+                        "connections",
+                        "link",
+                        "linked account",
+                        "connect",
+                        "unlink",
+                    ],
+                ),
+                row(
+                    "steam-show-on-profile",
+                    "Show on profile",
+                    "People who open your profile see your Steam name and a link to it.",
+                    &[
+                        "steam",
+                        "valve",
+                        "game",
+                        "games",
+                        "deadlock",
+                        "pc",
+                        "connection",
+                        "connections",
+                        "link",
+                        "linked account",
+                        "connect",
+                        "unlink",
+                        "profile",
+                        "public",
+                        "hide",
+                        "visible",
+                    ],
+                ),
+            ],
+        )],
     },
     PanelDef {
         id: "loud",

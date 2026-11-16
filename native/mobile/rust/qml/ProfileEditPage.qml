@@ -522,6 +522,26 @@ Rectangle {
                     }
                 }
             }
+
+            // Linked accounts (Settings › Connections on the desktop): the
+            // Steam link the Deadlock widget reads, and whether the
+            // profile shows it.
+            Section {
+                number: 5
+                title: qsTr("Connections")
+                Note {
+                    text: qsTr("Link accounts you own on other services and choose which ones your profile shows.")
+                }
+                KitButton {
+                    variant: "secondary"
+                    iconName: "connections"
+                    text: qsTr("Manage connections")
+                    onClicked: {
+                        Qt.inputMethod.hide()
+                        ShellState.connectionsRequested()
+                    }
+                }
+            }
         }
     }
 

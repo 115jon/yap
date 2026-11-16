@@ -11,7 +11,7 @@ import Yap.Ui
 // your custom status (edited in place), your profile and Edit profile
 // (the desktop's account menu has it too), the collectibles shop, the
 // theme (a tap
-// swaps its light and dark; Match system opens Settings), and Settings,
+// swaps its light and dark; Match system opens Settings > Appearance), and Settings,
 // the one notched primary key. The plate's own rows stay at its foot,
 // where the plate is, so nothing jumps. On a short screen (a phone on its
 // side) the card stops under the status bar and the rows between your card
@@ -20,7 +20,8 @@ import Yap.Ui
 Item {
     id: root
 
-    signal settingsRequested()
+    // Settings, or one of its pages over it ("" for the hub).
+    signal settingsRequested(string page)
     signal profileRequested(string userId)
     signal profileEditRequested()
     signal callRequested()
@@ -309,7 +310,7 @@ Item {
                         // Match system is chosen among the themes, in Settings.
                         onTriggered: {
                             if (root.systemTheme) {
-                                root.settingsRequested()
+                                root.settingsRequested("SettingsAppearancePage")
                                 return
                             }
                             Native.haptic(Native.Tick)
@@ -336,7 +337,7 @@ Item {
                         size: "lg"
                         text: qsTr("Settings")
                         ground: Theme.ply3
-                        onClicked: root.settingsRequested()
+                        onClicked: root.settingsRequested("")
                     }
                 }
 

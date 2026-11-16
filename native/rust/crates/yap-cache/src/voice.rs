@@ -187,6 +187,9 @@ pub struct VoiceSettings {
     pub noise_reduction_enabled: bool,
     pub noise_reduction_provider: String,
     pub echo_cancellation: bool,
+    /// WebRTC's automatic gain control. The web keeps it on (its capture
+    /// constraints); the phone's Voice & video page has the switch.
+    pub auto_gain_control: bool,
     pub stream_high_fidelity: bool,
     /// "Input volume", 0..=200 percent. Kept and shown as the web keeps it;
     /// neither client applies it to the mic yet.
@@ -234,6 +237,7 @@ impl Default for VoiceSettings {
             noise_reduction_enabled: false,
             noise_reduction_provider: NOISE_REDUCTION_PROVIDERS[0].into(),
             echo_cancellation: true,
+            auto_gain_control: true,
             stream_high_fidelity: false,
             input_volume: 100,
             spatial_audio_enabled: false,
@@ -337,6 +341,7 @@ impl VoiceSettings {
         };
         self.noise_suppression = noise;
         self.echo_cancellation = echo;
+        self.auto_gain_control = !hifi;
         self.stream_high_fidelity = hifi;
         self.noise_reduction_enabled = false;
         self.spatial_audio_enabled = false;
@@ -355,13 +360,14 @@ impl VoiceSettings {
     /// high fidelity and spatial audio turn WebRTC's noise suppression and
     /// echo cancellation off (spatial audio turns high fidelity on); RNNoise
     /// turns WebRTC's noise suppression off; WebRTC's noise suppression
-    /// turns RNNoise and high fidelity off; echo cancellation turns high
-    /// fidelity off. `false` for an unknown key.
+    /// turns RNNoise and high fidelity off; echo cancellation and gain
+    /// control turn high fidelity off. `false` for an unknown key.
     pub fn set_switch(&mut self, key: &str, on: bool) -> bool {
         match key {
             "noiseSuppression" => self.noise_suppression = on,
             "noiseReductionEnabled" => self.noise_reduction_enabled = on,
             "echoCancellation" => self.echo_cancellation = on,
+            "autoGainControl" => self.auto_gain_control = on,
             "streamHighFidelity" => self.stream_high_fidelity = on,
             "spatialAudioEnabled" => self.spatial_audio_enabled = on,
             "autoSensitivity" => self.auto_sensitivity = on,
@@ -390,7 +396,7 @@ impl VoiceSettings {
                 self.noise_reduction_enabled = false;
                 self.stream_high_fidelity = false;
             }
-            "echoCancellation" => self.stream_high_fidelity = false,
+            "echoCancellation" | "autoGainControl" => self.stream_high_fidelity = false,
             _ => {}
         }
         true
@@ -737,6 +743,17 @@ mod tests {
         let mut s = VoiceSettings::default();
         s.set_profile(InputProfile::Studio);
         assert!(!s.noise_suppression && !s.echo_cancellation && s.stream_high_fidelity);
+        assert!(!s.auto_gain_control);
+    }
+
+    #[test]
+    fn gain_control_should_turn_high_fidelity_off() {
+        let mut s = VoiceSettings::default();
+        s.set_profile(InputProfile::Studio);
+        assert!(s.set_switch("autoGainControl", true));
+        assert!(s.auto_gain_control && !s.stream_high_fidelity);
+        assert!(s.set_switch("autoGainControl", false));
+        assert!(!s.auto_gain_control);
     }
 
     #[test]

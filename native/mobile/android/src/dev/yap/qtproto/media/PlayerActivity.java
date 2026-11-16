@@ -36,6 +36,10 @@ import androidx.media3.ui.PlayerView;
  * screen off, another app over it) it is released, and back in front it is
  * made again where it was, paused or playing as it was. Turning the phone
  * keeps it (configChanges in the manifest).
+ *
+ * Started from the chat's player sheet (InAppPlayers), it leaves where it
+ * got to and whether it played ({@link #takeHandoff}), so the sheet goes on
+ * from there.
  */
 public final class PlayerActivity extends Activity {
     static final String EXTRA_URL = "dev.yap.qtproto.media.url";
@@ -45,6 +49,29 @@ public final class PlayerActivity extends Activity {
 
     private static final String STATE_POSITION = "position";
     private static final String STATE_PLAYING = "playing";
+
+    /** Where a video full screen got to, for the sheet it came from. */
+    static final class Handoff {
+        final String url;
+        final long position;
+        final boolean playing;
+
+        Handoff(String url, long position, boolean playing) {
+            this.url = url;
+            this.position = position;
+            this.playing = playing;
+        }
+    }
+
+    // Main thread only.
+    private static Handoff handoff;
+
+    /** The last full screen's end for `url`, once; null for another video. */
+    static Handoff takeHandoff(String url) {
+        Handoff last = handoff;
+        handoff = null;
+        return last != null && last.url.equals(url) ? last : null;
+    }
 
     private PlayerView view;
     private ExoPlayer player;
@@ -141,6 +168,18 @@ public final class PlayerActivity extends Activity {
         player.setMediaItem(MediaItem.fromUri(uri), position);
         player.setPlayWhenReady(playWhenReady);
         player.prepare();
+    }
+
+    // Before the activity under it resumes (onStop comes after).
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (uri == null) return;
+        if (player != null) {
+            position = Math.max(0, player.getCurrentPosition());
+            playWhenReady = player.getPlayWhenReady();
+        }
+        handoff = new Handoff(uri.toString(), position, playWhenReady);
     }
 
     @Override

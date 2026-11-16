@@ -2,8 +2,8 @@
 // (android/src/dev/yap/qtproto/voice/VoiceShim.java) and the core's side
 // (rust/src/voice.rs). The call itself is the core's; here are libwebrtc's
 // start-up (it needs the JVM and the application context), the microphone
-// permission, the audio routes for the QML, and what the call notification
-// shows. Two directions do not go through Qt's thread, so they work whatever
+// permission, the audio routes for the QML, what the call notification
+// shows, and Settings' mic test (MicTest.java). Two directions do not go through Qt's thread, so they work whatever
 // it is doing (and in a process the system started for the service alone):
 // the core tells the shim that a call started or ended from its own thread
 // (yap_mobile_call_active), and the notification's Mute and Leave and an
@@ -14,6 +14,9 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QMetaObject>
+
+#include <algorithm>
+#include <cmath>
 
 #ifdef Q_OS_ANDROID
 #include <QtCore/QFuture>
@@ -36,6 +39,7 @@ void yap_mobile_voice_quit();
 namespace {
 
 constexpr char kVoice[] = "dev/yap/qtproto/voice/VoiceShim";
+constexpr char kMicTest[] = "dev/yap/qtproto/voice/MicTest";
 
 // On the thread Java called from (VoiceShim.install, itself called from
 // Qt's thread below): libwebrtc looks its classes up from here.
@@ -83,6 +87,16 @@ void jniRoutes(JNIEnv*, jclass, jstring json)
   }
 }
 
+// The mic test's thread, every 20 ms.
+void jniMicLevel(JNIEnv*, jclass, jdouble rms)
+{
+  if (Native* native = Native::instance()) {
+    const double value = rms;
+    QMetaObject::invokeMethod(
+      native, [native, value] { native->onMicLevel(value); }, Qt::QueuedConnection);
+  }
+}
+
 } // namespace
 
 // From the core (rust/src/voice.rs), on one of its threads: a call runs, or
@@ -111,6 +125,11 @@ void Native::installVoice()
     qWarning("[voice] could not register the shim's callbacks");
     return;
   }
+  const JNINativeMethod micTest[] = {
+    { "nativeLevel", "(D)V", reinterpret_cast<void*>(jniMicLevel) },
+  };
+  if (!env.registerNativeMethods(kMicTest, micTest, std::size(micTest)))
+    qWarning("[voice] could not register the mic test's callback");
   const bool ok = QJniObject::callStaticMethod<jboolean>(
     kVoice, "install", "(Landroid/app/Activity;)Z", QNativeInterface::QAndroidApplication::context().object());
   if (!ok)
@@ -161,6 +180,16 @@ void Native::setAudioRoute(const QString& id) const
 #endif
 }
 
+void Native::setPreferredAudioRoute(const QString& id) const
+{
+#ifdef Q_OS_ANDROID
+  QJniObject::callStaticMethod<void>(kVoice, "setPreferredRoute", "(Ljava/lang/String;)V",
+                                     QJniObject::fromString(id).object<jstring>());
+#else
+  Q_UNUSED(id);
+#endif
+}
+
 void Native::setCallState(const QString& channel, bool muted, bool deafened) const
 {
 #ifdef Q_OS_ANDROID
@@ -179,6 +208,43 @@ void Native::callTouched() const
 #ifdef Q_OS_ANDROID
   QJniObject::callStaticMethod<void>(kVoice, "userChanged");
 #endif
+}
+
+void Native::setMicTest(bool on)
+{
+  if (on == m_micTest)
+    return;
+  m_micTest = on;
+  m_micTestRms = 0;
+  if (m_micTestLevel != 0) {
+    m_micTestLevel = 0;
+    emit micTestLevelChanged();
+  }
+#ifdef Q_OS_ANDROID
+  QJniObject::callStaticMethod<void>(kMicTest, on ? "start" : "stop");
+#endif
+  emit micTestChanged();
+}
+
+void Native::onMicLevel(double rms)
+{
+  if (!m_micTest)
+    return;
+  if (rms < 0) {
+    setMicTest(false);
+    emit micTestFailed();
+    return;
+  }
+  // MicTestWidget's RMS_SMOOTHING, then getVoiceActivityLevelPercent
+  // (yap-voice vad::level_percent): the position where dB + 100 sits.
+  const double now = rms * 100;
+  m_micTestRms = m_micTestRms > 0 ? m_micTestRms * 0.72 + now * 0.28 : now;
+  const qreal level =
+    m_micTestRms <= 0 ? 0 : std::clamp(20 * std::log10(m_micTestRms / 100) + 100, 0.0, 100.0);
+  if (std::abs(level - m_micTestLevel) < 0.01)
+    return;
+  m_micTestLevel = level;
+  emit micTestLevelChanged();
 }
 
 void Native::onAudioRoutes(const QByteArray& json)

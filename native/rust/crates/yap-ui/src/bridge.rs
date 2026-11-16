@@ -65,6 +65,15 @@ pub mod qobject {
         /// checking, date, purging, restoring, restoreError, deleting,
         /// deleteError}`.
         #[qproperty(QString, deletion)]
+        /// The site announcement banner, as JSON
+        /// (`yap_core::site_config::Announcement`): `{id, text, tone,
+        /// linkUrl, linkLabel, expiresAt}`; empty when none shows.
+        #[qproperty(QString, announcement)]
+        /// Settings › Connections, as JSON
+        /// (`yap_core::store::connections::ConnectionsView`): `{loaded,
+        /// loading, loadError, cards, busy, actionError, noticeTone,
+        /// notice, openUrl, openSeq, showSeq}`.
+        #[qproperty(QString, connections)]
         type Session = super::SessionRust;
 
         /// Starts the core (once).
@@ -103,6 +112,35 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "restoreAccount"]
         fn restore_account(self: &Session);
+
+        /// The banner's dismiss key: this announcement stays hidden on
+        /// this device (a critical one has no key).
+        #[qinvokable]
+        #[cxx_name = "dismissAnnouncement"]
+        fn dismiss_announcement(self: &Session);
+        /// Settings › Connections showed: load the list.
+        #[qinvokable]
+        #[cxx_name = "loadConnections"]
+        fn load_connections(self: &Session);
+
+        /// Connect a provider: the core asks for the begin URL, which
+        /// shows as `connections.openUrl` (a new `openSeq`) for the shell
+        /// to open in the browser.
+        #[qinvokable]
+        #[cxx_name = "connectAccount"]
+        fn connect_account(self: &Session, provider: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "unlinkAccount"]
+        fn unlink_account(self: &Session, provider: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "setConnectionShown"]
+        fn set_connection_shown(self: &Session, provider: &QString, show: bool);
+
+        #[qinvokable]
+        #[cxx_name = "dismissConnectionNotice"]
+        fn dismiss_connection_notice(self: &Session);
 
         /// `typed` confirms our username: any case, an optional `@`.
         #[qinvokable]
@@ -814,9 +852,11 @@ use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QList, QString, QStringList};
 use yap_core::account_deletion;
 use yap_core::notification_levels::{MuteChoice, NotificationLevel, NotificationTargetType};
+use yap_core::store::connections::ConnectionsCommand;
 use yap_core::store::deletion::DeletionCommand;
 use yap_core::store::favorites::FavoritesCommand;
 use yap_core::store::notify::NotifyCommand;
+use yap_core::store::site::SiteCommand;
 use yap_core::store::time::{format_rfc3339, local_date};
 use yap_core::{Phase, ViewUpdate};
 
@@ -863,6 +903,8 @@ pub struct SessionRust {
     me_name_style: QString,
     me_display: QString,
     deletion: QString,
+    announcement: QString,
+    connections: QString,
 }
 
 impl Drop for SessionRust {
@@ -1038,6 +1080,43 @@ impl qobject::Session {
 
     pub fn restore_account(&self) {
         client::command(Command::Deletion(DeletionCommand::Restore));
+    }
+
+    pub fn dismiss_announcement(&self) {
+        client::command(Command::Site(SiteCommand::Dismiss));
+    }
+
+    pub fn load_connections(&self) {
+        client::command(Command::Connections(ConnectionsCommand::Load));
+    }
+
+    pub fn connect_account(&self, provider: &QString) {
+        // The platform the begin URL hands the outcome back to.
+        let app = match yap_core::config::get().platform.as_str() {
+            "android" => "android",
+            _ => "windows",
+        };
+        client::command(Command::Connections(ConnectionsCommand::Connect {
+            provider: provider.to_string(),
+            app: app.to_owned(),
+        }));
+    }
+
+    pub fn unlink_account(&self, provider: &QString) {
+        client::command(Command::Connections(ConnectionsCommand::Unlink(
+            provider.to_string(),
+        )));
+    }
+
+    pub fn set_connection_shown(&self, provider: &QString, show: bool) {
+        client::command(Command::Connections(ConnectionsCommand::SetShown {
+            provider: provider.to_string(),
+            show,
+        }));
+    }
+
+    pub fn dismiss_connection_notice(&self) {
+        client::command(Command::Connections(ConnectionsCommand::DismissNotice));
     }
 
     pub fn confirms_username(&self, typed: &QString) -> bool {

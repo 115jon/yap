@@ -1332,6 +1332,10 @@ pub struct State {
     pub(super) backgrounds: super::backgrounds::BackgroundsState,
     pub(super) extras: super::extras::ExtrasState,
     pub(super) deletion: super::deletion::DeletionState,
+    /// The site announcement banner.
+    pub(super) site: super::site::SiteState,
+    /// Settings › Connections.
+    pub(super) connections: super::connections::ConnectionsState,
     /// TikTok and Instagram lookups, by link.
     pub(super) hydrations: super::embeds::Hydrations,
     /// Links the composer asked the server to resolve early.
@@ -1464,6 +1468,8 @@ impl State {
             backgrounds: Default::default(),
             extras: Default::default(),
             deletion: Default::default(),
+            site: Default::default(),
+            connections: Default::default(),
             hydrations: Default::default(),
             prefetched: Default::default(),
             view: Projection::default(),

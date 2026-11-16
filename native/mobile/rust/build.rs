@@ -17,12 +17,29 @@ const QML: &[&str] = &[
     "qml/PlatformList.qml",
     "qml/ChatPage.qml",
     "qml/MembersPage.qml",
+    "qml/ConnectionsPage.qml",
     "qml/ProfilePage.qml",
     "qml/BoardEditPage.qml",
     "qml/BoardWidgetSheet.qml",
     "qml/BoardCatalogSheet.qml",
     "qml/BoardSheetField.qml",
     "qml/SettingsPage.qml",
+    "qml/SettingsFrame.qml",
+    "qml/SettingsSection.qml",
+    "qml/SettingsSwitchRow.qml",
+    "qml/SettingsVolumeRow.qml",
+    "qml/SettingsErrorText.qml",
+    "qml/SettingsActionRow.qml",
+    "qml/SettingsProfilePage.qml",
+    "qml/SettingsAccountPage.qml",
+    "qml/SettingsPrivacyPage.qml",
+    "qml/SettingsDevicesPage.qml",
+    "qml/SettingsPlanPage.qml",
+    "qml/SettingsSoundboardPage.qml",
+    "qml/SettingsVoicePage.qml",
+    "qml/SettingsAppearancePage.qml",
+    "qml/SettingsNotificationsPage.qml",
+    "qml/SettingsAboutPage.qml",
     "qml/Segmented.qml",
     "qml/ProfileEditPage.qml",
     "qml/AvatarFramePage.qml",
@@ -86,6 +103,7 @@ const QML: &[&str] = &[
     "qml/SelectTextPage.qml",
     "qml/LicensesPage.qml",
     "qml/ListenTogetherSheet.qml",
+    "qml/MediaSheet.qml",
     "qml/SwipeReply.qml",
     "qml/seams/InlineAudio.qml",
     "qml/seams/InlineVideo.qml",
@@ -101,13 +119,15 @@ fn main() {
     let files = QML
         .iter()
         .map(|path| QmlFile::from(*path))
-        // This phone's own settings (QSettings), the page router and the
-        // camera's and the screen share's links to the call.
+        // This phone's own settings (QSettings), the page router, the
+        // camera's and the screen share's links to the call, and the
+        // chat's player sheet's.
         .chain([
             QmlFile::from("qml/Prefs.qml").singleton(true),
             QmlFile::from("qml/Router.qml").singleton(true),
             QmlFile::from("qml/CameraLink.qml").singleton(true),
             QmlFile::from("qml/ShareLink.qml").singleton(true),
+            QmlFile::from("qml/MediaLink.qml").singleton(true),
         ]);
     CxxQtBuilder::new_qml_module(QmlModule::new("com.yap.mobile").qml_files(files)).build();
 }

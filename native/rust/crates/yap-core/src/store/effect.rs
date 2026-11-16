@@ -465,6 +465,10 @@ pub enum ApiRequest {
     VoiceMove(yap_protocol::payload::VoiceMoveRequest),
     /// `/api/account/deletion`.
     Deletion(crate::account_deletion::DeletionRequest),
+    /// `GET /api/site-config`: the announcement banner.
+    SiteConfig,
+    /// `/api/connections`.
+    Connections(crate::connections::ConnectionsRequest),
 }
 
 /// A page of messages, oldest first.
@@ -528,6 +532,9 @@ pub enum ApiResponse {
     Extras(super::extras::ExtrasResponse),
     /// What `/api/account/deletion` answered.
     Deletion(crate::account_deletion::DeletionStatus),
+    /// The announcement `/api/site-config` says runs, if any.
+    SiteConfig(Option<Box<crate::site_config::Announcement>>),
+    Connections(crate::connections::ConnectionsResponse),
     /// A call whose body the store does not read.
     Done,
 }
@@ -591,6 +598,7 @@ impl ApiRequest {
             Self::Notify(request) => request.method(),
             Self::Backgrounds(request) => request.method(),
             Self::Deletion(request) => request.method(),
+            Self::Connections(request) => request.method(),
             Self::RemoveEmbeds { .. } => Method::Patch,
             Self::VoiceMove(_) => Method::Post,
             Self::SendMessage { .. }
@@ -609,7 +617,8 @@ impl ApiRequest {
             | Self::Shares
             | Self::KovaSession
             | Self::KovaAccounts
-            | Self::BillingStatus => Method::Get,
+            | Self::BillingStatus
+            | Self::SiteConfig => Method::Get,
             Self::MarkRead { .. } => Method::Put,
             Self::React { add: true, .. } => Method::Put,
             Self::React { add: false, .. } => Method::Delete,
@@ -647,6 +656,7 @@ impl ApiRequest {
             Self::Notify(request) => request.path(),
             Self::Backgrounds(request) => request.path(),
             Self::Deletion(request) => request.path(),
+            Self::Connections(request) => request.path(),
             Self::RemoveEmbeds { channel_id, .. } => format!("/api/channels/{channel_id}/messages"),
             Self::VoiceMove(_) => "/api/voice/move".into(),
             Self::Me => "/api/users/me".into(),
@@ -678,6 +688,7 @@ impl ApiRequest {
             Self::DeleteBanner | Self::DeleteNameplate => "/api/profile-assets/manage".into(),
             Self::Sessions => "/api/sessions".into(),
             Self::BillingStatus => "/api/billing/status".into(),
+            Self::SiteConfig => "/api/site-config".into(),
             Self::Shares => "/api/shares".into(),
             Self::RevokeShare { share_id } => format!("/api/shares/{}", query_value(share_id)),
             Self::RegisterPush { .. } | Self::UnregisterPush { .. } => "/api/push-tokens".into(),
@@ -778,6 +789,7 @@ impl ApiRequest {
             Self::Notify(request) => request.body(),
             Self::Backgrounds(request) => request.body(),
             Self::Deletion(request) => request.body(),
+            Self::Connections(request) => request.body(),
             Self::VoiceMove(request) => serde_json::to_value(request).unwrap_or(Value::Null),
             Self::RemoveEmbeds { message_id, .. } => {
                 json!({ "message_id": message_id, "embeds": [] })
@@ -857,7 +869,8 @@ impl ApiRequest {
             | Self::RevokeShare { .. }
             | Self::KovaSession
             | Self::KovaAccounts
-            | Self::BillingStatus => Value::Null,
+            | Self::BillingStatus
+            | Self::SiteConfig => Value::Null,
             Self::Me
             | Self::Servers
             | Self::Channels { .. }
@@ -891,6 +904,7 @@ impl ApiRequest {
             Self::Notify(request) => ApiResponse::Notify(request.decode(body)?),
             Self::Backgrounds(request) => ApiResponse::Backgrounds(request.decode(body)?),
             Self::Deletion(request) => ApiResponse::Deletion(request.decode(body)?),
+            Self::Connections(request) => ApiResponse::Connections(request.decode(body)?),
             Self::RemoveEmbeds { .. } | Self::VoiceMove(_) => ApiResponse::Done,
             Self::Me => ApiResponse::Me(Box::new(
                 serde_json::from_value(body).map_err(|e| ApiError::Decode(format!("me: {e}")))?,
@@ -970,6 +984,9 @@ impl ApiRequest {
             Self::BillingStatus => ApiResponse::BillingStatus(
                 body.get("enabled").and_then(Value::as_bool) == Some(true),
             ),
+            Self::SiteConfig => {
+                ApiResponse::SiteConfig(crate::site_config::parse_config(&body).map(Box::new))
+            }
             Self::Shares => ApiResponse::Shares(lenient_list(take(&mut body, "shares"))),
             // `null` when Kova has no session for the token.
             Self::KovaSession => ApiResponse::KovaEmail(

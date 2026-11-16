@@ -349,8 +349,11 @@ Window {
         if (userId.length > 0)
             openPage("ProfilePage", { userId: userId }, { sheet: true, key: userId })
     }
-    function openSettings() {
+    // Settings' hub, and `page` (one of its categories) over it when named.
+    function openSettings(page) {
         openPage("SettingsPage", {}, { whileBusy: true })
+        if (page && page.length > 0)
+            openPage(page, {}, { whileBusy: true, key: page })
     }
     // Edit profile, over Settings, your own profile or from the account
     // panel.
@@ -364,6 +367,24 @@ Window {
     }
     function openFriends() {
         openPage("FriendsPage")
+    }
+    // Settings › Connections (the Steam link): its page, once on top.
+    function openConnections() {
+        if (ready)
+            openPage("ConnectionsPage", {}, { whileBusy: true })
+    }
+    // A Connect's begin URL goes to a Custom Tab; the tab's outcome link
+    // (yap://connection) or the Deadlock widget's Link Steam shows the page.
+    ConnectionsModel {
+        driver: true
+        onOpenRequested: url => Native.openTab(url)
+        onShowRequested: window.openConnections()
+    }
+    Connections {
+        target: ShellState
+        function onConnectionsRequested() {
+            window.openConnections()
+        }
     }
     // A voice channel's row: the call page if we are in it, else a join,
     // once the microphone is allowed (the system asks the first time).
@@ -441,6 +462,33 @@ Window {
             }
             Voice.join(channelId)
             window.openCall()
+        }
+    }
+
+    // Settings > Voice & video: each call starts on the chosen output (the
+    // shim routes it as the call's audio starts) and camera. Read once
+    // signed in (the page passes changes on itself), and the camera again
+    // as each call's audio starts (a flip in the last call stays there).
+    function voicePrefs() {
+        try {
+            return JSON.parse(Settings.voiceSettings() || "{}")
+        } catch (e) {
+            return {}
+        }
+    }
+    function applyVoicePrefs() {
+        const voice = voicePrefs()
+        Native.setPreferredAudioRoute(voice.outputDeviceId ?? "default")
+        Native.setCameraFacing(voice.videoDeviceId !== "back")
+    }
+    property bool callStarted: false
+    Connections {
+        target: Native
+        function onAudioRoutesChanged() {
+            const started = Native.audioRoutes.length > 0
+            if (started && !window.callStarted)
+                Native.setCameraFacing(window.voicePrefs().videoDeviceId !== "back")
+            window.callStarted = started
         }
     }
 
@@ -733,6 +781,7 @@ Window {
     // next account.
     onReadyChanged: {
         if (ready) {
+            applyVoicePrefs()
             openFromNotification()
             openFromLink()
             takeAnswered()
@@ -744,6 +793,7 @@ Window {
         dropPlacedShare()
         callWanted = false
         accountPanel.close()
+        mediaSheet.close()
         stack.pop(null, StackView.Immediate)
         pager.snap()
         if (Session.phase === Session.SignedOut)
@@ -778,7 +828,14 @@ Window {
             id: stack
             anchors.fill: parent
             visible: window.ready
-            enabled: visible
+            // Under the player sheet nothing takes a touch: the chat's list
+            // and the pager would take a drag on the sheet's handle (the
+            // sheet's own scrim only stops what reaches it).
+            enabled: visible && !(mediaSheet.up && !mediaSheet.closing)
+            // A page pushed or popped from outside (a notification, a link,
+            // an answered call) is not left under the player, whose view
+            // Android draws over everything in the window.
+            onDepthChanged: mediaSheet.close()
 
             // A sheet rises from the bottom edge and drops back; a page
             // slides and fades in from the right (Android's default
@@ -866,6 +923,25 @@ Window {
         confirmText: qsTr("Open settings")
         onConfirmed: Native.openAppSettings()
     }
+
+    // A video or a web embed's player, in the app over the chat
+    // (MediaLink, from the cards' seams).
+    Connections {
+        target: MediaLink
+        function onVideoRequested(request) { mediaSheet.playVideo(request) }
+        function onWebRequested(request) { mediaSheet.playWeb(request) }
+    }
+    MediaSheet {
+        id: mediaSheet
+        anchors.fill: parent
+        anchors.bottomMargin: Native.clippedBottom
+    }
+    // The player's view is drawn over the whole scene: a ring or the
+    // deletion notice closes it rather than sit under it.
+    onShownRingChanged: if ((shownRing.callId ?? "").length > 0)
+        mediaSheet.close()
+    onPendingDeletionChanged: if (pendingDeletion)
+        mediaSheet.close()
 
     // The share key (ShareLink): what goes with the screen, before
     // Android's own dialog (the whole screen or one app).
@@ -1001,9 +1077,9 @@ Window {
         id: accountPanel
         anchors.fill: parent
         anchors.bottomMargin: Native.clippedBottom
-        onSettingsRequested: {
+        onSettingsRequested: page => {
             accountPanel.close()
-            window.openSettings()
+            window.openSettings(page)
         }
         onProfileRequested: userId => {
             accountPanel.close()

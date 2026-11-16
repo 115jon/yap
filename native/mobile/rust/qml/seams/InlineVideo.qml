@@ -1,19 +1,21 @@
 import QtQuick
 import Yap.Ui
 import Yap.Mobile
+import com.yap.mobile
 
 // The phone's InlineVideo (Yap.Platform): a video inside a shared embed card
-// (a direct file, TikTok and Instagram media, an X video or GIF). In the
-// chat it is a poster on black with the play disc and the length (or
-// "GIF"); a tap plays it full screen in Android's player (Player,
-// cpp/videoplayer.h), a GIF on repeat. The poster is the card's, or the
-// file's first frame (`image://videoposter`, in memory only) when the card
-// has none. Nothing plays in the list, so nothing holds a decoder or a
-// connection while it scrolls by. Without the player (another platform),
-// or when the file cannot be had, a tap opens the page the video is from
-// (`link`), or the file, outside the app. The desktop's EmbedVideo has the
-// same interface and plays in place; properties only it uses are kept so
-// the cards can set them on either app.
+// (a direct file, TikTok and Instagram media, an X video or GIF) or a file
+// in a message. In the chat it is a poster on black with the play disc and
+// the length (or "GIF"); a tap plays it in the app, in the chat's player
+// sheet (MediaSheet.qml, through MediaLink) on Android's player, a GIF on
+// repeat; the sheet's full-screen key takes it full screen. The poster is
+// the card's, or the file's first frame (`image://videoposter`, in memory
+// only) when the card has none. Nothing plays in the list, so nothing
+// holds a decoder or a connection while it scrolls by. Without the player
+// (another platform), or when the file cannot be had, a tap opens the page
+// the video is from (`link`), or the file, outside the app. The desktop's
+// EmbedVideo has the same interface and plays in place; properties only it
+// uses are kept so the cards can set them on either app.
 Item {
     id: root
 
@@ -28,7 +30,7 @@ Item {
     property Item clipTo: null
     property string name: ""
     property string link: ""
-    // Milliseconds: where full screen starts.
+    // Milliseconds: where the player starts.
     property int startAt: 0
     property bool autoStart: false
     // The desktop loads the first frame before any click; here it is the
@@ -65,18 +67,18 @@ Item {
             return
         if (Player.available && root.webSource) {
             Native.haptic(Native.Tick)
-            Player.play(root.source, root.startAt, root.animated, root.name)
+            // The sheet takes the box's shape (the first frame's, once
+            // known), and opens the page when the file cannot be had.
+            MediaLink.playVideo({
+                source: root.source,
+                startAt: root.startAt,
+                loop: root.animated,
+                title: root.name,
+                aspect: root.width > 0 && root.height > 0 ? root.width / root.height : root.aspect,
+                link: root.target
+            })
         } else if (root.target.length > 0) {
             Qt.openUrlExternally(root.target)
-        }
-    }
-
-    // The player could not have the file (signed out, offline): the page.
-    Connections {
-        target: Player
-        function onFailed(url) {
-            if (url === root.source && root.target.length > 0 && root.target !== root.source)
-                Qt.openUrlExternally(root.target)
         }
     }
 

@@ -14,6 +14,7 @@
 #include <QtCore/QJniEnvironment>
 #include <QtCore/QJniObject>
 #include <QtCore/qcoreapplication_platform.h>
+#include <sys/system_properties.h>
 #endif
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
@@ -30,6 +31,7 @@
 
 #include "a11y.h"
 #include "fling.h"
+#include "inappplayer.h"
 #include "native.h"
 #include "rustnetwork.h"
 #include "videohub.h"
@@ -87,6 +89,16 @@ int main(int argc, char* argv[])
   QElapsedTimer startup;
   startup.start();
   QGuiApplication app(argc, argv);
+#ifdef Q_OS_ANDROID
+  // The core's test switch for the announcement banner
+  // (yap_core::faults, YAP_TEST_ANNOUNCEMENT): a phone has no environment,
+  // so `adb shell setprop debug.yap.test_announcement warning` stands in.
+  {
+    char tone[PROP_VALUE_MAX] = {};
+    if (__system_property_get("debug.yap.test_announcement", tone) > 0)
+      qputenv("YAP_TEST_ANNOUNCEMENT", QByteArray(tone));
+  }
+#endif
   app.setOrganizationName(QStringLiteral("Yap"));
   app.setApplicationName(QStringLiteral("Yap Qt prototype"));
 
@@ -126,6 +138,9 @@ int main(int argc, char* argv[])
   // Video and sound previews on Android's player (videoplayer.h).
   auto* player = new VideoPlayer(&app);
   qmlRegisterSingletonInstance("Yap.Mobile", 1, 0, "Player", player);
+  // Videos and web embed players in the chat's player sheet
+  // (inappplayer.h).
+  qmlRegisterType<InAppPlayer>("Yap.Mobile", 1, 0, "InAppPlayer");
 
   QQmlApplicationEngine engine;
   // Network pictures over the core's rustls client, with a disk cache in

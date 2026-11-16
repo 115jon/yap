@@ -134,7 +134,10 @@ impl State {
     }
 
     fn follow_link(&mut self, fx: &mut Effects, link: Link) {
-        if !matches!(link, Link::Settings { .. } | Link::SignIn { .. }) {
+        if !matches!(
+            link,
+            Link::Settings { .. } | Link::SignIn { .. } | Link::Connection { .. }
+        ) {
             self.invites.nav_seq += 1;
         }
         match link {
@@ -154,6 +157,9 @@ impl State {
             }
             // Handled as it comes (`on_invites`), never held.
             Link::SignIn { .. } => {}
+            Link::Connection { provider, outcome } => {
+                self.on_connection_link(fx, provider, outcome);
+            }
             Link::Channel {
                 server_id,
                 channel_id,

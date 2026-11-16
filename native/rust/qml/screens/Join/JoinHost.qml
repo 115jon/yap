@@ -1,4 +1,5 @@
 import QtQuick
+import Yap.Chrome
 import com.yap.native
 import Yap.Ui
 
@@ -23,6 +24,21 @@ Item {
         if (state.settingsSeq > SettingsNav.linkSeq) {
             SettingsNav.linkSeq = state.settingsSeq
             SettingsNav.show(state.settingsPanel, state.settingsRow)
+        }
+    }
+
+    // Settings › Connections: the begin URL the core has for a Connect
+    // opens in the system browser; a link coming back from it, or the
+    // Deadlock widget's Link Steam, shows the panel.
+    ConnectionsModel {
+        driver: true
+        onOpenRequested: url => Files.openExternal(url)
+        onShowRequested: SettingsNav.show("connections", "")
+    }
+    Connections {
+        target: ShellState
+        function onConnectionsRequested() {
+            SettingsNav.show("connections", "steam-account")
         }
     }
 

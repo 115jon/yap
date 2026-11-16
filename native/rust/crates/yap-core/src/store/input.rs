@@ -334,6 +334,10 @@ pub enum Command {
     Deletion(super::deletion::DeletionCommand),
     /// DM calls, moves, stickers and the voice details.
     Calls(super::calls::CallsCommand),
+    /// The site announcement banner.
+    Site(super::site::SiteCommand),
+    /// Settings › Connections (the Steam link).
+    Connections(super::connections::ConnectionsCommand),
     /// The app is quitting: leave the call (its sockets close cleanly).
     Quit,
 }
@@ -449,6 +453,12 @@ pub enum Input {
     /// The app has been in the background for
     /// [`super::reduce::SUSPEND_GRACE`]. Only the newest suspend counts.
     SuspendElapsed {
+        generation: u64,
+    },
+    /// The site announcement is due again
+    /// ([`crate::site_config::REFRESH`] after the last answer). Only the
+    /// newest timer counts.
+    SiteRefresh {
         generation: u64,
     },
 }

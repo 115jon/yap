@@ -540,6 +540,16 @@ fn apply_one(mut session: Pin<&mut Session>, update: ViewUpdate) {
             let json = serde_json::to_string(&view).unwrap_or_default();
             session.set_deletion(q(&json));
         }
+        ViewUpdate::Announcement(view) => {
+            let json = view
+                .and_then(|view| serde_json::to_string(&view).ok())
+                .unwrap_or_default();
+            session.set_announcement(q(&json));
+        }
+        ViewUpdate::Connections(view) => {
+            let json = serde_json::to_string(&*view).unwrap_or_default();
+            session.set_connections(q(&json));
+        }
         ViewUpdate::DeviceCode { user_code, url } => {
             session.as_mut().set_user_code(q(&user_code));
             session.set_verification_url(q(&url));

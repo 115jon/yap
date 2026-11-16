@@ -174,6 +174,22 @@ impl Fixture {
             | ApiRequest::UnregisterPush { .. } => ApiResponse::Done,
             // Billing is off, as on a server without Stripe.
             ApiRequest::BillingStatus => ApiResponse::BillingStatus(false),
+            // No announcement, unless YAP_TEST_ANNOUNCEMENT names a tone.
+            ApiRequest::SiteConfig => ApiResponse::SiteConfig(
+                crate::faults::switches()
+                    .announcement
+                    .as_deref()
+                    .and_then(|tone| {
+                        crate::site_config::parse_config(&crate::site_config::test_config(tone))
+                    })
+                    .map(Box::new),
+            ),
+            // Nothing linked; every change succeeds.
+            ApiRequest::Connections(request) => ApiResponse::Connections(
+                request
+                    .decode(serde_json::json!({ "connections": [] }))
+                    .unwrap_or(crate::connections::ConnectionsResponse::Done),
+            ),
             // No pins, no windows; a thread is empty.
             ApiRequest::Threads(request) => ApiResponse::Threads(
                 request

@@ -383,15 +383,30 @@ Item {
         z: 4
     }
 
-    // Under the bar, lifted with its foot: the DM's call (while it rings or
-    // has someone in it), then the chat link's state. The rows start below
-    // them (the list's top margin) and scroll up behind them.
+    // Under the bar, lifted with its foot: the site announcement, the DM's
+    // call (while it rings or has someone in it), then the chat link's
+    // state. The rows start below them (the list's top margin) and scroll
+    // up behind them.
     readonly property real stripsTop: bar.y + bar.full + 8
-    readonly property real listTop: stripsTop + callStrip.height + strip.height
+    readonly property real listTop: stripsTop + siteBanner.height + callStrip.height + strip.height
+
+    // The site announcement (SiteAnnouncementBanner.tsx; the desktop's
+    // strip under its title bar).
+    SiteBanner {
+        id: siteBanner
+        y: root.stripsTop
+        width: parent.width
+        height: implicitHeight
+        z: 2
+        transform: Translate { y: -bar.lift }
+        leftInset: root.leftInset
+        rightInset: root.rightInset
+        onLinkRequested: url => Qt.openUrlExternally(url)
+    }
 
     DmCallStrip {
         id: callStrip
-        y: root.stripsTop
+        anchors.top: siteBanner.bottom
         width: parent.width
         z: 2
         transform: Translate { y: -bar.lift }

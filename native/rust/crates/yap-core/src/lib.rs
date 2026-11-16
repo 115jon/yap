@@ -17,6 +17,7 @@ pub mod collectibles;
 pub mod color;
 pub mod command_menu;
 pub mod config;
+pub mod connections;
 pub mod custom_sounds;
 pub mod dm_permission;
 pub mod emoji;
@@ -36,6 +37,7 @@ pub mod runtime;
 pub mod search;
 pub mod settings;
 pub mod shell;
+pub mod site_config;
 pub mod store;
 pub mod synth;
 #[cfg(feature = "desktop")]
