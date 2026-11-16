@@ -230,6 +230,31 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "playTestSound"]
         fn play_test_sound(self: &Settings);
+
+        /// The mic's processing settings as JSON where the app keeps them
+        /// here (the phone, `Platform::voice_settings_json`), else empty
+        /// (the desktop's `Audio`): `{inputProfile, noiseSuppression,
+        /// echoCancellation, highFidelity, noiseReduction}` named as on the
+        /// desktop's `Audio`, and `noiseReductionSupported`. No change
+        /// signal: a page reads it each time it is shown (sign-in loads the
+        /// account's settings) and takes what the setters return.
+        #[qinvokable]
+        #[cxx_name = "voiceSettings"]
+        fn voice_settings(self: &Settings) -> QString;
+
+        /// Sets a processing switch by the desktop's `Audio.setSwitch` key
+        /// (`noiseSuppression`, `echoCancellation`, `highFidelity`); a
+        /// switch can turn others off, so it returns the settings as
+        /// `voiceSettings` reads them (empty where the app has none here).
+        #[qinvokable]
+        #[cxx_name = "setVoiceSwitch"]
+        fn set_voice_switch(self: &Settings, key: &QString, on: bool) -> QString;
+
+        /// Picks the input profile (`standard`, `studio`, `custom`) as the
+        /// desktop's `Audio.setProfile`; returns what `voiceSettings` reads.
+        #[qinvokable]
+        #[cxx_name = "setVoiceProfile"]
+        fn set_voice_profile(self: &Settings, profile: &QString) -> QString;
     }
 
     impl cxx_qt::Initialize for Settings {}
@@ -713,6 +738,24 @@ impl qobject::Settings {
 
     pub fn play_test_sound(&self) {
         crate::platform::platform().play_test_sound();
+    }
+
+    pub fn voice_settings(&self) -> QString {
+        q(&crate::platform::platform()
+            .voice_settings_json()
+            .unwrap_or_default())
+    }
+
+    pub fn set_voice_switch(&self, key: &QString, on: bool) -> QString {
+        q(&crate::platform::platform()
+            .set_voice_switch(&key.to_string(), on)
+            .unwrap_or_default())
+    }
+
+    pub fn set_voice_profile(&self, profile: &QString) -> QString {
+        q(&crate::platform::platform()
+            .set_voice_profile(&profile.to_string())
+            .unwrap_or_default())
     }
 
     pub fn load_shares(&self) {

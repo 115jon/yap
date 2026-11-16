@@ -10,7 +10,12 @@
 //! per-person panning: those need the desktop's own audio path.
 //! Per-person volume and local mute are heard (libwebrtc's own playout
 //! gain per remote track) and kept per signed-in user in the desktop's
-//! voice settings file ([`peer_audio`], [`set_peer_audio`]).
+//! voice settings file ([`peer_audio`], [`set_peer_audio`]), and so are
+//! the mic's processing switches, under the desktop's keys
+//! ([`voice_settings_json`], [`set_voice_switch`], [`set_voice_profile`]):
+//! noise suppression, echo cancellation and gain control run where
+//! libwebrtc puts them (the phone's own effects where it has them, its
+//! software APM where not; `engine/webrtc.rs`).
 //! The soundboard and UI sounds play on the app's speaker (sound.rs), as
 //! call audio while a call runs.
 
@@ -20,11 +25,11 @@ use std::time::Duration;
 
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::watch;
-use yap_cache::voice::{self as saved_voice, PeerSettings, VoiceSettings};
+use yap_cache::voice::{self as saved_voice, InputProfile, PeerSettings, VoiceSettings};
 use yap_core::{Api, Command, VoiceCommand, VoiceEvents, VoiceTarget, VoiceUpdate};
 use yap_ui::client;
 use yap_voice::call::{self, CallAudio, Host};
-use yap_voice::{peer_gain, CameraEncoding, Playback, VideoIntent};
+use yap_voice::{peer_gain, CameraEncoding, Playback, Processing, VideoIntent};
 
 use crate::screen::PhoneScreen;
 
@@ -149,12 +154,16 @@ pub fn signed_in(api: &Api, user_id: &str) {
     *peers = Some((user_id.to_owned(), settings));
 }
 
-/// The signed-in user and their voice settings (only the per-person
-/// volumes are the phone's to change; the rest is kept as the file has it).
+/// The signed-in user and their voice settings (the per-person volumes and
+/// the processing switches are the phone's to change; the rest is kept as
+/// the file has it).
 static PEERS: Mutex<Option<(String, VoiceSettings)>> = Mutex::new(None);
 
-/// What calls hear of each person: their volumes and mutes. The phone sets
-/// nothing else of the call's audio, so the rest stays at its defaults.
+/// What calls take from the settings: each person's volume and mute, and
+/// the mic's processing as the desktop resolves it (high fidelity turns it
+/// all off; gain control is on otherwise). No RNNoise on the phone, so
+/// WebRTC's noise suppression is never handed to it. The rest stays at the
+/// call's defaults.
 fn hear(settings: &VoiceSettings) {
     call::set_call_audio(CallAudio {
         playback: Playback {
@@ -165,8 +174,99 @@ fn hear(settings: &VoiceSettings) {
                 .collect(),
             ..Playback::default()
         },
+        processing: Processing::from_settings(
+            settings.noise_suppression,
+            settings.echo_cancellation,
+            settings.stream_high_fidelity,
+            false,
+        ),
         ..CallAudio::default()
     });
+}
+
+/// The processing switches as the phone's Voice settings read them, under
+/// the desktop's `Audio` names: `{inputProfile, noiseSuppression,
+/// echoCancellation, highFidelity, noiseReduction, noiseReductionSupported}`
+/// (`noiseReduction` is `none` or `rnnoise`; the phone runs no RNNoise, so
+/// it reads `none` and `noiseReductionSupported`, the phone's own key, is
+/// false). The defaults before the first sign-in; the signed-in user's
+/// after it (a sign-out keeps the last user's, as the per-person volumes
+/// do).
+pub fn voice_settings_json() -> String {
+    let peers = PEERS.lock().unwrap_or_else(PoisonError::into_inner);
+    let defaults = VoiceSettings::default();
+    let s = peers.as_ref().map_or(&defaults, |(_, settings)| settings);
+    let profile = match s.input_profile {
+        InputProfile::Standard => "standard",
+        InputProfile::Studio => "studio",
+        InputProfile::Custom => "custom",
+    };
+    serde_json::json!({
+        "inputProfile": profile,
+        "noiseSuppression": s.noise_suppression,
+        "echoCancellation": s.echo_cancellation,
+        "highFidelity": s.stream_high_fidelity,
+        "noiseReduction": "none",
+        "noiseReductionSupported": false,
+    })
+    .to_string()
+}
+
+/// Applies a change to the signed-in user's settings: heard at once (the
+/// call in progress and later ones) and saved. Returns the settings as
+/// [`voice_settings_json`] reads them; nothing changes before the first
+/// sign-in.
+fn edit_voice(f: impl FnOnce(&mut VoiceSettings)) -> String {
+    {
+        let mut peers = PEERS.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((me, settings)) = peers.as_mut() {
+            f(settings);
+            hear(settings);
+            if let Some(dir) = yap_cache::settings::app_dir() {
+                if let Err(error) = saved_voice::save_voice(&dir, me, settings) {
+                    eprintln!("[voice] voice settings not saved: {error}");
+                }
+            }
+        }
+    }
+    voice_settings_json()
+}
+
+/// One processing switch by the desktop's `Audio.setSwitch` key:
+/// `noiseSuppression`, `echoCancellation` or `highFidelity` (the web's
+/// `streamHighFidelity` too), with the switches it turns off alongside as
+/// on the desktop and the web (high fidelity turns noise suppression and
+/// echo cancellation off; either of those turns high fidelity off). Any
+/// other key (RNNoise, spatial audio: not on the phone) changes nothing.
+/// Like the desktop's, it does not check the profile: the desktop's page
+/// offers the switches only under `custom`, and so should the phone's.
+pub fn set_voice_switch(key: &str, on: bool) -> String {
+    let web = match key {
+        "noiseSuppression" | "echoCancellation" => key,
+        "highFidelity" | "streamHighFidelity" => "streamHighFidelity",
+        _ => {
+            eprintln!("[voice] no {key} switch on the phone");
+            return voice_settings_json();
+        }
+    };
+    edit_voice(|s| {
+        s.set_switch(web, on);
+    })
+}
+
+/// The input profile, as the desktop's `Audio.setProfile`: `standard`
+/// (noise suppression and echo cancellation on), `studio` (all processing
+/// off, high fidelity) or `custom` (the switches as they are, each one
+/// settable). A preset also turns RNNoise, spatial audio and automatic
+/// sensitivity off in the saved file, as on the desktop (the phone uses
+/// none of them yet).
+pub fn set_voice_profile(profile: &str) -> String {
+    let profile = match profile {
+        "studio" => InputProfile::Studio,
+        "custom" => InputProfile::Custom,
+        _ => InputProfile::Standard,
+    };
+    edit_voice(|s| s.set_profile(profile))
 }
 
 /// Someone's volume (0..=400) and our local mute for them; the defaults

@@ -996,12 +996,27 @@ without libwebrtc. What is the phone's own:
   which `build.sh` runs; the Media Foundation and D3D11 patches in them
   build only for Windows). Audio goes through libwebrtc's own Android
   device module, `AudioRecord` on the `VOICE_COMMUNICATION` source and
-  `AudioTrack`, with the platform's echo canceller and noise suppressor
-  and WebRTC's processing. That is the path the desktop keeps behind
+  `AudioTrack`. That is the path the desktop keeps behind
   `YAP_ADM_AUDIO=1`, so the phone has no RNNoise and no per-person panning
-  (spatial audio is heard flat), and one mixed playout. The voice settings
-  are the defaults: the phone has no page for the output and per-person
-  volumes, sensitivity or processing yet. The soundboard's clips and
+  (spatial audio is heard flat), and one mixed playout. Mic processing:
+  echo cancellation, noise suppression and gain control are on by default
+  (the desktop's Standard profile). For each one libwebrtc uses the
+  platform's effect when Android reports it (`AcousticEchoCanceler`,
+  `NoiseSuppressor`) and its own software APM otherwise; the high-pass
+  filter is always WebRTC's. The resolved state is logged on each
+  call's first stats tick and whenever it changes:
+  `[voice] apm yes aec=sw(...) ns=sw(...) agc=sw(...) hpf=sw(...)`
+  (`sw` WebRTC's APM, `hw` the platform's effect, `off`). On the S22 Ultra
+  Android reports no effects, so all four run in software, on top of the
+  echo and noise reduction Samsung's audio HAL applies to every
+  `VOICE_COMMUNICATION` recording (logcat `SetECNSForVoip`), which apps
+  cannot turn off from this source. The switches are the desktop's and are
+  kept in the same per-user voice settings file:
+  `Settings.voiceSettings()`, `Settings.setVoiceSwitch(key, on)` and
+  `Settings.setVoiceProfile(profile)` (keys `noiseSuppression`,
+  `echoCancellation`, `highFidelity`; profiles `standard`, `studio`,
+  `custom`), applied to the call at once. The phone has no page for the
+  output volume or sensitivity yet. The soundboard's clips and
   Listen Together's stream play through `yap-audio` on the app's speaker
   (`yap-speaker`, AAudio) as call audio. Video: remote cameras and shares,
   the phone's own camera and its screen share (MediaProjection after
