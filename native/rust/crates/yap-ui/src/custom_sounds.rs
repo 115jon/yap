@@ -1,10 +1,12 @@
 //! `CustomSounds`: Settings → Notifications → Custom sounds
-//! (CustomSoundsCard.tsx, useCustomSoundsStore.ts). An imported file is
-//! checked ([`yap_core::custom_sounds`]), decoded off the GUI thread to
-//! learn its length, then copied to
-//! `%LOCALAPPDATA%\Yap.Data\custom-sounds\<stem>.<ext>` and listed in
-//! `custom-sounds.json`. Nothing is uploaded. [`crate::sound`] plays the
-//! file instead of the built-in sound while "Use custom sounds" is on.
+//! (CustomSoundsCard.tsx, useCustomSoundsStore.ts), for both apps. An
+//! imported file is checked ([`yap_core::custom_sounds`]), decoded off the
+//! GUI thread to learn its length, then copied to
+//! `custom-sounds/<stem>.<ext>` in the app's folder (`%LOCALAPPDATA%\Yap.Data`
+//! on the desktop, the app's data folder on the phone) and listed in
+//! `custom-sounds.json`. Nothing is uploaded. [`start`] plays the file
+//! instead of the built-in sound while "Use custom sounds" is on (after
+//! each app's own gates).
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -55,16 +57,20 @@ pub mod qobject {
 use core::pin::Pin;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QList, QString, QStringList};
 use serde_json::json;
+use yap_audio::ui;
 use yap_cache::settings::app_dir;
 use yap_core::custom_sounds::{self as cs, CustomSound, Refusal};
+use yap_core::shell::Sound;
+use yap_core::synth;
 
 use crate::gui;
+use crate::platform::platform;
 
 const INDEX: &str = "custom-sounds.json";
 const FOLDER: &str = "custom-sounds";
@@ -149,7 +155,7 @@ fn save_index(map: &BTreeMap<String, CustomSound>) {
 }
 
 /// The imported file for a sound, if there is one.
-pub(crate) fn file_for(id: &str) -> Option<PathBuf> {
+pub fn file_for(id: &str) -> Option<PathBuf> {
     let name = with_library(|map| map.get(id).map(|s| s.file.clone()))?;
     folder().map(|dir| dir.join(name))
 }
@@ -195,7 +201,7 @@ fn import(id: &str, path: &Path) -> Result<CustomSound, Refusal> {
     std::fs::create_dir_all(&dir)
         .and_then(|()| std::fs::write(dir.join(&file), &bytes))
         .map_err(|_| cs::decode_refusal(&name))?;
-    crate::sound::forget_custom(id);
+    forget_decoded(id);
     Ok(CustomSound {
         name,
         file,
@@ -229,7 +235,7 @@ fn forget(id: &str) {
             save_index(map);
         }
     });
-    crate::sound::forget_custom(id);
+    forget_decoded(id);
 }
 
 fn render(rust: &CustomSoundsRust) -> QString {
@@ -266,7 +272,7 @@ fn refresh(mut object: Pin<&mut qobject::CustomSounds>) {
 }
 
 impl gui::Slot for qobject::CustomSounds {
-    yap_ui::slot_cell!(qobject::CustomSounds);
+    crate::slot_cell!(qobject::CustomSounds);
 
     fn restore(self: Pin<&mut Self>) {
         refresh(self);
@@ -288,13 +294,7 @@ impl Drop for CustomSoundsRust {
 /// Importing a file is a clear sign the person wants to hear it: the
 /// switch turns on (CustomSoundsCard.tsx `onImported`).
 fn switch_on() {
-    if let Some(mut desktop) = gui::object::<crate::desktop::qobject::Desktop>() {
-        if !*desktop.custom_sounds() {
-            desktop
-                .as_mut()
-                .set_setting(&QString::from("customSounds"), true);
-        }
-    }
+    platform().custom_sounds_imported();
 }
 
 type Outcome = (String, Result<CustomSound, Refusal>);
@@ -425,6 +425,112 @@ impl qobject::CustomSounds {
     }
 
     pub fn preview(&self, id: &QString) {
-        crate::sound::preview(&id.to_string());
+        preview(&id.to_string());
+    }
+}
+
+// ── Playback ──────────────────────────────────────────────────────────────
+
+/// Imported files, decoded once per sound id (the volume is applied when
+/// one plays, so this does not grow with the slider).
+fn decoded() -> std::sync::MutexGuard<'static, HashMap<String, Arc<Vec<f32>>>> {
+    static DECODED: OnceLock<Mutex<HashMap<String, Arc<Vec<f32>>>>> = OnceLock::new();
+    DECODED
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A new file (or none) for a sound: its decoded copy goes.
+fn forget_decoded(id: &str) {
+    decoded().remove(id);
+}
+
+/// The native sound a catalog id plays as, when this build has one.
+fn native_sound(id: &str) -> Option<Sound> {
+    Sound::ALL.into_iter().find(|s| cs::id_of(*s) == id)
+}
+
+/// 48 kHz stereo `f32` to 16-bit at the sound volume.
+fn custom_pcm(samples: &[f32], volume: u8) -> Vec<i16> {
+    // A gain in 0..=1 loses nothing as f32.
+    #[allow(clippy::cast_possible_truncation)]
+    let gain = synth::volume_to_gain(volume) as f32;
+    samples
+        .iter()
+        // Clamped to ±1 first, so the cast cannot overflow.
+        .map(|s| ((s * gain).clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16)
+        .collect()
+}
+
+/// Plays an imported file on a short-lived thread (decoded there the
+/// first time).
+fn play_custom(id: String, group: &'static str, max_voices: usize, volume: u8) {
+    let spawned = std::thread::Builder::new()
+        .name("yap-sound".into())
+        .spawn(move || {
+            let cached = decoded().get(&id).cloned();
+            let samples = match cached {
+                Some(samples) => samples,
+                None => {
+                    let Some(path) = file_for(&id) else {
+                        return;
+                    };
+                    let hint = path.extension().and_then(|e| e.to_str()).map(str::to_owned);
+                    let result = std::fs::read(&path)
+                        .map_err(|e| e.to_string())
+                        .and_then(|bytes| yap_audio::decode_sound(&bytes, hint.as_deref()));
+                    match result {
+                        Ok((samples, _)) => {
+                            let samples = Arc::new(samples);
+                            decoded().insert(id.clone(), Arc::clone(&samples));
+                            samples
+                        }
+                        Err(error) => {
+                            eprintln!("[sound] custom {id}: {error}");
+                            return;
+                        }
+                    }
+                }
+            };
+            eprintln!("[sound] custom {id}");
+            ui::play_pcm(group, max_voices, Arc::new(custom_pcm(&samples, volume)), 2);
+        });
+    if let Err(error) = spawned {
+        eprintln!("[sound] no thread: {error}");
+    }
+}
+
+/// Plays `sound` at `volume` (0 to 100): its imported file when `custom`
+/// is on and there is one, else the built-in sound. The app's own gates
+/// (the sounds switch, the category) come first.
+pub fn start(sound: Sound, volume: u8, custom: bool) {
+    if volume == 0 {
+        return;
+    }
+    let id = cs::id_of(sound);
+    if custom && file_for(id).is_some() {
+        let spec = sound.spec();
+        if !ui::allow(sound) {
+            return;
+        }
+        play_custom(id.to_owned(), spec.group, spec.max_voices, volume);
+        return;
+    }
+    ui::play(sound, volume);
+}
+
+/// The custom sounds card's preview: the imported file when there is one,
+/// else the built-in sound, at the sound volume.
+pub fn preview(id: &str) {
+    let volume = platform().sound_volume();
+    if volume == 0 {
+        return;
+    }
+    if file_for(id).is_some() {
+        let group = native_sound(id).map_or("custom", |s| s.spec().group);
+        play_custom(id.to_owned(), group, 1, volume);
+    } else if let Some(sound) = native_sound(id) {
+        start(sound, volume, false);
     }
 }

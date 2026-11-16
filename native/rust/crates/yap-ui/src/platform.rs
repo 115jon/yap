@@ -149,6 +149,14 @@ pub trait Platform: Send + Sync + 'static {
     /// (`Settings.playTestSound`).
     fn play_test_sound(&self) {}
 
+    /// The UI sound volume, 0 to 100 (`CustomSounds.preview` plays at it).
+    fn sound_volume(&self) -> u8 {
+        100
+    }
+
+    /// A custom sound was imported: "Use custom sounds" turns on.
+    fn custom_sounds_imported(&self) {}
+
     /// The mic's processing settings as JSON, under the desktop `Audio`
     /// object's names (`{inputProfile, noiseSuppression, echoCancellation,
     /// highFidelity, noiseReduction}`, plus `noiseReductionSupported`, which

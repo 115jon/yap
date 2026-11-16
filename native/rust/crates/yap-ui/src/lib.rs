@@ -15,6 +15,7 @@ pub mod calls;
 pub mod client;
 pub mod color;
 pub mod command_menu;
+pub mod custom_sounds;
 pub mod extras;
 pub mod friends;
 pub mod gui;

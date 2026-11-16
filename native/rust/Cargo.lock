@@ -4155,6 +4155,7 @@ dependencies = [
  "tokio",
  "uuid",
  "yap-anim",
+ "yap-audio",
  "yap-cache",
  "yap-core",
  "yap-protocol",

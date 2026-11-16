@@ -239,7 +239,6 @@ fn main() {
     CxxQtBuilder::new_qml_module(QmlModule::new("com.yap.native").qml_files(files))
         .files([
             "src/audio.rs",
-            "src/custom_sounds.rs",
             "src/desktop.rs",
             "src/games.rs",
             "src/hotkeys.rs",
