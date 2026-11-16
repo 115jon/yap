@@ -808,9 +808,16 @@ so a reader sees one whole version. The desktop is unchanged (its
 Both are pages of the stack (they slide in from the right), built on the
 desktop's objects with phone list layouts:
 
-- **Settings** (the account row at the drawer's foot): who is signed in,
-  then numbered sections under 2px ink rules (the desktop's rule cards).
-  _Status_: Online, Idle, Do not disturb, Invisible and the custom status
+- **Settings** (the account panel's Settings key): a hub (`SettingsPage`)
+  grouped as the web's settings are (You, Calls, App), each category its
+  own stacked page on `SettingsFrame` with numbered sections under 2px ink
+  rules (the desktop's rule cards). Your card on top opens _Profile_; the
+  search field matches a setting's name or a few keywords and opens its
+  page. Back and Android's back step out one page at a time. The pages:
+  _Profile_, _Account_ (username, Sign out, Delete account), _Privacy &
+  safety_, _Devices_, _Yap Loud_, _Soundboard_, _Appearance_ (theme and
+  text size), _Notifications_ and _About_.
+  _Status_ (Profile): Online, Idle, Do not disturb, Invisible and the custom status
   line (`Session.setStatus`). _Appearance_: the core's seven themes as
   thumbnails (`Settings.chooseTheme`, kept in this device's
   `appearance.json`; "Use on all my devices" is `Settings.changeThemeSync`).
