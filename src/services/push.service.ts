@@ -167,8 +167,6 @@ async function deleteStaleToken(db: D1Database, token: string): Promise<void> {
 // (`GET /api/notifications/:id/push`, `notificationPushText` below) with
 // its own session.
 
-/** The Android channel the app creates at startup for message pushes. */
-export const MESSAGES_CHANNEL_ID = "messages";
 /** Marks a data-only push the app's native FCM service handles. */
 const NATIVE_FORMAT = "2";
 

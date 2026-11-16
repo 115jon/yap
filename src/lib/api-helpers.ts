@@ -413,8 +413,10 @@ export function pendingDeletionResponse(
 /** Seconds a client should wait before retrying a 503 AUTH_UNAVAILABLE. */
 const AUTH_RETRY_AFTER_SECONDS = 5;
 
-/** The 401 for a request with no session. Clients read it as "sign in again". */
-/** `_req` is unused; kept so callers need not change. */
+/**
+ * The 401 for a request with no session. Clients read it as "sign in again".
+ * `_req` is unused; kept so callers need not change.
+ */
 export function unauthorizedResponse(_req?: Request): Response {
   return Response.json({ error: "Unauthorized" }, { status: 401 });
 }
