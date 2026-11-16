@@ -1,9 +1,9 @@
 import QtQuick
 import QtQuick.Templates as T
-import com.yap.native
 import Yap.Ui
 
-// The input sensitivity meter (InputSensitivityMeter.tsx, MicTestWidget):
+// The input sensitivity meter (InputSensitivityMeter.tsx, MicTestWidget),
+// on the desktop's Voice & video page and the phone's:
 // the mic level as a ladder of 16 cells on tint-3, lit talk above the
 // marker and ink-3 below it, and the marker itself, a 2 px warning-ink
 // bar. The value is the marker on the 0..100 scale (dB + 100); dragging it

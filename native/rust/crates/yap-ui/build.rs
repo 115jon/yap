@@ -55,6 +55,7 @@ fn main() {
         QmlFile::from("qml/components/KitButton.qml"),
         QmlFile::from("qml/components/LazyPopup.qml"),
         QmlFile::from("qml/components/Led.qml"),
+        QmlFile::from("qml/components/LevelMeter.qml"),
         QmlFile::from("qml/components/LinkText.qml"),
         QmlFile::from("qml/components/ListEnter.qml"),
         QmlFile::from("qml/components/ListenCore.qml"),
