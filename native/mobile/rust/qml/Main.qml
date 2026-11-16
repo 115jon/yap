@@ -476,7 +476,7 @@ Window {
             return {}
         }
     }
-    onReadyChanged: if (ready) {
+    function applyVoicePrefs() {
         const voice = voicePrefs()
         Native.setPreferredAudioRoute(voice.outputDeviceId ?? "default")
         Native.setCameraFacing(voice.videoDeviceId !== "back")
@@ -781,6 +781,7 @@ Window {
     // next account.
     onReadyChanged: {
         if (ready) {
+            applyVoicePrefs()
             openFromNotification()
             openFromLink()
             takeAnswered()
