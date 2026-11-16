@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.5.0](https://github.com/115jon/yap/compare/v4.4.1...v4.5.0) (2026-11-16)
+
+
+### Features
+
+* **api:** ✨ let the native apps link steam through the system browser ([#363](https://github.com/115jon/yap/issues/363)) ([06f601b](https://github.com/115jon/yap/commit/06f601b94595f44e331908a397dbde4d2dc4a074))
+
+
+### Bug Fixes
+
+* **api:** let a browser load a native app's steam begin url twice ([#366](https://github.com/115jon/yap/issues/366)) ([7bbb859](https://github.com/115jon/yap/commit/7bbb859e503b12586fd369e3584bf08bbb7faf69))
+
 ## [4.4.1](https://github.com/115jon/yap/compare/v4.4.0...v4.4.1) (2026-11-16)
 
 
