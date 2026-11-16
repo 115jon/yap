@@ -601,7 +601,7 @@ Rectangle {
                             consequence: root.devices.others.length === 1
                                 ? qsTr("Your other device will be signed out and need to sign in again.")
                                 : qsTr("Your %1 other devices will be signed out and need to sign in again.").arg(root.devices.others.length)
-                            confirmLabel: qsTr("Sign out all")
+                            confirmLabel: qsTr("Sign out all other devices")
                             busy: root.devices.busy(root.devices.allOthers)
                             error: root.devices.errorFor(root.devices.allOthers)
                             onCancelled: root.devices.disarm()

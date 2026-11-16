@@ -59,8 +59,10 @@ QtObject {
         else
             Extras.revokeSession(id)
     }
+    // One sign-out at a time (the core drops a second): any running one
+    // keeps every confirm busy.
     function busy(id) {
-        return account.revoking === id
+        return (account.revoking ?? "") !== ""
     }
     function errorFor(id) {
         return account.revokeErrorId === id ? account.revokeError ?? "" : ""
