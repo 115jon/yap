@@ -64,6 +64,7 @@ const QML: &[&str] = &[
     "qml/CallVideo.qml",
     "qml/DmCallStrip.qml",
     "qml/SoundboardSheet.qml",
+    "qml/SoundForm.qml",
     "qml/IncomingCallSheet.qml",
     "qml/AttachSheet.qml",
     "qml/BottomSheet.qml",
