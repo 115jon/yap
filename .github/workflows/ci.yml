@@ -116,8 +116,13 @@ jobs:
       # yap-core without its `runtime` feature (the store and the rules
       # modules) must build for the browser: no tokio, reqwest, keyring or
       # SQLite in it. packages/rust/yap-core-wasm depends on exactly that.
+      # A check, not clippy: clippy lints only workspace members, and the
+      # native crates are path dependencies here. RUSTFLAGS turns their
+      # rustc warnings (dead code once I/O is gone, say) into errors.
       - name: Check yap-core's pure half builds for wasm
-        run: cargo clippy --manifest-path packages/rust/Cargo.toml -p yap-core-wasm --target wasm32-unknown-unknown -- -D warnings
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --manifest-path packages/rust/Cargo.toml -p yap-core-wasm --target wasm32-unknown-unknown
 
   quality:
     name: quality

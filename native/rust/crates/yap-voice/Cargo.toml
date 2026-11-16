@@ -41,7 +41,7 @@ yap-cache = { workspace = true, features = ["sqlite"], optional = true }
 # Path dependencies, not the workspace ones: those keep their default
 # (native-tls, desktop) features, and the mobile app builds this crate on
 # rustls without them.
-yap-core = { path = "../yap-core", default-features = false, optional = true }
+yap-core = { path = "../yap-core", default-features = false, features = ["runtime"], optional = true }
 yap-protocol.workspace = true
 yap-realtime = { path = "../yap-realtime", default-features = false }
 yap-speaker.workspace = true

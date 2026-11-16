@@ -51,6 +51,10 @@ runtime = [
 desktop = ["runtime", "dep:rusty-leveldb", "dep:semver"]
 
 [[test]]
+name = "chunked"
+required-features = ["runtime"]
+
+[[test]]
 name = "install"
 required-features = ["desktop"]
 

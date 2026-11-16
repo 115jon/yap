@@ -1,7 +1,7 @@
 //! Yap REST: JSON over HTTPS with the Kova session as a Bearer token.
 //!
 //! The session, the error type and the URL rules build without the
-//! `runtime` feature; the client ([`Api`]) needs it.
+//! `runtime` feature; the client (`Api`) needs it.
 
 #[cfg(feature = "runtime")]
 use std::error::Error as _;

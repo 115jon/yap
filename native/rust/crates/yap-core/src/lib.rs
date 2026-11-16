@@ -1,11 +1,11 @@
 //! The Yap client core, without Qt: configuration, REST, Kova sign-in, a
 //! typed state store with a pure reducer ([`store`]), and the runtime that
-//! executes its effects ([`runtime`]).
+//! executes its effects (`runtime`).
 //!
 //! The UI talks to it through [`Command`]s in and batches of
 //! [`ViewUpdate`]s out: typed scalars and row diffs per list model
 //! ([`store::view`]). The gateway and voice calls still live in the app
-//! crate and plug in through [`runtime::Realtime`].
+//! crate and plug in through `runtime::Realtime`.
 //!
 //! Everything that does I/O (REST, sign-in, the keyring, the runtime, the
 //! SQLite cache) is behind the `runtime` feature, which every app build
