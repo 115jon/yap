@@ -42,8 +42,16 @@ Rectangle {
 
     implicitHeight: shown ? Math.max(36, body.implicitHeight + 12) : 0
     visible: shown
-    color: critical ? Theme.dangerTint : tone === "warning" ? Theme.warningTint : Theme.ply2
+    // The tints are translucent: an opaque ground under them, so the rows
+    // that scroll behind the strip (the phone's chat) never show through.
+    color: Theme.ply2
     clip: true
+
+    Rectangle {
+        anchors.fill: parent
+        visible: root.critical || root.tone === "warning"
+        color: root.critical ? Theme.dangerTint : Theme.warningTint
+    }
 
     Timer {
         running: root.expiring
