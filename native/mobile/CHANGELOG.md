@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0](https://github.com/115jon/yap/compare/qt-android-v0.13.2...qt-android-v0.14.0) (2026-11-16)
+
+
+### Features
+
+* **native:** ✨ play videos and embed players in the app ([#371](https://github.com/115jon/yap/issues/371)) ([4d4f046](https://github.com/115jon/yap/commit/4d4f046d9cba70ed24827eab96134e22a0b21b21))
+* **native:** phone settings become a searchable hub of pages ([#368](https://github.com/115jon/yap/issues/368)) ([b156bca](https://github.com/115jon/yap/commit/b156bcacfd20a70034d323abf641b4fca05445b0))
+
 ## [0.13.2](https://github.com/115jon/yap/compare/qt-android-v0.13.1...qt-android-v0.13.2) (2026-11-16)
 
 
