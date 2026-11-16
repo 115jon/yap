@@ -31,6 +31,7 @@
 
 #include "a11y.h"
 #include "fling.h"
+#include "inappplayer.h"
 #include "native.h"
 #include "rustnetwork.h"
 #include "videohub.h"
@@ -137,6 +138,9 @@ int main(int argc, char* argv[])
   // Video and sound previews on Android's player (videoplayer.h).
   auto* player = new VideoPlayer(&app);
   qmlRegisterSingletonInstance("Yap.Mobile", 1, 0, "Player", player);
+  // Videos and web embed players in the chat's player sheet
+  // (inappplayer.h).
+  qmlRegisterType<InAppPlayer>("Yap.Mobile", 1, 0, "InAppPlayer");
 
   QQmlApplicationEngine engine;
   // Network pictures over the core's rustls client, with a disk cache in

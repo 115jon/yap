@@ -5,7 +5,9 @@
 // in Java (android/src/dev/yap/qtproto/media):
 //
 //   play()       a video full screen in PlayerActivity (Media3), from where
-//                it was in the chat; a GIF loops.
+//                it was; a GIF loops. A tap on a video in the chat plays it
+//                in the player sheet instead (InAppPlayer, inappplayer.h,
+//                which signs its URL through resolve()).
 //   playAudio()  one sound preview at a time (InlineAudio, a TikTok post's
 //                sound), stopped when the app leaves the front.
 //   posters      `image://videoposter/<url>`: a video's first frame for the
