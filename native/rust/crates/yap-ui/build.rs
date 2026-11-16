@@ -169,6 +169,7 @@ fn main() {
         QmlFile::from("qml/components/MediaTile.qml"),
         QmlFile::from("qml/components/PlayDisc.qml"),
         QmlFile::from("qml/components/SensitiveMediaFrame.qml"),
+        QmlFile::from("qml/components/SiteBanner.qml"),
         QmlFile::from("qml/embeds/EmbedCard.qml"),
         QmlFile::from("qml/embeds/EmbedHeader.qml"),
         QmlFile::from("qml/embeds/EmbedStatusCard.qml"),

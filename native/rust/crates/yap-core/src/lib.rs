@@ -36,6 +36,7 @@ pub mod runtime;
 pub mod search;
 pub mod settings;
 pub mod shell;
+pub mod site_config;
 pub mod store;
 pub mod synth;
 #[cfg(feature = "desktop")]

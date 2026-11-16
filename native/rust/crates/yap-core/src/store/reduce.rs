@@ -19,6 +19,7 @@ mod push;
 mod search;
 mod settings;
 mod shop;
+mod site;
 mod social;
 mod threads;
 mod warm;
@@ -141,6 +142,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
         }
         Input::BootRetry { session } => state.on_boot_retry(&mut fx, session),
         Input::SuspendElapsed { generation } => state.on_suspend_elapsed(&mut fx, generation),
+        Input::SiteRefresh { generation } => state.on_site_refresh(generation),
     }
     state.sync_activity(&mut fx);
     state.sync_settings(&mut fx);
@@ -152,6 +154,7 @@ pub fn reduce(state: &mut State, input: Input) -> Vec<Effect> {
     state.sync_invites(&mut fx);
     state.sync_apps(&mut fx);
     state.sync_deletion(&mut fx);
+    state.sync_site(&mut fx);
     fx.0
 }
 
@@ -1033,6 +1036,7 @@ impl State {
         self.window_shown = shown;
         self.window_generation += 1;
         if shown {
+            self.site_on_screen();
             self.standby_paused = false;
             self.sync_standby(fx);
         } else {
@@ -1847,6 +1851,7 @@ impl State {
             Command::RemoveEmbeds(id) => self.remove_embeds(fx, &id),
             Command::Extras(command) => self.on_extras(fx, command),
             Command::Deletion(command) => self.on_deletion(fx, command),
+            Command::Site(command) => self.on_site(fx, command),
             Command::Calls(command) => self.on_calls(fx, command),
             Command::Quit => {
                 if let Some(standby) = self.standby.take() {
@@ -2261,6 +2266,7 @@ impl State {
         }
         let mut answer = Some(result);
         if self.route_deletion_http(fx, id, &mut answer)
+            || self.route_site_http(fx, id, &mut answer)
             || self.route_push_http(id, &mut answer)
             || self.route_prefetch(fx, id, &mut answer)
             || self.route_calls_http(fx, id, &mut answer)

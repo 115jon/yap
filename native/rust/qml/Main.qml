@@ -170,8 +170,19 @@ ApplicationWindow {
         sourceComponent: SignInView {}
     }
 
+    // The site announcement (SiteAnnouncementBanner.tsx): across the top
+    // of the signed-in app, under the title bar.
+    SiteBanner {
+        id: siteBanner
+        width: parent.width
+        visible: shown && window.ready && !ShellState.stageFullscreen
+        height: visible ? implicitHeight : 0
+        onLinkRequested: url => Files.openExternal(url)
+    }
+
     Shell {
         anchors.fill: parent
+        anchors.topMargin: siteBanner.height
         visible: window.ready
     }
 
