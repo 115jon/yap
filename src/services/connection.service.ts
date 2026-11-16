@@ -13,8 +13,8 @@
  * A link the native apps start (their session is not a browser cookie)
  * reaches the system browser through the begin route instead: it carries
  * the nonce and the binding, and checkLinkBinding lets the browser take the
- * binding as its cookie (as often as the browser loads the URL: some load a
- * link twice). Its callback links nothing: holdLinkResult keeps the verified account
+ * binding as its cookie: on the first load, and again within
+ * BEGIN_GRACE_MS of it (some browsers load a link twice). Its callback links nothing: holdLinkResult keeps the verified account
  * behind a one-time code the browser hands to the app, and takeLinkResult
  * gives it only to the account that started the link (migration 050).
  */
@@ -140,16 +140,21 @@ export async function createLinkState(
   return { nonce, binding, returnTo };
 }
 
+/** How long after its first load a begin URL still works. */
+export const BEGIN_GRACE_MS = 30_000;
+
 export type CheckedLinkBinding =
   | { ok: true; returnTo: string }
   | { ok: false; reason: "expired" | "invalid" };
 
 /**
  * The begin route's half of a native link: the state is still pending, for
- * this provider, and the binding is its own. Nothing changes, so a browser
- * that loads the begin URL twice (a prefetch, a reload) still gets through;
- * the URL never links anything by itself, since only the account that
- * started the link can claim what its callback verifies (takeLinkResult).
+ * this provider, the binding is its own, and the URL is loaded for the
+ * first time or within BEGIN_GRACE_MS of that (a browser that fetches a
+ * link twice still gets through; a URL seen later is dead). The first load
+ * is stamped (begun_at). The URL never links anything by itself: only the
+ * account that started the link can claim what its callback verifies
+ * (takeLinkResult).
  */
 export async function checkLinkBinding(
   db: D1Database,
@@ -168,14 +173,21 @@ export async function checkLinkBinding(
     sha256Hex(input.nonce),
     sha256Hex(input.binding),
   ]);
+  // Only a state whose binding matches is stamped, so a wrong guess can't
+  // start the grace for the real URL.
   const row = await db
     .prepare(
-      `SELECT return_to, binding_hash FROM connection_link_states
-       WHERE state_hash = ? AND provider = ? AND expires_at >= ?`,
+      `UPDATE connection_link_states SET begun_at = COALESCE(begun_at, ?)
+       WHERE state_hash = ? AND provider = ? AND binding_hash = ? AND expires_at >= ?
+       RETURNING return_to, binding_hash, begun_at`,
     )
-    .bind(stateHash, input.provider, now)
-    .first<{ return_to: string; binding_hash: string }>();
-  if (!row || !constantTimeEqual(bindingHash, row.binding_hash)) {
+    .bind(now, stateHash, input.provider, bindingHash, now)
+    .first<{ return_to: string; binding_hash: string; begun_at: number }>();
+  if (
+    !row ||
+    !constantTimeEqual(bindingHash, row.binding_hash) ||
+    now - row.begun_at > BEGIN_GRACE_MS
+  ) {
     return { ok: false, reason: "expired" };
   }
   return { ok: true, returnTo: row.return_to };

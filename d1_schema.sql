@@ -526,7 +526,9 @@ CREATE TABLE IF NOT EXISTS connection_link_states (
     binding_hash TEXT NOT NULL,
     return_to TEXT NOT NULL,
     expires_at INTEGER NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    -- A native app's first load of its begin URL (migration 051).
+    begun_at INTEGER
 );
 
 -- A native app's verified link, waiting for that app to claim it

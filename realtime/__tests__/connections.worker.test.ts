@@ -833,7 +833,7 @@ function codeOf(location: string): string {
 }
 
 describe("a link a native app starts", () => {
-  it("answers a one-time begin URL on the Yap host, without a cookie", async () => {
+  it("answers a begin URL on the Yap host, without a cookie", async () => {
     const me = await newUser();
     const url = await startApp(me.token, "windows");
     expect(`${url.origin}${url.pathname}`).toBe(
@@ -903,6 +903,13 @@ describe("a link a native app starts", () => {
     const again = await begin(url);
     expect(again.response.status).toBe(303);
     expect(again.location).toContain("steamcommunity.com");
+    // The second load's browser finishes the link as usual.
+    const done = await appCallback(
+      assertion(again.returnTo(), steamId64()),
+      again.cookie,
+    );
+    expect((await complete(me.token, codeOf(done.location))).status).toBe(200);
+    expect(await rows(me.id)).toHaveLength(1);
     // A newer start replaces the state: the old URL goes back to the app.
     await startApp(me.token, "windows");
     const stale = await begin(url);
@@ -910,6 +917,35 @@ describe("a link a native app starts", () => {
       "yap-native://connection?provider=steam&status=expired",
     );
     expect(stale.cookies).toEqual([]);
+  });
+
+  it("is dead once the grace after its first load is over", async () => {
+    const me = await newUser();
+    const url = await startApp(me.token, "android");
+    expect((await begin(url)).location).toContain("steamcommunity.com");
+    await run(
+      `UPDATE connection_link_states SET begun_at = ? WHERE user_id = ?`,
+      Date.now() - 31_000,
+      me.id,
+    );
+    const late = await begin(url);
+    expect(late.location).toBe(
+      "yap://connection?provider=steam&status=expired",
+    );
+    expect(late.cookies).toEqual([]);
+  });
+
+  it("a wrong binding never starts the grace for the real URL", async () => {
+    const me = await newUser();
+    const url = await startApp(me.token, "windows");
+    const forged = new URL(url);
+    forged.searchParams.set("binding", "C".repeat(43));
+    await begin(forged);
+    const { results } = await db
+      .prepare(`SELECT begun_at FROM connection_link_states WHERE user_id = ?`)
+      .bind(me.id)
+      .all<{ begun_at: number | null }>();
+    expect(results[0]?.begun_at).toBeNull();
   });
 
   it("refuses a forged binding, a malformed state, another provider and no app", async () => {
