@@ -28,40 +28,50 @@ pub const CALL_BLOCKED: &str = "You can't call this user.";
 const CODE_YOU_BLOCKED: &str = "USER_BLOCKED";
 const CODE_BLOCKED_YOU: &str = "BLOCKED_BY_USER";
 
-/// Which side of a block closes a DM.
+/// What closes a DM: a side of a block, or the recipient's "who can DM
+/// you" setting ([`crate::dm_permission`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DmBlock {
     /// You blocked them (`USER_BLOCKED`).
     YouBlocked,
     /// They blocked you (`BLOCKED_BY_USER`).
     BlockedYou,
+    /// Their "who can DM you" setting does not let you in
+    /// (`NOT_ACCEPTING_DMS`).
+    NotAccepting,
 }
 
 impl DmBlock {
-    /// The view's name for it (`you_blocked`, `blocked_you`).
+    /// The view's name for it (`you_blocked`, `blocked_you`,
+    /// `not_accepting`).
     pub fn as_str(self) -> &'static str {
         match self {
             Self::YouBlocked => "you_blocked",
             Self::BlockedYou => "blocked_you",
+            Self::NotAccepting => "not_accepting",
         }
     }
 
-    /// The composer's notice.
-    pub fn notice(self) -> &'static str {
+    /// The composer's notice; `name` is the recipient's shown name (only
+    /// the setting's notice names them).
+    pub fn notice(self, name: &str) -> String {
         match self {
-            Self::YouBlocked => DM_YOU_BLOCKED,
-            Self::BlockedYou => DM_BLOCKED_YOU,
+            Self::YouBlocked => DM_YOU_BLOCKED.to_owned(),
+            Self::BlockedYou => DM_BLOCKED_YOU.to_owned(),
+            Self::NotAccepting => crate::dm_permission::not_accepting_message(name),
         }
     }
 }
 
-/// The side of a block an error answer (`{error, code}`) was refused
-/// over, by its `code`: 403 either way, or 409 for a friend request to
-/// someone you blocked.
+/// What an error answer (`{error, code}`) was refused over, by its
+/// `code`: a side of a block (403 either way, or 409 for a friend request
+/// to someone you blocked), or the recipient's "who can DM you" setting
+/// (403 `NOT_ACCEPTING_DMS`).
 pub fn refusal(status: u16, body: &Value) -> Option<DmBlock> {
     match (status, body.get("code").and_then(Value::as_str)?) {
         (403 | 409, CODE_YOU_BLOCKED) => Some(DmBlock::YouBlocked),
         (403, CODE_BLOCKED_YOU) => Some(DmBlock::BlockedYou),
+        (403, crate::dm_permission::CODE_NOT_ACCEPTING) => Some(DmBlock::NotAccepting),
         _ => None,
     }
 }
@@ -113,7 +123,7 @@ pub fn dm_composer_block(you_blocked: bool, refusal: Option<DmBlock>) -> Option<
     if you_blocked {
         Some(DmBlock::YouBlocked)
     } else {
-        refusal.filter(|r| *r == DmBlock::BlockedYou)
+        refusal.filter(|r| *r != DmBlock::YouBlocked)
     }
 }
 
@@ -151,6 +161,31 @@ mod tests {
         assert_eq!(refusal(500, &body("USER_BLOCKED")), None);
         assert_eq!(refusal(403, &body("ROOM_NOT_ALLOWED")), None);
         assert_eq!(refusal(403, &json!({ "error": DM_BLOCKED_YOU })), None);
+    }
+
+    #[test]
+    fn reads_the_dm_setting_refusal_by_its_code() {
+        let body = json!({
+            "error": "Alex isn't accepting messages from you.",
+            "code": "NOT_ACCEPTING_DMS",
+        });
+        assert_eq!(refusal(403, &body), Some(DmBlock::NotAccepting));
+        assert_eq!(refusal(409, &body), None);
+        let error = blocked(
+            DmBlock::NotAccepting,
+            403,
+            "Alex isn't accepting messages from you.",
+        );
+        assert_eq!(dm_refusal(&error), Some(DmBlock::NotAccepting));
+        assert_eq!(
+            block_sentence(&error),
+            Some("Alex isn't accepting messages from you.")
+        );
+        assert_eq!(
+            DmBlock::NotAccepting.notice("Alex"),
+            "Alex isn't accepting messages from you."
+        );
+        assert_eq!(DmBlock::BlockedYou.notice("Alex"), DM_BLOCKED_YOU);
     }
 
     #[test]
@@ -208,5 +243,14 @@ mod tests {
         // Unblocked elsewhere: a stale refusal of our own does not hold.
         assert_eq!(dm_composer_block(false, Some(DmBlock::YouBlocked)), None);
         assert_eq!(dm_composer_block(false, None), None);
+        // The recipient's setting closes it until we block them ourselves.
+        assert_eq!(
+            dm_composer_block(false, Some(DmBlock::NotAccepting)),
+            Some(DmBlock::NotAccepting)
+        );
+        assert_eq!(
+            dm_composer_block(true, Some(DmBlock::NotAccepting)),
+            Some(DmBlock::YouBlocked)
+        );
     }
 }

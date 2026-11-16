@@ -283,6 +283,9 @@ pub struct UserProfileUpdate {
     /// "Share my activity", sent only to the user's own sessions.
     #[serde(default)]
     pub share_activity: Option<bool>,
+    /// "Who can DM you", sent only to the user's own sessions.
+    #[serde(default)]
+    pub dm_permission: Option<String>,
     /// The serialized avatar display (crop and collectibles), as stored.
     #[serde(default, deserialize_with = "present")]
     pub avatar_display: Option<Option<Value>>,
@@ -329,6 +332,9 @@ impl UserProfileUpdate {
         }
         if let Some(share) = self.share_activity {
             user.share_activity = Some(share);
+        }
+        if let Some(permission) = &self.dm_permission {
+            user.dm_permission = Some(permission.clone());
         }
         if let Some(display) = &self.avatar_display {
             user.avatar_display.clone_from(display);
@@ -652,6 +658,9 @@ pub struct CallRinging {
 pub struct CallRingStop {
     pub call_id: Option<String>,
     pub reason: String,
+    /// The sentence for a ring the callee's "who can DM you" setting
+    /// refused (`not_accepting`: "Alex isn't accepting calls from you.").
+    pub message: Option<String>,
 }
 
 /// VoiceMove (op 42, room socket): a moderator moved this session.

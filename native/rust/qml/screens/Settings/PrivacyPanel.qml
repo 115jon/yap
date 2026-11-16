@@ -5,7 +5,8 @@ import com.yap.native
 import Yap.Ui
 
 // Privacy & safety (PrivacyPanel.tsx). Activity: "Share my activity",
-// saved to the account. Media filter: the four levels as a
+// saved to the account. Direct messages: who can DM you, the three values
+// as a segmented rail, saved to the account at once. Media filter: the four levels as a
 // segmented rail, saved to the account at once (rolled back with the
 // reason if it fails). Shared messages: the links from `/api/shares`, Live
 // or All, each with Copy link, Open and Revoke (an inline confirm).
@@ -39,6 +40,31 @@ Column {
             disabled: Settings.shareActivitySaving
             onToggled: Settings.shareMyActivity(!Settings.shareActivity)
             footer: RowError { text: Settings.shareActivityError }
+        }
+    }
+
+    // Who can DM you (PrivacyPanel.tsx DmPermissionRow): the three values
+    // as a segmented rail, saved at once (rolled back with the reason if
+    // the account does not take it).
+    SettingsCard {
+        width: parent.width
+        sectionId: "direct-messages"
+        SettingsRow {
+            rowId: "dm-permission"
+            layout: "block"
+            SegmentedField {
+                width: parent.width
+                accessibleName: SettingsNav.label("dm-permission")
+                value: Settings.dmPermission
+                busy: Settings.dmPermissionSaving.length > 0
+                options: [
+                    { value: "everyone", label: qsTr("Everyone"), desc: qsTr("Anyone on Yap can start a DM with you.") },
+                    { value: "friends_and_servers", label: qsTr("Friends & servers"), desc: qsTr("Only your friends and people who share a server with you can start a DM.") },
+                    { value: "nobody", label: qsTr("No one"), desc: qsTr("No one can start a new DM with you. Conversations you've written in stay open.") },
+                ]
+                onPicked: value => Settings.changeDmPermission(value)
+            }
+            footer: RowError { text: Settings.dmPermissionError }
         }
     }
 
