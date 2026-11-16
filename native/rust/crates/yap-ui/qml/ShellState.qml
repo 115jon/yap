@@ -275,6 +275,9 @@ QtObject {
     }
     // A call with a person: their DM opens first (Shell does it).
     signal startCallWithRequested(string userId, string name)
+    // Start a new meeting room, or join one by its link or code
+    // (yap_core::rooms): the app's join prompt.
+    signal meetingRequested(bool starting)
 
     // Home shows the collectibles shop instead of Friends (DMSidebar's
     // Shop row); opening a conversation or Friends leaves it.

@@ -17,7 +17,8 @@ ApplicationWindow {
     // A voice channel has no "#".
     // At Home: "@ada · Direct messages", else "Friends" or "Shop". Empty
     // before chat loads: the bar then shows no title (the "logo" model).
-    readonly property string location: !ready ? ""
+    readonly property string location: Voice.room.length > 0 ? Voice.room + " · " + qsTr("Meeting")
+        : !ready ? ""
         : Nav.home ? (Nav.dmUsername.length > 0 ? "@" + Nav.dmUsername + " · " + qsTr("Direct messages")
             : ShellState.shopOpen ? qsTr("Shop") : qsTr("Friends"))
         : Nav.activeServerName.length === 0 ? ""
@@ -197,6 +198,10 @@ ApplicationWindow {
 
     // Toast actions and the taskbar thumbnail toolbar.
     DesktopLink {}
+
+    // Meeting rooms: their screen over the rest, the Start and Join
+    // dialog, and room links.
+    RoomLink {}
 
     // The notices, stacked at the bottom right: GPU safe mode, Media
     // Foundation missing (cpp/compat.*), the last run's crash.

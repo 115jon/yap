@@ -657,10 +657,38 @@ pub mod qobject {
         /// places them (`{userId, me, x, y, enabled, highFidelity}`, us
         /// first); empty outside a call.
         #[qproperty(QString, spatial)]
+        /// The meeting room the call is in (`yap_core::rooms`), empty
+        /// outside one.
+        #[qproperty(QString, room)]
         type Voice = super::VoiceRust;
 
         #[qinvokable]
         fn join(self: &Voice, channel_id: &QString);
+
+        /// Joins the meeting room `slug` as `name`, signed in or not.
+        #[qinvokable]
+        #[cxx_name = "joinRoom"]
+        fn join_room(self: &Voice, slug: &QString, name: &QString);
+
+        /// The room a pasted code or link names, or empty.
+        #[qinvokable]
+        #[cxx_name = "roomSlug"]
+        fn room_slug(self: &Voice, text: &QString) -> QString;
+
+        /// The name a guest would join under, or empty when it can't be one.
+        #[qinvokable]
+        #[cxx_name = "roomName"]
+        fn room_name(self: &Voice, text: &QString) -> QString;
+
+        /// A new room's slug.
+        #[qinvokable]
+        #[cxx_name = "newRoomSlug"]
+        fn new_room_slug(self: &Voice) -> QString;
+
+        /// The room's invite link on the site.
+        #[qinvokable]
+        #[cxx_name = "roomLink"]
+        fn room_link(self: &Voice, slug: &QString) -> QString;
 
         #[qinvokable]
         fn leave(self: &Voice);
@@ -995,6 +1023,7 @@ pub struct VoiceRust {
     share_sources: QString,
     share_sources_revision: i32,
     spatial: QString,
+    room: QString,
     /// A source refresh is running.
     share_refreshing: bool,
 }
@@ -1590,6 +1619,35 @@ impl qobject::Voice {
 
     pub fn leave(&self) {
         client::command(Command::LeaveVoice);
+    }
+
+    pub fn join_room(&self, slug: &QString, name: &QString) {
+        client::command(Command::JoinRoom {
+            slug: slug.to_string(),
+            name: name.to_string(),
+        });
+    }
+
+    pub fn room_slug(&self, text: &QString) -> QString {
+        let origin = &yap_core::config::get().api_base;
+        yap_core::rooms::room_slug(&text.to_string(), origin)
+            .map(|slug| QString::from(slug.as_str()))
+            .unwrap_or_default()
+    }
+
+    pub fn room_name(&self, text: &QString) -> QString {
+        yap_core::rooms::guest_name(&text.to_string())
+            .map(|name| QString::from(name.as_str()))
+            .unwrap_or_default()
+    }
+
+    pub fn new_room_slug(&self) -> QString {
+        QString::from(yap_core::rooms::new_room_slug().as_str())
+    }
+
+    pub fn room_link(&self, slug: &QString) -> QString {
+        let origin = &yap_core::config::get().api_base;
+        QString::from(yap_core::rooms::room_link(&slug.to_string(), origin).as_str())
     }
 
     pub fn set_muted_from_ui(&self, muted: bool) {

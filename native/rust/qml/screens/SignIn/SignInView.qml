@@ -16,6 +16,10 @@ import Yap.Ui
 // the web's verifying, success and unreachable panels have no native twin
 // (Loading hands over to the boot screen). The failure panels are chosen by
 // the text of the status the sign-in left behind (yap-core auth.rs).
+//
+// "Join a meeting" swaps the panel for the meeting room form (no account
+// needed, yap_core::rooms); a room link opened while signed out lands
+// there too (Invites.roomRequest).
 Rectangle {
     id: root
 
@@ -42,7 +46,10 @@ Rectangle {
         : outcome === deniedText ? "denied"
         : outcome.length > 0 && outcome !== sessionEndedText ? "error"
         : "idle"
-    readonly property bool displayTitle: view === "idle"
+    // The meeting room form instead of the sign-in panel.
+    property bool meeting: false
+    readonly property bool joining: meeting && !inFlow
+    readonly property bool displayTitle: view === "idle" || joining
 
     readonly property string tileIcon: view === "pending" ? "globe"
         : view === "expired" ? "timerOff"
@@ -52,12 +59,14 @@ Rectangle {
     readonly property string tileTone: view === "pending" ? "accent"
         : view === "error" ? "danger"
         : "neutral"
-    readonly property string titleText: view === "idle" ? qsTr("Sign in to Yap")
+    readonly property string titleText: joining ? qsTr("Join a meeting")
+        : view === "idle" ? qsTr("Sign in to Yap")
         : view === "pending" ? qsTr("Check your browser")
         : view === "expired" ? qsTr("That code expired")
         : view === "denied" ? qsTr("Sign-in declined")
         : qsTr("Couldn't sign in")
-    readonly property string bodyText: view === "idle" ? qsTr("Your browser opens to confirm it's you, then you're back here.")
+    readonly property string bodyText: joining ? qsTr("No account needed. Paste the link you were sent and pick a name.")
+        : view === "idle" ? qsTr("Your browser opens to confirm it's you, then you're back here.")
         : view === "pending" ? qsTr("Make sure it shows this same code, then confirm.")
         : view === "expired" ? qsTr("Codes only last a few minutes. Get a fresh one to keep going.")
         : view === "denied" ? qsTr("The request was declined in your browser, so nothing was signed in.")
@@ -77,8 +86,37 @@ Rectangle {
     }
 
     function startSignIn() {
+        meeting = false
         if (!starting)
             Session.startSignIn()
+    }
+
+    // A room link: the meeting form, on that room. Taken a beat later and
+    // only if still signed out: a start that signs in on its own passes
+    // through SignedOut, and the shell's dialog takes the link then.
+    function takeRoom() {
+        if (Invites.roomRequest.length > 0)
+            roomTimer.restart()
+    }
+    Timer {
+        id: roomTimer
+        interval: 400
+        onTriggered: root.takeRoomNow()
+    }
+    function takeRoomNow() {
+        if (Session.phase !== Session.SignedOut && Session.phase !== Session.DeviceCode)
+            return
+        const slug = Invites.roomRequest
+        if (slug.length === 0)
+            return
+        Invites.clearRoomRequest()
+        showMeeting(slug)
+    }
+
+    function showMeeting(slug) {
+        meeting = true
+        roomForm.reset(slug, roomForm.lastName)
+        Qt.callLater(roomForm.focusFirst)
     }
 
     function copyLink() {
@@ -88,7 +126,14 @@ Rectangle {
         copiedTimer.restart()
     }
 
-    Component.onCompleted: Qt.callLater(capture)
+    Component.onCompleted: {
+        Qt.callLater(capture)
+        takeRoom()
+    }
+    Connections {
+        target: Invites
+        function onRoomRequested() { root.takeRoom() }
+    }
 
     // The browser opens by itself once per code (DesktopLogin's
     // openedUrlRef opens verification_uri_complete when pending). The URL
@@ -105,6 +150,7 @@ Rectangle {
     }
 
     onViewChanged: enter.restart()
+    onJoiningChanged: enter.restart()
 
     Connections {
         target: Session
@@ -244,7 +290,7 @@ Rectangle {
                 // The status tile: 48 px, tinted by tone, a 24 px glyph.
                 StatusTile {
                     Layout.bottomMargin: 24
-                    visible: !root.displayTitle
+                    visible: !root.displayTitle && !root.joining
                     icon: root.tileIcon
                     tone: root.tileTone
                 }
@@ -348,7 +394,7 @@ Rectangle {
                 KitButton {
                     Layout.topMargin: 32
                     Layout.fillWidth: true
-                    visible: root.view !== "pending"
+                    visible: root.view !== "pending" && !root.joining
                     variant: "primary"
                     size: "lg"
                     iconName: root.view === "idle" ? "externalLink" : ""
@@ -357,6 +403,36 @@ Rectangle {
                         ? (root.view === "idle" ? qsTr("Getting your code…") : qsTr("Getting a new code…"))
                         : root.view === "idle" ? qsTr("Sign in with browser") : qsTr("Try again")
                     onClicked: root.startSignIn()
+                }
+                // No account: a meeting room by its link (RoomPageClient.tsx).
+                KitButton {
+                    Layout.topMargin: 8
+                    Layout.fillWidth: true
+                    visible: root.view === "idle" && !root.joining
+                    variant: "secondary"
+                    size: "lg"
+                    iconName: "link"
+                    text: qsTr("Join a meeting")
+                    onClicked: root.showMeeting("")
+                }
+
+                RoomJoinForm {
+                    id: roomForm
+                    // The name typed last, for the next join from here.
+                    property string lastName: ""
+                    Layout.topMargin: 32
+                    Layout.fillWidth: true
+                    visible: root.joining
+                    onJoined: (slug, name) => lastName = name
+                }
+                KitButton {
+                    Layout.topMargin: 8
+                    Layout.fillWidth: true
+                    visible: root.joining
+                    variant: "ghost"
+                    size: "lg"
+                    text: qsTr("Back to sign in")
+                    onClicked: root.meeting = false
                 }
 
                 // Pending: open again and copy the link side by side, then cancel.
@@ -402,7 +478,7 @@ Rectangle {
                 Notice {
                     Layout.topMargin: 16
                     Layout.fillWidth: true
-                    visible: root.view === "error" || (root.view === "idle" && root.outcome === root.sessionEndedText)
+                    visible: !root.joining && (root.view === "error" || (root.view === "idle" && root.outcome === root.sessionEndedText))
                     icon: root.view === "error" ? "alert" : "info"
                     danger: root.view === "error"
                     text: root.outcome
@@ -411,7 +487,7 @@ Rectangle {
                 // Dev: paste a session token instead. Quiet on purpose.
                 Text {
                     Layout.topMargin: 40
-                    visible: !root.inFlow
+                    visible: !root.inFlow && !root.joining
                     textFormat: Text.PlainText
                     text: tokenRow.visible ? qsTr("Hide token sign-in") : qsTr("Developer: use a session token")
                     color: devHover.hovered ? Theme.ink2 : Theme.ink3
