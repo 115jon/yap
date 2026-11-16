@@ -81,13 +81,13 @@ impl State {
     /// Asks when due, and sends the view when it changed. Runs after every
     /// input.
     pub(super) fn sync_site(&mut self, fx: &mut Effects) {
-        let session = self.signed_in().map(|(session, _)| session.id);
-        match session {
+        let account = self.signed_in().map(|(_, me)| me.id.clone());
+        match account {
             None => {
-                if self.site.session.is_some() {
+                if self.site.account.is_some() {
                     // Signed out: nothing shows, and the next account
                     // asks afresh. The dismissal is the device's.
-                    self.site.session = None;
+                    self.site.account = None;
                     self.site.request = None;
                     self.site.announcement = None;
                     self.site.due = false;
@@ -95,9 +95,9 @@ impl State {
                 }
             }
             Some(id) => {
-                let fresh = self.site.session != Some(id);
+                let fresh = self.site.account.as_ref() != Some(&id);
                 if fresh {
-                    self.site.session = Some(id);
+                    self.site.account = Some(id);
                     self.site.request = None;
                     self.site.announcement = None;
                     self.site.generation += 1;

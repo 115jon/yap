@@ -224,6 +224,14 @@ pub fn voice_fail() -> Option<VoiceFail> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn the_announcement_switch_should_name_a_tone_or_nothing() {
+        assert_eq!(parse_announcement_tone(" Warning "), Some("warning".into()));
+        assert_eq!(parse_announcement_tone("critical"), Some("critical".into()));
+        assert_eq!(parse_announcement_tone(""), None);
+        assert_eq!(parse_announcement_tone("loud"), None);
+    }
+
     const BASE: &str = "https://yap.test";
 
     #[test]

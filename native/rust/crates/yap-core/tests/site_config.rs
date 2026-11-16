@@ -231,3 +231,38 @@ fn signing_out_should_take_the_banner_down() {
     let fx = client.command(Command::SignOut);
     assert_eq!(shown(&fx), Some(None));
 }
+
+#[test]
+fn a_reconnect_of_the_same_sign_in_should_keep_the_banner() {
+    let (mut client, _) = Client::showing(config("a1", "warning"));
+    // A minute in the background closes the gateway; back in front it
+    // reconnects with a new session id.
+    let fx = client.command(Command::Suspend(true));
+    let grace = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::Later { input, .. } if matches!(**input, Input::SuspendElapsed { .. }) => {
+                Some((**input).clone())
+            }
+            _ => None,
+        })
+        .expect("grace");
+    let mut seen = client.input(grace);
+    seen.extend(client.command(Command::Suspend(false)));
+    seen.extend(client.command(Command::RetryGateway));
+    seen.extend(client.command(Command::RetryGateway));
+    assert_eq!(shown(&seen), None, "the banner never went: {seen:#?}");
+    let asked = seen
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                Effect::Http {
+                    request: ApiRequest::SiteConfig,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert!(asked <= 1, "{asked} site config requests");
+}

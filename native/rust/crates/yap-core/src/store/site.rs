@@ -3,7 +3,7 @@
 //! while the app is on screen and when it comes back, and dismissed per
 //! announcement on this device.
 
-use super::{RequestId, SessionId};
+use super::RequestId;
 use crate::site_config::Announcement;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,9 +25,10 @@ pub struct SiteState {
     pub dismissed: Option<String>,
     /// The fetch in flight.
     pub request: Option<RequestId>,
-    /// The session the announcement was fetched for; another one (a sign
-    /// out, another account) fetches afresh.
-    pub session: Option<SessionId>,
+    /// The account the announcement was fetched for (its user id); a sign
+    /// out or another account fetches afresh. Not the session id, which
+    /// changes with each gateway reconnect of the same sign-in.
+    pub account: Option<String>,
     /// Due again (the refresh timer ran out, or the app came back on
     /// screen): fetched as soon as the app is on screen.
     pub due: bool,
