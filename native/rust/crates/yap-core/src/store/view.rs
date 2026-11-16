@@ -836,6 +836,8 @@ pub struct VoiceView {
     /// The spatial panel's room map as JSON (`{state, seats}`), empty
     /// outside a call or before the call has one.
     pub spatial: String,
+    /// The meeting room's slug when the call is one (`crate::rooms`).
+    pub room: String,
 }
 
 /// The open voice channel (its landing or the call), empty when none.

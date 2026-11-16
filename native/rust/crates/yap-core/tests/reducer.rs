@@ -4397,3 +4397,109 @@ fn a_still_should_wait_for_a_live_share_and_fit_the_gateway() {
         "the gateway would refuse it"
     );
 }
+
+// Meeting rooms
+
+/// The `VoiceStart` a batch holds: its call, session token and target.
+fn room_start(fx: &[Effect]) -> (CallId, Token, yap_core::VoiceTarget) {
+    fx.iter()
+        .find_map(|e| match e {
+            Effect::VoiceStart {
+                call,
+                token,
+                target,
+            } => Some((*call, token.clone(), target.clone())),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no VoiceStart in {fx:#?}"))
+}
+
+#[test]
+fn a_guest_should_join_a_room_signed_out() {
+    let mut client = Client::new();
+    client.input(Input::TokenLoaded(None));
+    let fx = client.command(Command::JoinRoom {
+        slug: "standup".into(),
+        name: "  Ada  ".into(),
+    });
+    let (call, token, target) = room_start(&fx);
+    assert_eq!(token.as_str(), "");
+    assert_eq!(target.room_slug.as_deref(), Some("standup"));
+    assert_eq!(
+        (target.server_id.as_str(), target.channel_id.as_str()),
+        ("", "")
+    );
+    assert_eq!(
+        (target.me_name.as_str(), target.me_username.as_str()),
+        ("Ada", "Ada")
+    );
+    let view = last_voice_view(&fx);
+    assert_eq!(view.room, "standup");
+    assert_eq!(view.channel_name, "standup");
+    assert!(!view.channel_id.is_empty());
+
+    // The roster shows on the stage; no gateway presence goes out.
+    let me = VoiceMember {
+        id: "p1".into(),
+        name: "Ada".into(),
+        me: true,
+        ..VoiceMember::default()
+    };
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Roster(vec![me]),
+    });
+    assert!(fx
+        .iter()
+        .any(|e| matches!(e, Effect::View(ViewUpdate::Tiles(_)))));
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Connected,
+    });
+    assert!(!fx.iter().any(|e| matches!(e, Effect::GatewaySend(_))));
+
+    let fx = client.command(Command::LeaveVoice);
+    assert!(fx.contains(&Effect::Voice {
+        call,
+        command: VoiceCommand::Leave
+    }));
+    assert!(!fx.iter().any(|e| matches!(e, Effect::GatewaySend(_))));
+    assert_eq!(last_voice_view(&fx).room, "");
+}
+
+#[test]
+fn a_signed_in_user_should_join_a_room_without_presence() {
+    let mut client = Client::online();
+    let fx = client.command(Command::JoinRoom {
+        slug: "standup".into(),
+        name: "Fixture Me".into(),
+    });
+    let (call, token, target) = room_start(&fx);
+    assert_eq!(token.as_str(), "tok_fixture");
+    assert_eq!(target.room_slug.as_deref(), Some("standup"));
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Connected,
+    });
+    assert!(!fx.iter().any(|e| matches!(e, Effect::GatewaySend(_))));
+    // A reset room ends the call rather than joining a channel.
+    let fx = client.input(Input::Voice {
+        call,
+        update: VoiceUpdate::Reset,
+    });
+    assert!(!fx.iter().any(|e| matches!(e, Effect::VoiceStart { .. })));
+    assert_eq!(last_voice_view(&fx).room, "");
+}
+
+#[test]
+fn a_room_join_should_need_a_name_and_a_room() {
+    let mut client = Client::new();
+    client.input(Input::TokenLoaded(None));
+    for (slug, name) in [("standup", "   "), ("voice-s-c", "Ada"), ("", "Ada")] {
+        let fx = client.command(Command::JoinRoom {
+            slug: slug.into(),
+            name: name.into(),
+        });
+        assert!(fx.is_empty(), "{slug} {name}: {fx:#?}");
+    }
+}

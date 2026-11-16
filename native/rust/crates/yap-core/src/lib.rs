@@ -40,6 +40,7 @@ pub mod markdown;
 pub mod notification_levels;
 pub mod picker;
 pub mod profile_board;
+pub mod rooms;
 #[cfg(feature = "runtime")]
 pub mod runtime;
 pub mod search;

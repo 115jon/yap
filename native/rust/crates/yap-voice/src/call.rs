@@ -95,9 +95,58 @@ pub fn set_transmit(open: bool) {
     transmit().send_if_modified(|current| std::mem::replace(current, open) != open);
 }
 
-/// Call admission (`realtime/ADMISSION.md`) through the signed-in API.
+/// Call admission (`realtime/ADMISSION.md`) through the signed-in API,
+/// or for a meeting room (`yap_core::rooms`) as the server's guest.
 #[derive(Clone)]
-struct Admission(Api);
+struct Admission {
+    api: Api,
+    /// A meeting room: the server admits it as a public room
+    /// (`authorizePublicDemo`), which wants the site's `Origin` and keeps
+    /// the guest in a session cookie.
+    room: bool,
+}
+
+/// The cookie the server keeps a room guest in (`demo-session.ts`).
+const GUEST_COOKIE: &str = "ralph_demo_session";
+
+/// This process's room guest session (`name=value`), once the server set
+/// one: every admission of a call (its reconnects too) is the same guest.
+fn guest_cookie() -> &'static Mutex<Option<String>> {
+    static COOKIE: Mutex<Option<String>> = Mutex::new(None);
+    &COOKIE
+}
+
+/// The guest session among `Set-Cookie` values, as `name=value`.
+fn guest_cookie_of(set_cookies: &[String]) -> Option<String> {
+    set_cookies.iter().find_map(|c| {
+        let pair = c.split(';').next()?.trim();
+        let (name, value) = pair.split_once('=')?;
+        (name == GUEST_COOKIE && !value.is_empty()).then(|| pair.to_owned())
+    })
+}
+
+impl Admission {
+    async fn room_admission(&self, body: &Value) -> Result<Value, ApiError> {
+        let mut headers = vec![("Origin", config::get().gateway_origin.clone())];
+        let held = guest_cookie()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(cookie) = held {
+            headers.push(("Cookie", cookie));
+        }
+        let (reply, set_cookies) = self
+            .api
+            .post_with_cookies("/api/voice/admission", body, &headers)
+            .await?;
+        if let Some(cookie) = guest_cookie_of(&set_cookies) {
+            *guest_cookie()
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(cookie);
+        }
+        Ok(reply)
+    }
+}
 
 impl AdmissionApi for Admission {
     async fn admission(&self, body: Value) -> Result<Value, ApiFailure> {
@@ -111,13 +160,15 @@ impl AdmissionApi for Admission {
                 message: error.to_string(),
             });
         }
-        self.0
-            .post("/api/voice/admission", &body)
-            .await
-            .map_err(|error| ApiFailure {
-                unauthorized: matches!(error, ApiError::Unauthorized),
-                message: error.to_string(),
-            })
+        let reply = if self.room {
+            self.room_admission(&body).await
+        } else {
+            self.api.post("/api/voice/admission", &body).await
+        };
+        reply.map_err(|error| ApiFailure {
+            unauthorized: matches!(error, ApiError::Unauthorized),
+            message: error.to_string(),
+        })
     }
 }
 
@@ -494,6 +545,27 @@ async fn post_beacon(beacon: Beacon, what: &'static str) {
     );
 }
 
+#[cfg(test)]
+mod guest_cookie_tests {
+    use super::guest_cookie_of;
+
+    #[test]
+    fn the_guest_session_should_be_kept_as_name_and_value() {
+        let set = vec![
+            "other=1; Path=/".to_owned(),
+            "ralph_demo_session=ds1.abc.def; HttpOnly; Secure; SameSite=Strict; Path=/".to_owned(),
+        ];
+        assert_eq!(
+            guest_cookie_of(&set).as_deref(),
+            Some("ralph_demo_session=ds1.abc.def")
+        );
+        assert_eq!(
+            guest_cookie_of(&["ralph_demo_session=; Path=/".to_owned()]),
+            None
+        );
+    }
+}
+
 fn call_stats(stats: crate::VoiceStats) -> CallStats {
     let ticks: Vec<(u64, [f64; 4])> = stats
         .samples
@@ -564,7 +636,10 @@ pub async fn run<H: Host>(
     let beacon_api = api.clone();
     let env = CallEnv {
         engine: LibwebrtcEngine,
-        admission: Admission(api),
+        admission: Admission {
+            api,
+            room: target.room_slug.is_some() && target.channel_id.is_empty(),
+        },
         capturer: host.capturer(),
         http,
         api_base: cfg.api_base.clone(),
