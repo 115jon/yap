@@ -12,9 +12,9 @@
  *
  * A link the native apps start (their session is not a browser cookie)
  * reaches the system browser through the begin route instead: it carries
- * the nonce and the binding once, and rebindLinkState swaps the binding for
- * a fresh one that only that browser's cookie knows, so the URL works once.
- * Its callback links nothing: holdLinkResult keeps the verified account
+ * the nonce and the binding, and checkLinkBinding lets the browser take the
+ * binding as its cookie: on the first load, and again within
+ * BEGIN_GRACE_MS of it (some browsers load a link twice). Its callback links nothing: holdLinkResult keeps the verified account
  * behind a one-time code the browser hands to the app, and takeLinkResult
  * gives it only to the account that started the link (migration 050).
  */
@@ -140,17 +140,23 @@ export async function createLinkState(
   return { nonce, binding, returnTo };
 }
 
-export type ReboundLinkState =
-  | { ok: true; binding: string; returnTo: string }
+/** How long after its first load a begin URL still works. */
+export const BEGIN_GRACE_MS = 30_000;
+
+export type CheckedLinkBinding =
+  | { ok: true; returnTo: string }
   | { ok: false; reason: "expired" | "invalid" };
 
 /**
- * The begin route's half of a native link: a state still pending, for this
- * provider, whose binding matches, gets a new binding (returned, for the
- * browser's cookie). The old binding no longer matches anything, so the
- * begin URL works once. The state itself stays for the callback.
+ * The begin route's half of a native link: the state is still pending, for
+ * this provider, the binding is its own, and the URL is loaded for the
+ * first time or within BEGIN_GRACE_MS of that (a browser that fetches a
+ * link twice still gets through; a URL seen later is dead). The first load
+ * is stamped (begun_at). The URL never links anything by itself: only the
+ * account that started the link can claim what its callback verifies
+ * (takeLinkResult).
  */
-export async function rebindLinkState(
+export async function checkLinkBinding(
   db: D1Database,
   input: {
     provider: ConnectionProvider;
@@ -158,27 +164,33 @@ export async function rebindLinkState(
     binding: unknown;
     now?: number;
   },
-): Promise<ReboundLinkState> {
+): Promise<CheckedLinkBinding> {
   if (!isLinkToken(input.nonce) || !isLinkToken(input.binding)) {
     return { ok: false, reason: "invalid" };
   }
   const now = input.now ?? Date.now();
-  const binding = randomToken();
-  const [stateHash, oldHash, newHash] = await Promise.all([
+  const [stateHash, bindingHash] = await Promise.all([
     sha256Hex(input.nonce),
     sha256Hex(input.binding),
-    sha256Hex(binding),
   ]);
+  // Only a state whose binding matches is stamped, so a wrong guess can't
+  // start the grace for the real URL.
   const row = await db
     .prepare(
-      `UPDATE connection_link_states SET binding_hash = ?
+      `UPDATE connection_link_states SET begun_at = COALESCE(begun_at, ?)
        WHERE state_hash = ? AND provider = ? AND binding_hash = ? AND expires_at >= ?
-       RETURNING return_to`,
+       RETURNING return_to, binding_hash, begun_at`,
     )
-    .bind(newHash, stateHash, input.provider, oldHash, now)
-    .first<{ return_to: string }>();
-  if (!row) return { ok: false, reason: "expired" };
-  return { ok: true, binding, returnTo: row.return_to };
+    .bind(now, stateHash, input.provider, bindingHash, now)
+    .first<{ return_to: string; binding_hash: string; begun_at: number }>();
+  if (
+    !row ||
+    !constantTimeEqual(bindingHash, row.binding_hash) ||
+    now - row.begun_at > BEGIN_GRACE_MS
+  ) {
+    return { ok: false, reason: "expired" };
+  }
+  return { ok: true, returnTo: row.return_to };
 }
 
 /**

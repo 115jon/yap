@@ -56,7 +56,7 @@ export function callbackPath(
 
 /**
  * Where a native app sends the system browser to begin a link: the state's
- * nonce and binding (both one-time, see rebindLinkState) and which app
+ * nonce and binding (checkLinkBinding) and which app
  * asked. The app opens it; it never holds the provider's URL itself.
  */
 export function beginUrl(
