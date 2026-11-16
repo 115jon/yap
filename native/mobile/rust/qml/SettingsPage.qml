@@ -1,1508 +1,296 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Templates as T
+import QtQuick.Controls.Basic
 import Yap.Mobile
 import com.yap.mobile
 import Yap.Ui
 
-// Settings, one scrolling page (the desktop's Settings dialog, phone
-// layout): who you are and Edit profile (ProfileEditPage), then numbered
-// sections under 2 px ink rules (the desktop's rule cards). Status and its
-// custom line (Session.setStatus);
-// Appearance (the core's themes, kept on this device in appearance.json
-// and synced to the account when asked); Text size (a factor over the
-// system's, this phone's own); Notifications (the push shim's permission
-// state, then the UI sounds: the master switch, the volume, each category
-// and Test, kept on this phone as the desktop keeps its own); Soundboard
-// (this phone's playback volume); Privacy and safety (Share my activity
-// and the media filter, saved to the account); Plan (the three plans,
-// read-only until billing ships); Devices (the account's sessions, others
-// signed out one by one or all at once after a confirm, SessionsModel;
-// this phone alone while the sign-in service cannot list the others); About (and the open source
-// licences, LicensesPage); Sign out, confirmed in place; Delete account,
-// behind the username typed to confirm it (DeleteAccountState). Opened
-// from the account row at the drawer's foot.
-Rectangle {
+// Settings: a hub of categories, each its own page (Router), grouped as the
+// web's settings are (SETTINGS_NAV_GROUPS: You, Calls, App). Your card on
+// top opens Profile; the search field finds a setting by name and opens
+// its page; Back clears a search before it leaves. Opened from the account
+// panel.
+SettingsFrame {
     id: root
 
-    readonly property bool sheet: false
-    // The predictive back gesture's progress (0..1): the page follows the
-    // finger before the pop commits, as an Android activity does.
-    property real backProgress: 0
-
-    signal closeRequested()
-    // Edit profile, from the account at the top.
-    signal profileEditRequested()
-
-    // The window's insets where this page meets its edges, read once here:
-    // a child that asks for its own would feed its position back in.
-    readonly property real leftInset: SafeArea.margins.left
-    readonly property real rightInset: SafeArea.margins.right
-    readonly property real topInset: SafeArea.margins.top
-    readonly property real bottomInset: SafeArea.margins.bottom
-
+    // Each category: its page, glyph, title and one line of what it holds.
+    readonly property var pages: ({
+        SettingsProfilePage: { icon: "profile", title: qsTr("Profile") },
+        SettingsAccountPage: { icon: "account", title: qsTr("Account") },
+        SettingsPrivacyPage: { icon: "privacy", title: qsTr("Privacy & safety") },
+        SettingsDevicesPage: { icon: "sessions", title: qsTr("Devices") },
+        SettingsPlanPage: { icon: "sparkle", title: qsTr("Yap Loud") },
+        SettingsSoundboardPage: { icon: "soundboard", title: qsTr("Soundboard") },
+        SettingsAppearancePage: { icon: "appearance", title: qsTr("Appearance") },
+        SettingsNotificationsPage: { icon: "bell", title: qsTr("Notifications") },
+        SettingsAboutPage: { icon: "info", title: qsTr("About") }
+    })
+    // What search finds: each setting's name, the words someone might type
+    // for it, and the page it is on.
+    readonly property var index: [
+        { page: "SettingsProfilePage", label: qsTr("Edit profile"), words: "avatar banner bio name picture" },
+        { page: "SettingsProfilePage", label: qsTr("Status"), words: "online idle away do not disturb dnd invisible presence" },
+        { page: "SettingsProfilePage", label: qsTr("Custom status"), words: "status message" },
+        { page: "SettingsAccountPage", label: qsTr("Username"), words: "handle sign in" },
+        { page: "SettingsAccountPage", label: qsTr("Sign out"), words: "log out logout" },
+        { page: "SettingsAccountPage", label: qsTr("Delete account"), words: "remove close account" },
+        { page: "SettingsPrivacyPage", label: qsTr("Share my activity"), words: "playing game activity status" },
+        { page: "SettingsPrivacyPage", label: qsTr("Who can DM you"), words: "direct messages dm calls block" },
+        { page: "SettingsPrivacyPage", label: qsTr("Media filter"), words: "gif sticker safe search nsfw sensitive" },
+        { page: "SettingsDevicesPage", label: qsTr("Signed-in devices"), words: "sessions sign out other devices phone computer" },
+        { page: "SettingsPlanPage", label: qsTr("Your plan"), words: "loud founder billing upgrade subscription tier" },
+        { page: "SettingsSoundboardPage", label: qsTr("Soundboard volume"), words: "sounds loud" },
+        { page: "SettingsAppearancePage", label: qsTr("Theme"), words: "dark light colour color mode match system" },
+        { page: "SettingsAppearancePage", label: qsTr("Use on all my devices"), words: "theme sync" },
+        { page: "SettingsAppearancePage", label: qsTr("Text size"), words: "font bigger smaller zoom scale" },
+        { page: "SettingsNotificationsPage", label: qsTr("Push notifications"), words: "alerts notify" },
+        { page: "SettingsNotificationsPage", label: qsTr("Sound effects"), words: "sounds volume chime mute" },
+        { page: "SettingsNotificationsPage", label: qsTr("Notification sounds"), words: "mentions replies dm chime" },
+        { page: "SettingsNotificationsPage", label: qsTr("Sound volume"), words: "sounds loud" },
+        { page: "SettingsNotificationsPage", label: qsTr("Voice join and leave"), words: "sounds tone voice channel" },
+        { page: "SettingsNotificationsPage", label: qsTr("Connect and disconnect"), words: "sounds chime voice channel" },
+        { page: "SettingsNotificationsPage", label: qsTr("Mute and deafen"), words: "sounds click" },
+        { page: "SettingsNotificationsPage", label: qsTr("Calls"), words: "sounds ringback ringtone dm call" },
+        { page: "SettingsNotificationsPage", label: qsTr("Screen share"), words: "sounds stream tone" },
+        { page: "SettingsNotificationsPage", label: qsTr("Test notification sound"), words: "sound play" },
+        { page: "SettingsAboutPage", label: qsTr("Version"), words: "about update build" },
+        { page: "SettingsAboutPage", label: qsTr("Open source licences"), words: "licenses notices" },
+        { page: "SettingsAboutPage", label: qsTr("Privacy"), words: "policy" }
+    ]
+    readonly property bool hasSoundboard: Apps.soundboardVolume() >= 0
+    // The word in progress counts: the IME has not committed it.
+    readonly property string query: (searchField.text + searchField.preeditText).trim().toLowerCase()
+    // Every word of the query, each in the setting's name, its page's name
+    // or its keywords.
+    readonly property var results: {
+        if (query.length === 0)
+            return []
+        const words = query.split(/\s+/)
+        return index.filter(entry => {
+            if (entry.page === "SettingsSoundboardPage" && !hasSoundboard)
+                return false
+            const haystack = (entry.label + " " + pages[entry.page].title + " " + entry.words).toLowerCase()
+            return words.every(word => haystack.includes(word))
+        })
+    }
     readonly property string status: Session.meStatus.length > 0 ? Session.meStatus : "online"
-    // Text size factors over the system's scale.
-    readonly property var textSizes: [
-        { factor: 0.85, label: qsTr("Small") },
-        { factor: 1, label: qsTr("Default") },
-        { factor: 1.15, label: qsTr("Large") },
-        { factor: 1.3, label: qsTr("Larger") }
-    ]
+    readonly property string themeName: Settings.theme === "system" ? qsTr("Match system") : Theme.themeLabel(Theme.themeId)
 
-    // Devices: the list, its states and the revoke (shared with the
-    // desktop's SessionsPanel).
-    readonly property SessionsModel devices: SessionsModel {}
-
-    // This phone's UI sound settings (sound.rs), read again after each
-    // change; empty where the app keeps none (a host build).
-    property var sounds: readSounds()
-    function readSounds() {
-        const json = Settings.soundSettings()
-        try {
-            return json.length > 0 ? JSON.parse(json) : null
-        } catch (e) {
-            return null
-        }
+    // A search takes Back (and its predictive gesture) to clear it, while
+    // this page is on top.
+    // Activating too: a second Back while the page over this one leaves
+    // still clears first.
+    readonly property bool holdsLayer: query.length > 0
+        && (StackView.status === StackView.Active || StackView.status === StackView.Activating)
+    onHoldsLayerChanged: holdsLayer ? Native.pushBackLayer(root) : Native.popBackLayer(root)
+    Component.onDestruction: Native.popBackLayer(root)
+    function backProgressed(progress) {}
+    function backCancelled() {}
+    function backInvoked() {
+        clearSearch()
     }
-    function setSound(key, value) {
-        Settings.setSoundSetting(key, value)
-        sounds = readSounds()
+    function clearSearch() {
+        searchField.text = ""
+        searchField.focus = false
+        Qt.inputMethod.hide()
     }
-    // The soundboard's playback volume (0..100), -1 where the app keeps
-    // none here.
-    property int boardVolume: Apps.soundboardVolume()
-
-    // The media filter's levels (the desktop's PrivacyPanel).
-    readonly property var mediaLevels: [
-        { value: "high", label: qsTr("High"), badge: qsTr("G only"), desc: qsTr("Shows the strictest results for general audiences.") },
-        { value: "medium", label: qsTr("Medium"), badge: qsTr("G + PG"), desc: qsTr("Allows a little more expressiveness while staying broadly safe.") },
-        { value: "low", label: qsTr("Low"), badge: qsTr("Up to PG-13"), desc: qsTr("Includes more mature jokes and reactions without going fully open.") },
-        { value: "off", label: qsTr("Off"), badge: qsTr("Up to R"), desc: qsTr("Shows the widest provider-approved range. Explicit nudity is still excluded.") }
-    ]
-    // The level shown: the one being saved, else the account's.
-    readonly property string mediaFilter: Settings.mediaFilterSaving.length > 0 ? Settings.mediaFilterSaving
-        : Settings.mediaFilter.length > 0 ? Settings.mediaFilter : "high"
-
-    // Who can DM you (the core's dm_permission): the value being saved,
-    // else the account's.
-    readonly property var dmLevels: [
-        { value: "everyone", label: qsTr("Everyone"), desc: qsTr("Anyone on Yap can start a DM with you.") },
-        { value: "friends_and_servers", label: qsTr("Friends & servers"), desc: qsTr("Only your friends and people who share a server with you can start a DM.") },
-        { value: "nobody", label: qsTr("No one"), desc: qsTr("No one can start a new DM with you. Conversations you've written in stay open.") }
-    ]
-    readonly property string dmPermission: Settings.dmPermissionSaving.length > 0 ? Settings.dmPermissionSaving
-        : Settings.dmPermission.length > 0 ? Settings.dmPermission : "everyone"
-
-    // The plan in force and the three plans (the core's plan_json).
-    readonly property var plan: {
-        try {
-            return Settings.plan.length > 0 ? JSON.parse(Settings.plan) : null
-        } catch (e) {
-            return null
-        }
+    // The header's Back too.
+    beforeBack: () => {
+        if (query.length === 0)
+            return false
+        clearSearch()
+        return true
     }
 
-    property bool signOutArmed: false
-    property bool deleteArmed: false
-
-    color: Theme.ply0
-    transform: [
-        Scale {
-            origin.x: root.width / 2
-            origin.y: root.height / 2
-            xScale: 1 - root.backProgress * 0.08
-            yScale: 1 - root.backProgress * 0.08
-        },
-        Translate { x: root.backProgress * root.width * 0.1 }
-    ]
-
-    Component.onCompleted: {
-        devices.load()
-        Settings.loadBilling()
+    function open(page) {
+        Qt.inputMethod.hide()
+        Router.open(page, {}, { key: page })
     }
 
-    PageHeader {
-        id: header
-        z: 1
-        title: qsTr("Settings")
-        topInset: root.topInset
-        leftInset: root.leftInset
-        rightInset: root.rightInset
-        onBackRequested: root.closeRequested()
-    }
+    title: qsTr("Settings")
 
-    Flickable {
-        id: scroll
-        anchors.top: header.bottom
-        anchors.bottom: parent.bottom
+    // Search, as Android's own Settings has it on top.
+    Item {
         width: parent.width
-        contentHeight: body.height
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
-        // The sign-out question opens under the page's last key: the page
-        // follows it down once, or its two keys sat under the gesture bar.
-        property bool revealEnd: false
-        onContentHeightChanged: if (revealEnd) {
-            revealEnd = false
-            contentY = Math.max(0, contentHeight - height)
-        }
-
-        Column {
-            id: body
-            x: Math.max(16 + root.leftInset, (scroll.width - width) / 2)
-            width: Math.min(scroll.width - 32 - root.leftInset - root.rightInset, 560)
-            topPadding: 20
-            bottomPadding: 32 + root.bottomInset
-            spacing: 32
-
-            // Who is signed in, and Edit profile.
-            Column {
-                width: parent.width
-                spacing: 16
-                Row {
-                    width: parent.width
-                    spacing: 16
-                    PresenceAvatar {
-                        id: face
-                        anchors.verticalCenter: parent.verticalCenter
-                        size: 64
-                        initials: Session.meInitials.length > 0 ? Session.meInitials : "?"
-                        source: Session.meAvatar
-                        deco: Session.meDeco
-                        presence: root.status
-                        ground: root.color
-                    }
-                    Column {
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - face.width - parent.spacing
-                        spacing: 2
-                        DisplayName {
-                            width: parent.width
-                            text: Session.meName
-                            nameStyle: Session.meNameStyle
-                            color: Theme.ink1
-                            font: Theme.type.pageTitle
-                            ground: root.color
-                        }
-                        Text {
-                            width: parent.width
-                            textFormat: Text.PlainText
-                            text: "@" + Session.meUsername
-                            elide: Text.ElideRight
-                            color: Theme.ink2
-                            font: Theme.type.description
-                        }
-                    }
-                }
-                KitButton {
-                    width: parent.width
-                    variant: "secondary"
-                    iconName: "edit"
-                    text: qsTr("Edit profile")
-                    onClicked: root.profileEditRequested()
-                }
-            }
-
-            Section {
-                number: 1
-                title: qsTr("Status")
-                Repeater {
-                    model: Theme.presenceOptions
-                    delegate: ChoiceRow {
-                        required property var modelData
-                        text: modelData.label
-                        hint: modelData.hint
-                        chosen: root.status === modelData.value
-                        led: modelData.value
-                        onChose: Session.setStatus(modelData.value, Session.meCustomStatus)
-                    }
-                }
-                Item { width: 1; height: 8 }
-                Item {
-                    width: parent.width
-                    height: statusField.height
-                    MobileField {
-                        id: statusField
-                        width: parent.width
-                        rightPadding: clearKey.visible ? 48 : 14
-                        maximumLength: 128
-                        placeholderText: qsTr("Set a custom status")
-                        EnterKey.type: Qt.EnterKeyDone
-                        Accessible.name: qsTr("Custom status")
-                        Component.onCompleted: text = Session.meCustomStatus
-                        function save() {
-                            const value = text.trim()
-                            if (value !== Session.meCustomStatus)
-                                Session.setStatus(root.status, value)
-                        }
-                        onAccepted: {
-                            save()
-                            focus = false
-                            Qt.inputMethod.hide()
-                        }
-                        onActiveFocusChanged: if (!activeFocus) save()
-                    }
-                    IconKey {
-                        id: clearKey
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: statusField.text.length > 0
-                        iconName: "close"
-                        tip: qsTr("Clear custom status")
-                        onClicked: {
-                            statusField.text = ""
-                            Session.setStatus(root.status, "")
-                        }
-                    }
-                    // The server's value, unless it is being typed over.
-                    Connections {
-                        target: Session
-                        function onMeCustomStatusChanged() {
-                            if (!statusField.activeFocus)
-                                statusField.text = Session.meCustomStatus
-                        }
-                    }
-                }
-            }
-
-            Section {
-                number: 2
-                title: qsTr("Appearance")
-                ThemeTile {
-                    width: parent.width
-                    themeId: "system"
-                    label: qsTr("Match system")
-                }
-                Item { width: 1; height: 12 }
-                Grid {
-                    width: parent.width
-                    columns: 2
-                    columnSpacing: 12
-                    rowSpacing: 12
-                    Repeater {
-                        model: Theme.themePalettes
-                        delegate: ThemeTile {
-                            required property var modelData
-                            width: (parent.width - 12) / 2
-                            themeId: modelData.id
-                            label: modelData.label
-                        }
-                    }
-                }
-                Item { width: 1; height: 8 }
-                SwitchItem {
-                    text: qsTr("Use on all my devices")
-                    description: qsTr("Your theme follows your account.")
-                    checked: Settings.themeSync
-                    onToggled: Settings.changeThemeSync(!Settings.themeSync)
-                }
-            }
-
-            Section {
-                number: 3
-                title: qsTr("Text size")
-                Segmented {
-                    width: parent.width
-                    accessibleName: qsTr("Text size")
-                    options: root.textSizes.map(size => size.label)
-                    current: {
-                        const at = root.textSizes.findIndex(size => Math.abs(size.factor - Prefs.textFactor) < 0.01)
-                        return at < 0 ? 1 : at
-                    }
-                    onPicked: index => Prefs.textFactor = root.textSizes[index].factor
-                }
-                Item { width: 1; height: 12 }
-                // A message at the chosen size (the type roles already carry
-                // Theme.textScale).
-                Rectangle {
-                    width: parent.width
-                    height: sample.height + 24
-                    radius: Theme.radius
-                    color: Theme.ply1
-                    border.width: 1
-                    border.color: Theme.line
-                    Row {
-                        id: sample
-                        x: 12
-                        y: 12
-                        width: parent.width - 24
-                        spacing: 12
-                        Avatar {
-                            id: sampleFace
-                            size: 32
-                            initials: Session.meInitials.length > 0 ? Session.meInitials : "?"
-                            source: Session.meAvatar
-                        }
-                        Column {
-                            width: parent.width - sampleFace.width - parent.spacing
-                            spacing: 2
-                            Text {
-                                width: parent.width
-                                textFormat: Text.PlainText
-                                text: Session.meName
-                                elide: Text.ElideRight
-                                color: Theme.ink1
-                                font: Theme.type.author
-                            }
-                            Text {
-                                width: parent.width
-                                textFormat: Text.PlainText
-                                text: qsTr("Messages, names and menus read at this size.")
-                                wrapMode: Text.Wrap
-                                color: Theme.ink1
-                                font: Theme.type.message
-                            }
-                        }
-                    }
-                }
-                Item { width: 1; height: 8 }
-                Text {
-                    width: parent.width
-                    wrapMode: Text.Wrap
-                    text: qsTr("On top of your phone's text size (%1%).").arg(Math.round(Native.fontScale * 100))
-                    color: Theme.ink3
-                    font: Theme.type.caption
-                }
-            }
-
-            Section {
-                number: 4
-                title: qsTr("Notifications")
-                SwitchItem {
-                    text: qsTr("Push notifications")
-                    description: Native.notificationsEnabled
-                        ? qsTr("New messages reach this phone. Turn them off in Android's settings.")
-                        : qsTr("Turn them on to hear about new messages.")
-                    checked: Native.notificationsEnabled
-                    // Once on, only Android's settings turn them off.
-                    locked: Native.notificationsEnabled
-                    // The permission dialog while Android still shows it,
-                    // else the app's notification settings (the shim).
-                    onToggled: Native.requestNotifications()
-                }
-                // The UI sounds, on this phone only (the desktop keeps its
-                // own); the categories rest while Sound effects is off.
-                Column {
-                    width: parent.width
-                    visible: root.sounds !== null
-                    SwitchItem {
-                        text: qsTr("Sound effects")
-                        description: qsTr("Turns every in-app sound on or off.")
-                        checked: root.sounds?.sounds ?? true
-                        onToggled: root.setSound("sounds", checked ? 0 : 1)
-                    }
-                    VolumeRow {
-                        text: qsTr("Sound volume")
-                        disabled: !(root.sounds?.sounds ?? true)
-                        value: root.sounds?.soundVolume ?? 100
-                        onCommitted: value => root.setSound("soundVolume", value)
-                    }
-                    Repeater {
-                        model: [
-                            { key: "soundNotifications", text: qsTr("Notification sounds"), description: qsTr("A chime for mentions, replies and DMs.") },
-                            { key: "soundVoiceJoinLeave", text: qsTr("Voice join and leave"), description: qsTr("A tone when someone joins or leaves your voice channel.") },
-                            { key: "soundConnect", text: qsTr("Connect and disconnect"), description: qsTr("A chime when you join or leave a voice channel.") },
-                            { key: "soundMute", text: qsTr("Mute and deafen"), description: qsTr("A click when you mute or deafen.") },
-                            { key: "soundCalls", text: qsTr("Calls"), description: qsTr("The ringback, connect and end tones of a DM call. Incoming calls ring with your phone's ringtone.") },
-                            { key: "soundScreenShare", text: qsTr("Screen share"), description: qsTr("A tone when a screen share starts or stops.") }
-                        ]
-                        delegate: SwitchItem {
-                            required property var modelData
-                            readonly property bool on: root.sounds?.[modelData.key] ?? true
-                            text: modelData.text
-                            description: modelData.description
-                            checked: on
-                            disabled: !(root.sounds?.sounds ?? true)
-                            onToggled: root.setSound(modelData.key, on ? 0 : 1)
-                        }
-                    }
-                    PageRow {
-                        text: qsTr("Test notification sound")
-                        iconName: "play"
-                        onOpened: Settings.playTestSound()
-                    }
-                }
-            }
-
-            Section {
-                number: 5
-                title: qsTr("Soundboard")
-                visible: root.boardVolume >= 0
-                VolumeRow {
-                    text: qsTr("Soundboard volume")
-                    description: qsTr("How loud sounds from the soundboard play on this phone.")
-                    value: Math.max(0, root.boardVolume)
-                    onCommitted: value => {
-                        Apps.setSoundboardVolume(value)
-                        root.boardVolume = value
-                    }
-                }
-            }
-
-            // Privacy and safety (the desktop's PrivacyPanel), each saved
-            // to the account at once and rolled back with the reason if it
-            // does not take them.
-            Section {
-                number: 6
-                title: qsTr("Privacy and safety")
-                SwitchItem {
-                    text: qsTr("Share my activity")
-                    description: qsTr("Show what you're playing to people who share a server, a DM or a friendship with you. Invisible always hides it.")
-                    checked: Settings.shareActivity
-                    locked: Settings.shareActivitySaving
-                    onToggled: Settings.shareMyActivity(!Settings.shareActivity)
-                }
-                ErrorText { text: Settings.shareActivityError }
-                Item { width: 1; height: 12 }
-                Column {
-                    width: parent.width
-                    bottomPadding: 12
-                    spacing: 2
-                    Text {
-                        width: parent.width
-                        textFormat: Text.PlainText
-                        text: qsTr("Who can DM you")
-                        color: Theme.ink1
-                        font: Theme.type.setting
-                    }
-                    Text {
-                        width: parent.width
-                        textFormat: Text.PlainText
-                        text: qsTr("Applies to new messages and calls from people you haven't talked with. Blocking someone always closes a DM.")
-                        wrapMode: Text.Wrap
-                        color: Theme.ink3
-                        font: Theme.type.caption
-                    }
-                }
-                Segmented {
-                    width: parent.width
-                    accessibleName: qsTr("Who can DM you")
-                    options: root.dmLevels.map(level => level.label)
-                    current: Math.max(0, root.dmLevels.findIndex(level => level.value === root.dmPermission))
-                    onPicked: index => Settings.changeDmPermission(root.dmLevels[index].value)
-                }
-                Item { width: 1; height: 8 }
-                Text {
-                    readonly property var level: root.dmLevels.find(l => l.value === root.dmPermission) ?? root.dmLevels[0]
-                    width: parent.width
-                    textFormat: Text.PlainText
-                    text: level.desc + (Settings.dmPermissionSaving.length > 0 ? " " + qsTr("Saving…") : "")
-                    wrapMode: Text.Wrap
-                    color: Theme.ink3
-                    font: Theme.type.caption
-                    Accessible.role: Accessible.StaticText
-                    Accessible.name: text
-                }
-                ErrorText { text: Settings.dmPermissionError }
-                Item { width: 1; height: 12 }
-                Column {
-                    width: parent.width
-                    bottomPadding: 12
-                    spacing: 2
-                    Text {
-                        width: parent.width
-                        textFormat: Text.PlainText
-                        text: qsTr("Media filter")
-                        color: Theme.ink1
-                        font: Theme.type.setting
-                    }
-                    Text {
-                        width: parent.width
-                        textFormat: Text.PlainText
-                        text: qsTr("Applies to GIF, sticker, clip and meme search and trending. Where a provider supports it, Yap sends your account ID so results match your choice.")
-                        wrapMode: Text.Wrap
-                        color: Theme.ink3
-                        font: Theme.type.caption
-                    }
-                }
-                Segmented {
-                    width: parent.width
-                    accessibleName: qsTr("Media filter")
-                    options: root.mediaLevels.map(level => level.label)
-                    current: Math.max(0, root.mediaLevels.findIndex(level => level.value === root.mediaFilter))
-                    onPicked: index => Settings.changeMediaFilter(root.mediaLevels[index].value)
-                }
-                Item { width: 1; height: 8 }
-                Text {
-                    readonly property var level: root.mediaLevels.find(l => l.value === root.mediaFilter) ?? root.mediaLevels[0]
-                    width: parent.width
-                    textFormat: Text.PlainText
-                    text: level.badge + " · " + level.desc
-                        + (root.mediaFilter === "high" ? " " + qsTr("Media marked sensitive stays hidden until you show it.") : "")
-                    wrapMode: Text.Wrap
-                    color: Theme.ink3
-                    font: Theme.type.caption
-                    Accessible.role: Accessible.StaticText
-                    Accessible.name: text
-                }
-                ErrorText { text: Settings.mediaFilterError }
-            }
-
-            // The plan in force and the three plans (the desktop's Yap
-            // Loud page): no payments yet, so Upgrade stays off with
-            // "Coming soon" until billing answers.
-            Section {
-                number: 7
-                title: qsTr("Plan")
-                Column {
-                    width: parent.width
-                    bottomPadding: 16
-                    spacing: 2
-                    Text {
-                        width: parent.width
-                        textFormat: Text.PlainText
-                        text: root.plan ? root.plan.label : qsTr("Loading…")
-                        wrapMode: Text.Wrap
-                        color: Theme.ink1
-                        font: Theme.type.setting
-                    }
-                    Text {
-                        width: parent.width
-                        visible: text.length > 0
-                        textFormat: Text.PlainText
-                        text: root.plan ? root.plan.description : ""
-                        wrapMode: Text.Wrap
-                        color: Theme.ink3
-                        font: Theme.type.caption
-                    }
-                }
-                TierCards {
-                    width: parent.width
-                    plan: root.plan
-                }
-            }
-
-            Section {
-                number: 8
-                title: qsTr("Devices")
-                Loader {
-                    width: parent.width
-                    active: root.devices.loadingFirst
-                    visible: active
-                    sourceComponent: Item {
-                        height: 64
-                        Spinner {
-                            anchors.centerIn: parent
-                            running: true
-                        }
-                    }
-                }
-                Column {
-                    width: parent.width
-                    visible: root.devices.failed
-                    spacing: 8
-                    Text {
-                        width: parent.width
-                        textFormat: Text.PlainText
-                        text: root.devices.error
-                        wrapMode: Text.Wrap
-                        color: Theme.dangerInk
-                        font: Theme.type.description
-                    }
-                    KitButton {
-                        iconName: "refresh"
-                        text: qsTr("Try again")
-                        loading: root.devices.loading
-                        onClicked: root.devices.load()
-                    }
-                }
-                Repeater {
-                    // This phone first. While the sign-in service cannot
-                    // list other devices at all, this phone alone.
-                    model: root.devices.failed ? []
-                        : root.devices.othersSupported ? root.devices.ordered
-                        : root.devices.current
-                    delegate: SessionItem {}
-                }
-                Text {
-                    visible: !root.devices.loadingFirst && !root.devices.failed
-                        && root.devices.othersSupported && root.devices.others.length === 0
-                    width: parent.width
-                    topPadding: 8
-                    textFormat: Text.PlainText
-                    text: root.devices.othersListed ? qsTr("No other devices are signed in.")
-                        : qsTr("Other signed-in devices can't be listed right now.")
-                    wrapMode: Text.Wrap
-                    color: Theme.ink2
-                    font: Theme.type.description
-                }
-                // Sign out all other devices, asking first.
-                Column {
-                    readonly property bool armed: root.devices.armed === root.devices.allOthers
-                    visible: !root.devices.failed && root.devices.othersSupported
-                        && root.devices.others.length > 0
-                    width: parent.width
-                    topPadding: 8
-                    spacing: 8
-                    KitButton {
-                        width: parent.width
-                        visible: !parent.armed
-                        variant: "secondary"
-                        text: qsTr("Sign out all other devices")
-                        onClicked: root.devices.arm(root.devices.allOthers)
-                    }
-                    Loader {
-                        width: parent.width
-                        active: parent.armed
-                        visible: active
-                        sourceComponent: InlineConfirm {
-                            consequence: root.devices.others.length === 1
-                                ? qsTr("Your other device will be signed out and need to sign in again.")
-                                : qsTr("Your %1 other devices will be signed out and need to sign in again.").arg(root.devices.others.length)
-                            confirmLabel: qsTr("Sign out all other devices")
-                            busy: root.devices.busy(root.devices.allOthers)
-                            error: root.devices.errorFor(root.devices.allOthers)
-                            onCancelled: root.devices.disarm()
-                            onConfirmed: root.devices.revoke(root.devices.allOthers)
-                        }
-                    }
-                }
-            }
-
-            Section {
-                number: 9
-                title: qsTr("About")
-                InfoRow {
-                    text: qsTr("Version")
-                    value: Qt.application.version.length > 0 ? Qt.application.version : Settings.version
-                }
-                LinkRow {
-                    text: qsTr("Licence")
-                    url: "https://github.com/115jon/yap/blob/main/LICENSE"
-                }
-                LinkRow {
-                    text: qsTr("Privacy")
-                    // The site's page (PRIVACY.md), on the core's web origin.
-                    url: Admin.webOrigin + "/privacy"
-                }
-                PageRow {
-                    text: qsTr("Open source licences")
-                    onOpened: licensesPage.load().open()
-                }
-            }
-
-            Column {
-                width: parent.width
-                spacing: 12
-                KitButton {
-                    width: parent.width
-                    visible: !root.signOutArmed
-                    size: "lg"
-                    variant: "destructive"
-                    iconName: "logout"
-                    text: qsTr("Sign out")
-                    onClicked: {
-                        scroll.revealEnd = true
-                        root.signOutArmed = true
-                    }
-                }
-                Loader {
-                    width: parent.width
-                    active: root.signOutArmed
-                    visible: active
-                    sourceComponent: InlineConfirm {
-                        consequence: qsTr("Sign out of Yap on this phone? Your messages stay on your account.")
-                        confirmLabel: qsTr("Sign out")
-                        onCancelled: {
-                            scroll.revealEnd = false
-                            root.signOutArmed = false
-                        }
-                        onConfirmed: Session.signOut()
-                    }
-                }
-            }
-
-            // Delete account (the desktop's Account → Delete account): the
-            // warning with the date 30 days out, the username typed to
-            // confirm it, then the request; once scheduled this phone signs
-            // out as Sign out does. A refusal stays under the keys.
-            Section {
-                number: 10
-                title: qsTr("Delete account")
-                Text {
-                    width: parent.width
-                    bottomPadding: 12
-                    textFormat: Text.PlainText
-                    text: qsTr("Deletes your Yap account after 30 days. Sign in before then to restore it.")
-                    wrapMode: Text.Wrap
-                    color: Theme.ink2
-                    font: Theme.type.description
-                }
-                KitButton {
-                    width: parent.width
-                    visible: !root.deleteArmed
-                    size: "lg"
-                    variant: "destructive"
-                    iconName: "trash"
-                    text: qsTr("Delete account")
-                    onClicked: {
-                        scroll.revealEnd = true
-                        root.deleteArmed = true
-                    }
-                }
-                Loader {
-                    width: parent.width
-                    active: root.deleteArmed
-                    visible: active
-                    sourceComponent: DeleteConfirm {
-                        onCancelled: {
-                            scroll.revealEnd = false
-                            root.deleteArmed = false
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // The delete confirm: InlineConfirm's look with the username field
-    // between the warning and the keys; Delete account works only once the
-    // field names this account (DeleteAccountState, shared with the
-    // desktop).
-    component DeleteConfirm: Item {
-        id: confirm
-
-        readonly property DeleteAccountState deletion: DeleteAccountState {
-            typed: nameField.text
-        }
-        readonly property bool busy: deletion.busy
-
-        signal cancelled()
-
-        function submit() {
-            if (confirm.deletion.submit())
-                Native.haptic(Native.Confirm)
-        }
-        function cancel() {
-            confirm.deletion.dismiss()
-            confirm.cancelled()
-        }
-
-        width: parent ? parent.width : 0
-        implicitHeight: box.height
-
-        Rectangle {
-            id: box
+        height: searchField.height
+        MobileField {
+            id: searchField
             width: parent.width
-            height: content.implicitHeight + 32
-            radius: Theme.radius
-            color: Theme.tint1
-            Rectangle {
-                width: 2
-                height: parent.height
-                color: Theme.dangerInk
-            }
-            Column {
-                id: content
-                x: 16
-                y: 16
-                width: parent.width - 32
-                spacing: 12
-                Text {
-                    width: parent.width
-                    textFormat: Text.PlainText
-                    text: confirm.deletion.title
-                    wrapMode: Text.Wrap
-                    color: Theme.ink1
-                    font: Theme.type.setting
-                    Accessible.role: Accessible.Heading
-                    Accessible.name: text
-                }
-                Text {
-                    width: parent.width
-                    textFormat: Text.PlainText
-                    text: confirm.deletion.warning
-                    wrapMode: Text.Wrap
-                    color: Theme.ink1
-                    font: Theme.type.description
-                    Accessible.role: Accessible.StaticText
-                    Accessible.name: text
-                }
-                Text {
-                    width: parent.width
-                    textFormat: Text.PlainText
-                    text: confirm.deletion.prompt
-                    wrapMode: Text.Wrap
-                    color: Theme.ink2
-                    font: Theme.type.description
-                }
-                MobileField {
-                    id: nameField
-                    width: parent.width
-                    maximumLength: 64
-                    enabled: !confirm.busy
-                    placeholderText: "@" + Session.meUsername
-                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData
-                    Accessible.name: confirm.deletion.fieldName
-                    onAccepted: confirm.submit()
-                }
-                Row {
-                    width: parent.width
-                    spacing: 8
-                    KitButton {
-                        width: (parent.width - parent.spacing) / 2
-                        size: "lg"
-                        variant: "secondary"
-                        text: qsTr("Cancel")
-                        enabled: !confirm.busy
-                        onClicked: confirm.cancel()
-                    }
-                    KitButton {
-                        width: (parent.width - parent.spacing) / 2
-                        size: "lg"
-                        variant: "danger"
-                        text: qsTr("Delete account")
-                        enabled: confirm.deletion.matches
-                        loading: confirm.busy
-                        onClicked: confirm.submit()
-                    }
-                }
-                Text {
-                    width: parent.width
-                    visible: confirm.deletion.error.length > 0
-                    textFormat: Text.PlainText
-                    text: confirm.deletion.error
-                    wrapMode: Text.Wrap
-                    color: Theme.dangerInk
-                    font: Theme.type.caption
-                    Accessible.role: Accessible.AlertMessage
-                    Accessible.name: text
-                }
-            }
-        }
-    }
-
-    // About > Open source licences, over the page; made on first use.
-    Loader {
-        id: licensesPage
-        anchors.fill: parent
-        z: 2
-        active: false
-        sourceComponent: LicensesPage {}
-        function load() {
-            active = true
-            return item
-        }
-    }
-
-    // A numbered section (the desktop's rule card): a 2 px ink-1 rule, the
-    // silkscreen legend and its "01" on the rule line, then the rows.
-    component Section: Column {
-        id: section
-        property int number: 0
-        property string title
-        default property alias content: rows.data
-        width: parent ? parent.width : 0
-        spacing: 0
-        Rectangle {
-            width: parent.width
-            height: 2
-            color: Theme.ink1
-        }
-        Item {
-            width: parent.width
-            height: 36
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                textFormat: Text.PlainText
-                text: section.title
-                color: Theme.ink2
-                font: Theme.type.silk
-                Accessible.role: Accessible.Heading
-                Accessible.name: section.title
-            }
-            Text {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: String(section.number).padStart(2, "0")
-                color: Theme.ink3
-                font: Theme.type.numSm
-                Accessible.ignored: true
-            }
-        }
-        Column {
-            id: rows
-            width: parent.width
-        }
-    }
-
-    // One of a set (a status): the LED, the label over an optional hint,
-    // the check while chosen. 48 high, the whole row is the key.
-    component ChoiceRow: Item {
-        id: choice
-        property string text
-        property string hint
-        property string led
-        property bool chosen: false
-        signal chose()
-        width: parent ? parent.width : 0
-        height: Math.max(48, labels.implicitHeight + 16)
-        Accessible.role: Accessible.RadioButton
-        Accessible.name: hint.length > 0 ? text + ", " + hint : text
-        Accessible.checkable: true
-        Accessible.checked: chosen
-        Accessible.onPressAction: choice.chose()
-        Rectangle {
-            anchors.fill: parent
-            anchors.leftMargin: -8
-            anchors.rightMargin: -8
-            radius: Theme.radius
-            color: choiceTap.pressed ? Theme.tint2 : choice.chosen ? Theme.tint1 : "transparent"
-            Behavior on color { ColorAnimation { duration: Theme.dur1 } }
-        }
-        Led {
-            x: 4
-            anchors.verticalCenter: parent.verticalCenter
-            size: 10
-            lit: choice.led !== "offline"
-            color: Theme.presenceLed(choice.led)
-        }
-        Column {
-            id: labels
-            anchors.left: parent.left
-            anchors.leftMargin: 30
-            anchors.right: check.left
-            anchors.rightMargin: 12
-            anchors.verticalCenter: parent.verticalCenter
-            Text {
-                width: parent.width
-                textFormat: Text.PlainText
-                text: choice.text
-                elide: Text.ElideRight
-                color: Theme.ink1
-                font: Theme.type.setting
-            }
-            Text {
-                width: parent.width
-                visible: choice.hint.length > 0
-                textFormat: Text.PlainText
-                text: choice.hint
-                elide: Text.ElideRight
-                color: Theme.ink3
-                font: Theme.type.caption
-            }
+            leftPadding: 44
+            rightPadding: clearKey.visible ? 48 : 14
+            placeholderText: qsTr("Search settings")
+            inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
+            EnterKey.type: Qt.EnterKeySearch
+            Accessible.name: qsTr("Search settings")
+            onAccepted: Qt.inputMethod.hide()
         }
         Icon {
-            id: check
+            x: 14
+            anchors.verticalCenter: parent.verticalCenter
+            name: "search"
+            size: Theme.iconMd
+            color: Theme.ink3
+        }
+        IconKey {
+            id: clearKey
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            visible: choice.chosen
-            name: "check"
-            size: Theme.iconLg
-            color: Theme.ink1
-        }
-        TapHandler {
-            id: choiceTap
-            onTapped: {
-                if (choice.chosen)
-                    return
-                Native.haptic(Native.Tick)
-                choice.chose()
+            visible: root.query.length > 0
+            iconName: "close"
+            tip: qsTr("Clear search")
+            onClicked: {
+                Qt.inputMethod.reset()
+                searchField.text = ""
             }
         }
     }
 
-    // A setting you switch: label and description, the LED switch at the
-    // end; the whole row is the key.
-    component SwitchItem: Item {
-        id: item
-        property string text
-        property string description
-        property bool checked: false
-        // Shown, but a tap changes nothing.
-        property bool locked: false
-        // Off for now (its master switch is off): dimmed and locked.
-        property bool disabled: false
-        readonly property bool inert: locked || disabled
-        signal toggled()
-        width: parent ? parent.width : 0
-        height: Math.max(56, itemLabels.implicitHeight + 16)
-        opacity: disabled ? 0.45 : 1
-        Accessible.role: Accessible.CheckBox
-        Accessible.name: text
-        Accessible.description: description
-        Accessible.checkable: true
-        Accessible.checked: checked
-        Accessible.onPressAction: if (!item.inert) item.toggled()
-        Rectangle {
-            anchors.fill: parent
-            anchors.leftMargin: -8
-            anchors.rightMargin: -8
-            radius: Theme.radius
-            color: itemTap.pressed && !item.inert ? Theme.tint2 : "transparent"
-            Behavior on color { ColorAnimation { duration: Theme.dur1 } }
-        }
-        Column {
-            id: itemLabels
-            anchors.left: parent.left
-            anchors.right: toggle.left
-            anchors.rightMargin: 16
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 2
-            Text {
-                width: parent.width
-                textFormat: Text.PlainText
-                text: item.text
-                wrapMode: Text.Wrap
-                color: Theme.ink1
-                font: Theme.type.setting
-            }
-            Text {
-                width: parent.width
-                visible: item.description.length > 0
-                textFormat: Text.PlainText
-                text: item.description
-                wrapMode: Text.Wrap
-                color: Theme.ink3
-                font: Theme.type.caption
-            }
-        }
-        SettingSwitch {
-            id: toggle
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            checked: item.checked
-            // The row takes the tap.
-            enabled: false
-            opacity: 1
-            Accessible.ignored: true
-        }
-        TapHandler {
-            id: itemTap
-            onTapped: {
-                if (item.inert)
-                    return
-                Native.haptic(Native.Tick)
-                item.toggled()
-            }
-        }
-    }
-
-    // A theme's thumbnail (its own colours; Match system split dark and
-    // light) over its name, ringed in ink-1 with a check while chosen.
-    component ThemeTile: Item {
-        id: tile
-        property string themeId
-        property string label
-        readonly property bool on: Settings.theme === themeId
-        height: thumb.height + 8 + 18
-        Accessible.role: Accessible.RadioButton
-        Accessible.name: label
-        Accessible.checkable: true
-        Accessible.checked: on
-        Accessible.onPressAction: Settings.chooseTheme(tile.themeId)
-        scale: tileTap.pressed ? Theme.scalePress : 1
-        Behavior on scale { NumberAnimation { duration: Theme.dur1 } }
-        Rectangle {
-            id: thumb
-            width: parent.width
-            height: tile.themeId === "system" ? 72 : Math.round(width * 9 / 16)
-            radius: Theme.radius
-            color: "transparent"
-            clip: true
-            Item {
-                anchors.fill: parent
-                anchors.margins: 2
-                clip: true
-                Loader {
-                    width: parent.width
-                    height: parent.height
-                    active: tile.themeId !== "system"
-                    sourceComponent: Mock { t: Theme.themeMock(tile.themeId) }
-                }
-                Item {
-                    visible: tile.themeId === "system"
-                    width: parent.width / 2
-                    height: parent.height
-                    clip: true
-                    Mock { width: parent.width * 2; height: parent.height; t: Theme.themeMock("dark") }
-                }
-                Item {
-                    visible: tile.themeId === "system"
-                    x: parent.width / 2
-                    width: parent.width / 2
-                    height: parent.height
-                    clip: true
-                    Mock { x: -parent.width; width: parent.width * 2; height: parent.height; t: Theme.themeMock("light") }
-                }
-            }
-            Rectangle {
-                anchors.fill: parent
-                color: "transparent"
-                radius: Theme.radius
-                border.width: tile.on ? 2 : 1
-                border.color: tile.on ? Theme.ink1 : Theme.lineStrong
-            }
-            Rectangle {
-                visible: tile.on
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.margins: 6
-                width: 20
-                height: 20
-                radius: Theme.radius
-                color: Theme.primaryFill
-                Icon {
-                    anchors.centerIn: parent
-                    name: "check"
-                    size: Theme.iconXs
-                    color: Theme.primaryFillInk
-                }
+    // Search results: the setting, the page it is on.
+    Column {
+        visible: root.query.length > 0
+        width: parent.width
+        Repeater {
+            model: root.results
+            delegate: AdminRow {
+                required property var modelData
+                iconName: root.pages[modelData.page].icon
+                text: modelData.label
+                hint: root.pages[modelData.page].title
+                onOpened: root.open(modelData.page)
             }
         }
         Text {
-            y: thumb.height + 8
+            visible: root.results.length === 0
             width: parent.width
+            topPadding: 24
+            horizontalAlignment: Text.AlignHCenter
             textFormat: Text.PlainText
-            text: tile.label
-            elide: Text.ElideRight
-            color: tile.on ? Theme.ink1 : Theme.ink2
-            font: tile.on ? Theme.type.labelStrong : Theme.type.description
-        }
-        TapHandler {
-            id: tileTap
-            onTapped: {
-                if (tile.on)
-                    return
-                Native.haptic(Native.Tick)
-                Settings.chooseTheme(tile.themeId)
-            }
+            text: qsTr("No settings match “%1”.").arg(root.query)
+            wrapMode: Text.Wrap
+            color: Theme.ink3
+            font: Theme.type.description
         }
     }
 
-    // A theme drawn small: the rail, the sidebar, a header line, two
-    // messages and the accent.
-    component Mock: Rectangle {
-        id: mock
-        required property var t
-        color: t.bg
-        Rectangle { width: parent.width * 0.1; height: parent.height; color: mock.t.rail }
-        Rectangle { x: parent.width * 0.1; width: parent.width * 0.26; height: parent.height; color: mock.t.sidebar }
-        Rectangle { x: parent.width * 0.14; y: parent.height * 0.18; width: parent.width * 0.16; height: 3; color: mock.t.dim }
-        Rectangle { x: parent.width * 0.14; y: parent.height * 0.32; width: parent.width * 0.12; height: 3; color: mock.t.accent }
-        Rectangle { x: parent.width * 0.14; y: parent.height * 0.46; width: parent.width * 0.18; height: 3; color: mock.t.dim }
-        Rectangle { x: parent.width * 0.42; y: parent.height * 0.24; width: parent.width * 0.32; height: 4; color: mock.t.text; opacity: 0.85 }
-        Rectangle { x: parent.width * 0.42; y: parent.height * 0.38; width: parent.width * 0.48; height: 3; color: mock.t.dim }
-        Rectangle { x: parent.width * 0.42; y: parent.height * 0.58; width: parent.width * 0.26; height: 4; color: mock.t.text; opacity: 0.85 }
-        Rectangle { x: parent.width * 0.42; y: parent.height * 0.72; width: parent.width * 0.4; height: 3; color: mock.t.dim }
-        Rectangle { x: parent.width * 0.06 - 2; y: parent.height * 0.14; width: 4; height: 4; color: mock.t.accent }
-    }
-
-    // A device signed in to the account: its glyph, name, where and when;
-    // another device's Sign out asks first.
-    component SessionItem: Column {
-        id: device
-        required property var modelData
-        readonly property bool armed: root.devices.armed === modelData.id
-        width: parent ? parent.width : 0
-        bottomPadding: armed ? 12 : 0
-        Item {
-            width: parent.width
-            height: Math.max(64, deviceLabels.implicitHeight + 16)
-            Accessible.role: Accessible.ListItem
-            Accessible.name: device.modelData.title + ", " + device.modelData.detail
-            Rectangle {
-                id: glyph
+    // You: your card (Profile), then the account's pages.
+    Rectangle {
+        visible: root.query.length === 0
+        width: parent.width
+        height: card.height + 32
+        radius: Theme.radius
+        color: cardTap.pressed ? Theme.tint2 : Theme.ply1
+        border.width: 1
+        border.color: Theme.line
+        Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+        Accessible.role: Accessible.Button
+        Accessible.name: qsTr("Profile, %1").arg(Session.meName)
+        Accessible.onPressAction: root.open("SettingsProfilePage")
+        Row {
+            id: card
+            x: 16
+            y: 16
+            width: parent.width - 32
+            spacing: 16
+            PresenceAvatar {
+                id: face
                 anchors.verticalCenter: parent.verticalCenter
-                width: 40
-                height: 40
-                radius: Theme.radius
-                color: Theme.tint2
-                Icon {
-                    anchors.centerIn: parent
-                    name: device.modelData.mobile ? "mobile" : "monitor"
-                    size: Theme.iconMd
-                    color: Theme.ink1
-                }
+                size: 56
+                initials: Session.meInitials.length > 0 ? Session.meInitials : "?"
+                source: Session.meAvatar
+                deco: Session.meDeco
+                presence: root.status
+                ground: Theme.ply1
             }
             Column {
-                id: deviceLabels
-                anchors.left: glyph.right
-                anchors.leftMargin: 12
-                anchors.right: signOutKey.visible ? signOutKey.left : parent.right
-                anchors.rightMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
+                width: parent.width - face.width - chevron.width - 2 * parent.spacing
                 spacing: 2
-                Row {
+                DisplayName {
                     width: parent.width
-                    spacing: 8
-                    Text {
-                        width: Math.min(implicitWidth, parent.width - (here.visible ? here.width + 8 : 0))
-                        textFormat: Text.PlainText
-                        text: device.modelData.title
-                        elide: Text.ElideRight
-                        color: Theme.ink1
-                        font: Theme.type.setting
-                    }
-                    Text {
-                        id: here
-                        visible: device.modelData.current
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: qsTr("This device")
-                        color: Theme.successInk
-                        font: Theme.type.silk
-                    }
+                    text: Session.meName
+                    nameStyle: Session.meNameStyle
+                    color: Theme.ink1
+                    font: Theme.type.sectionTitle
+                    ground: Theme.ply1
                 }
                 Text {
                     width: parent.width
                     textFormat: Text.PlainText
-                    text: device.modelData.detail
+                    text: qsTr("@%1 · Profile and status").arg(Session.meUsername)
                     elide: Text.ElideRight
                     color: Theme.ink2
                     font: Theme.type.description
                 }
             }
-            KitButton {
-                id: signOutKey
-                anchors.right: parent.right
+            Icon {
+                id: chevron
                 anchors.verticalCenter: parent.verticalCenter
-                visible: !device.modelData.current && !device.armed
-                variant: "secondary"
-                text: qsTr("Sign out")
-                Accessible.name: qsTr("Sign out %1").arg(device.modelData.title)
-                onClicked: root.devices.arm(device.modelData.id)
+                name: "chevronRight"
+                size: Theme.iconMd
+                color: Theme.ink3
             }
-        }
-        Loader {
-            width: parent.width
-            active: device.armed
-            visible: active
-            sourceComponent: InlineConfirm {
-                consequence: qsTr("%1 will be signed out and need to sign in again.").arg(device.modelData.title)
-                confirmLabel: qsTr("Sign out device")
-                busy: root.devices.busy(device.modelData.id)
-                error: root.devices.errorFor(device.modelData.id)
-                onCancelled: root.devices.disarm()
-                onConfirmed: root.devices.revoke(device.modelData.id)
-            }
-        }
-    }
-
-    // A volume, 0 to 100: the label (and an optional description) over the
-    // range and its number. Saved once the finger rests (250 ms) or lifts.
-    component VolumeRow: Column {
-        id: vol
-        property string text
-        property string description
-        property int value: 0
-        property bool disabled: false
-        signal committed(int value)
-        width: parent ? parent.width : 0
-        topPadding: 8
-        bottomPadding: 4
-        opacity: disabled ? 0.45 : 1
-        Text {
-            width: parent.width
-            textFormat: Text.PlainText
-            text: vol.text
-            wrapMode: Text.Wrap
-            color: Theme.ink1
-            font: Theme.type.setting
-        }
-        Text {
-            width: parent.width
-            visible: vol.description.length > 0
-            topPadding: 2
-            textFormat: Text.PlainText
-            text: vol.description
-            wrapMode: Text.Wrap
-            color: Theme.ink3
-            font: Theme.type.caption
-        }
-        Item {
-            width: parent.width
-            height: 48
-            T.Slider {
-                id: range
-                anchors.left: parent.left
-                anchors.right: volNum.left
-                anchors.rightMargin: 12
-                anchors.verticalCenter: parent.verticalCenter
-                height: 48
-                from: 0
-                to: 100
-                stepSize: 1
-                snapMode: T.Slider.SnapAlways
-                enabled: !vol.disabled
-                Accessible.role: Accessible.Slider
-                Accessible.name: vol.text
-                Accessible.description: Math.round(value) + "%"
-                onMoved: rest.restart()
-                onPressedChanged: if (!pressed && rest.running) {
-                    rest.stop()
-                    vol.committed(Math.round(value))
-                }
-                Binding on value {
-                    when: !range.pressed && !rest.running
-                    value: vol.value
-                    restoreMode: Binding.RestoreNone
-                }
-                background: Rectangle {
-                    x: range.leftPadding
-                    y: (range.height - height) / 2
-                    width: range.availableWidth
-                    height: 6
-                    radius: 1
-                    color: Theme.tint3
-                    Rectangle {
-                        width: range.visualPosition * parent.width
-                        height: parent.height
-                        radius: 1
-                        color: Theme.accentInk
-                    }
-                }
-                handle: Rectangle {
-                    x: range.leftPadding + range.visualPosition * (range.availableWidth - width)
-                    y: (range.height - height) / 2
-                    width: 14
-                    height: 30
-                    radius: Theme.radius
-                    color: Theme.ink1
-                }
-                Timer {
-                    id: rest
-                    interval: 250
-                    onTriggered: vol.committed(Math.round(range.value))
-                }
-                // The page closed inside the wait: keep the last value.
-                Component.onDestruction: if (rest.running) vol.committed(Math.round(range.value))
-            }
-            Text {
-                id: volNum
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                width: 36
-                horizontalAlignment: Text.AlignRight
-                textFormat: Text.PlainText
-                text: Math.round(range.value)
-                color: Theme.ink2
-                font: Theme.type.num
-                Accessible.ignored: true
-            }
-        }
-    }
-
-    // A refusal under the row it belongs to, while there is one.
-    component ErrorText: Text {
-        width: parent ? parent.width : 0
-        visible: text.length > 0
-        topPadding: 4
-        textFormat: Text.PlainText
-        wrapMode: Text.Wrap
-        color: Theme.dangerInk
-        font: Theme.type.caption
-        Accessible.role: Accessible.AlertMessage
-        Accessible.name: text
-    }
-
-    // A fact: the label, the value in the number face.
-    component InfoRow: Item {
-        id: info
-        property string text
-        property string value
-        width: parent ? parent.width : 0
-        height: 48
-        Accessible.role: Accessible.StaticText
-        Accessible.name: text + ", " + value
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-            text: info.text
-            color: Theme.ink1
-            font: Theme.type.setting
-        }
-        Text {
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-            text: info.value
-            color: Theme.ink2
-            font: Theme.type.num
-        }
-    }
-
-    // A page of the app's own, opened over this one.
-    component PageRow: Item {
-        id: pageRow
-        property string text
-        // The glyph at the end: a page opens by default.
-        property string iconName: "chevronRight"
-        signal opened()
-        width: parent ? parent.width : 0
-        height: 48
-        Accessible.role: Accessible.Button
-        Accessible.name: text
-        Accessible.onPressAction: pageRow.opened()
-        Rectangle {
-            anchors.fill: parent
-            anchors.leftMargin: -8
-            anchors.rightMargin: -8
-            radius: Theme.radius
-            color: pageTap.pressed ? Theme.tint2 : "transparent"
-            Behavior on color { ColorAnimation { duration: Theme.dur1 } }
-        }
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-            text: pageRow.text
-            color: Theme.ink1
-            font: Theme.type.setting
-        }
-        Icon {
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            name: pageRow.iconName
-            size: Theme.iconMd
-            color: Theme.ink3
         }
         TapHandler {
-            id: pageTap
+            id: cardTap
             onTapped: {
                 Native.haptic(Native.Tick)
-                pageRow.opened()
+                root.open("SettingsProfilePage")
             }
         }
     }
 
-    // A page on the web, opened in the browser.
-    component LinkRow: Item {
-        id: link
-        property string text
-        property string url
-        width: parent ? parent.width : 0
-        height: 48
-        Accessible.role: Accessible.Link
-        Accessible.name: text
-        Accessible.onPressAction: Qt.openUrlExternally(link.url)
-        Rectangle {
-            anchors.fill: parent
-            anchors.leftMargin: -8
-            anchors.rightMargin: -8
-            radius: Theme.radius
-            color: linkTap.pressed ? Theme.tint2 : "transparent"
-            Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+    AdminSection {
+        visible: root.query.length === 0
+        title: qsTr("You")
+        HubRow {
+            page: "SettingsAccountPage"
+            hint: qsTr("Sign out, delete account")
         }
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-            text: link.text
-            color: Theme.ink1
-            font: Theme.type.setting
+        HubRow {
+            page: "SettingsPrivacyPage"
+            hint: qsTr("Activity, DMs, media filter")
         }
-        Icon {
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            name: "externalLink"
-            size: Theme.iconMd
-            color: Theme.ink3
+        HubRow {
+            page: "SettingsDevicesPage"
+            hint: qsTr("Where you're signed in")
         }
-        TapHandler {
-            id: linkTap
-            onTapped: {
-                Native.haptic(Native.Tick)
-                Qt.openUrlExternally(link.url)
-            }
+        HubRow {
+            page: "SettingsPlanPage"
+            hint: qsTr("Your plan")
         }
+    }
+
+    AdminSection {
+        visible: root.query.length === 0 && root.hasSoundboard
+        title: qsTr("Calls")
+        HubRow {
+            page: "SettingsSoundboardPage"
+            hint: qsTr("Playback volume")
+        }
+    }
+
+    AdminSection {
+        visible: root.query.length === 0
+        title: qsTr("App")
+        HubRow {
+            page: "SettingsAppearancePage"
+            hint: qsTr("%1 · Text size").arg(root.themeName)
+        }
+        HubRow {
+            page: "SettingsNotificationsPage"
+            hint: Native.notificationsEnabled ? qsTr("Push on · Sounds") : qsTr("Push off · Sounds")
+        }
+        HubRow {
+            page: "SettingsAboutPage"
+            hint: qsTr("Version %1, licences").arg(Qt.application.version.length > 0 ? Qt.application.version : Settings.version)
+        }
+    }
+
+    // A category: its glyph, title and line, opening its page.
+    component HubRow: AdminRow {
+        required property string page
+        iconName: root.pages[page].icon
+        text: root.pages[page].title
+        onOpened: root.open(page)
     }
 }
