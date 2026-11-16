@@ -543,7 +543,7 @@ pub struct ClientVoiceState {
 /// VoiceStateUpdate (op 15) on the global gateway: our live share's still
 /// for the sidebar roster (chat-gateway.ts `sendVoiceStateUpdate({
 /// stream_preview_url })`); `None` sends `null`, which clears it.
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts"))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StreamPreviewUpdate {
     pub stream_preview_url: Option<String>,

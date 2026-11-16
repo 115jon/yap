@@ -32,6 +32,7 @@ pub struct SocketTicketRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IceServer {
     #[serde(deserialize_with = "string_or_list")]
+    #[cfg_attr(feature = "ts", ts(as = "ts_wire::StringOrList"))]
     pub urls: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
@@ -40,7 +41,6 @@ pub struct IceServer {
 }
 
 fn string_or_list<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
-    #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "rest.ts"))]
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum OneOrMany {
@@ -334,6 +334,7 @@ pub struct Server {
         deserialize_with = "opt_bool_or_int",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ts_wire::BoolOrInt>"))]
     pub invites_paused: Option<bool>,
     /// The public message share switches (Server settings → Overview).
     #[serde(
@@ -341,18 +342,21 @@ pub struct Server {
         deserialize_with = "opt_bool_or_int",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ts_wire::BoolOrInt>"))]
     pub allow_public_shares: Option<bool>,
     #[serde(
         default,
         deserialize_with = "opt_bool_or_int",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ts_wire::BoolOrInt>"))]
     pub show_source_in_shares: Option<bool>,
     #[serde(
         default,
         deserialize_with = "opt_bool_or_int",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ts_wire::BoolOrInt>"))]
     pub allow_share_indexing: Option<bool>,
 }
 
@@ -451,7 +455,7 @@ pub struct Attachment {
     pub file_key: Option<String>,
     /// Marked sensitive by the sender (blurred under the high filter).
     #[serde(default, deserialize_with = "bool_or_int")]
-    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ts_wire::BoolOrInt>", optional))]
     pub is_nsfw: bool,
 }
 
@@ -979,7 +983,7 @@ pub struct Message {
     /// Messages that reply to this one, its thread (message.service.ts
     /// `formatMessageRow`; 0 when absent).
     #[serde(default, deserialize_with = "count")]
-    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Option<i64>>", optional))]
     pub reply_count: i64,
 }
 
@@ -1019,7 +1023,7 @@ pub struct ThreadSummary {
     #[cfg_attr(feature = "ts", ts(as = "Option<User>", optional))]
     pub author: User,
     #[serde(default, deserialize_with = "count")]
-    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Option<i64>>", optional))]
     pub reply_count: i64,
     #[serde(default)]
     #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
@@ -1170,7 +1174,7 @@ pub struct Role {
     #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub position: i64,
     #[serde(default, deserialize_with = "bool_or_int")]
-    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ts_wire::BoolOrInt>", optional))]
     pub is_default: bool,
     /// The bitmask (src/lib/permissions.ts); 0 when a payload leaves it out.
     #[serde(default)]
@@ -1363,7 +1367,7 @@ pub struct Invite {
     #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub uses: i64,
     #[serde(default, deserialize_with = "bool_or_int")]
-    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
+    #[cfg_attr(feature = "ts", ts(as = "Option<ts_wire::BoolOrInt>", optional))]
     pub temporary: bool,
     pub expires_at: Option<String>,
     pub created_at: Option<String>,
@@ -1623,4 +1627,18 @@ pub struct DevicePollResponse {
     pub status: Option<DevicePollStatus>,
     pub session_token: Option<String>,
     pub error: Option<String>,
+}
+
+/// TypeScript for fields whose deserializer takes more than their Rust type.
+#[cfg(feature = "ts")]
+mod ts_wire {
+    /// `bool_or_int`: D1 rows carry booleans as 0 or 1.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "rest.ts", type = "boolean | number")]
+    pub struct BoolOrInt;
+
+    /// `string_or_list`: one URL or several.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "rest.ts", type = "string | Array<string>")]
+    pub struct StringOrList;
 }

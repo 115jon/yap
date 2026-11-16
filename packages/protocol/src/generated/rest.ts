@@ -18,7 +18,7 @@ export type Attachment = {
   /**
    * Marked sensitive by the sender (blurred under the high filter).
    */
-  is_nsfw?: boolean;
+  is_nsfw?: BoolOrInt;
 };
 
 /**
@@ -47,6 +47,11 @@ export type Ban = {
   banned_by_username?: string | null;
   created_at?: string;
 };
+
+/**
+ * `bool_or_int`: D1 rows carry booleans as 0 or 1.
+ */
+export type BoolOrInt = boolean | number;
 
 /**
  * A DM call's outcome, kept as a system message (`type: "call"`,
@@ -383,7 +388,7 @@ export type GifTerms = { results?: Array<string> };
  * One ICE (STUN/TURN) server. The wire allows `urls` as a string or a list.
  */
 export type IceServer = {
-  urls: Array<string>;
+  urls: StringOrList;
   username?: string | null;
   credential?: string | null;
 };
@@ -402,7 +407,7 @@ export type Invite = {
    */
   max_uses?: number | null;
   uses?: number;
-  temporary?: boolean;
+  temporary?: BoolOrInt;
   expires_at?: string | null;
   created_at?: string | null;
 };
@@ -528,7 +533,7 @@ export type Message = {
    * Messages that reply to this one, its thread (message.service.ts
    * `formatMessageRow`; 0 when absent).
    */
-  reply_count?: number;
+  reply_count?: number | null;
 };
 
 /**
@@ -723,7 +728,7 @@ export type Role = {
    */
   color?: string | null;
   position?: number;
-  is_default?: boolean;
+  is_default?: BoolOrInt;
   /**
    * The bitmask (src/lib/permissions.ts); 0 when a payload leaves it out.
    */
@@ -742,13 +747,13 @@ export type Server = {
   /**
    * Every invite link is off until a manager resumes them.
    */
-  invites_paused?: boolean | null;
+  invites_paused?: BoolOrInt | null;
   /**
    * The public message share switches (Server settings → Overview).
    */
-  allow_public_shares?: boolean | null;
-  show_source_in_shares?: boolean | null;
-  allow_share_indexing?: boolean | null;
+  allow_public_shares?: BoolOrInt | null;
+  show_source_in_shares?: BoolOrInt | null;
+  allow_share_indexing?: BoolOrInt | null;
 };
 
 /**
@@ -818,6 +823,11 @@ export type SocketTicket = {
 export type SocketTicketRequest = { audience: TicketAudience };
 
 /**
+ * `string_or_list`: one URL or several.
+ */
+export type StringOrList = string | Array<string>;
+
+/**
  * A thread starter in `GET /api/channels/{id}/threads` (`{threads}`,
  * message.service.ts `fetchChannelThreads`): a message with replies, its
  * content cut to 200 characters, newest reply first.
@@ -826,7 +836,7 @@ export type ThreadSummary = {
   id: string;
   content?: string;
   author?: User;
-  reply_count?: number;
+  reply_count?: number | null;
   last_reply_at?: string;
   created_at?: string;
 };

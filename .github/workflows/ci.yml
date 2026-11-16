@@ -72,6 +72,7 @@ jobs:
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
             rust:
+              - 'native/rust/Cargo.toml'
               - 'native/rust/crates/yap-protocol/**'
               - 'packages/rust/**'
               - 'packages/protocol/src/generated/**'

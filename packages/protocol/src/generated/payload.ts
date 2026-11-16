@@ -335,7 +335,7 @@ export type StopTracks = {
  * for the sidebar roster (chat-gateway.ts `sendVoiceStateUpdate({
  * stream_preview_url })`); `None` sends `null`, which clears it.
  */
-export type StreamPreviewUpdate = { stream_preview_url?: string | null };
+export type StreamPreviewUpdate = { stream_preview_url: string | null };
 
 /**
  * A published track as the voice room describes it (Video, op 12, and

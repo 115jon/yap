@@ -396,6 +396,32 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// The TypeScript of the `String` fields that hold one of a list
+    /// (`ts(type = ...)` above) must name exactly that list.
+    #[cfg(feature = "ts")]
+    #[test]
+    fn ts_literal_types_should_match_their_lists() {
+        use ts_rs::{Config, TS};
+        let union = |values: &[&str]| {
+            values
+                .iter()
+                .map(|v| format!("\"{v}\""))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        };
+        let cfg = Config::new();
+        let live = DeadlockLiveState::decl(&cfg);
+        assert!(live.contains("kind: \"deadlock\""), "{live}");
+        let phases = format!("phase: {}", union(DEADLOCK_LIVE_PHASES));
+        assert!(live.contains(&phases), "{live}");
+        let modes = format!("mode?: {}", union(DEADLOCK_LIVE_MODES));
+        assert!(live.contains(&modes), "{live}");
+        let activity = GameActivity::decl(&cfg);
+        assert!(activity.contains("kind: \"playing\""), "{activity}");
+        let sources = format!("source: {}", union(GAME_ACTIVITY_SOURCES));
+        assert!(activity.contains(&sources), "{activity}");
+    }
+
     const HASH: &str = "a60bb76ba4d4acafbd4cb9aad6e61739";
 
     fn wire() -> Value {
