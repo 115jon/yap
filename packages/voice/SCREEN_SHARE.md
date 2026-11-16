@@ -30,20 +30,14 @@ A share is captured and published one of two ways. The platform injects
 both as **sources**; the module decides which one runs.
 
 - **Native**: the native pipeline captures, encodes (hardware H.264) and
-  publishes the share by itself. Web desktop: the Rust publisher behind
-  `NativeScreenShareTransport`, which negotiates over the voice socket
-  (`SelectProtocol` with `push_prefix: "screen"`, then `TracksReady`) and
-  sends source audio from WASAPI loopback. Its loopback is fixed when it
-  starts, so its audio cannot change in place.
-- **Browser**: the platform's media stack captures the source (web: CEF
-  desktop capture of a picked window or monitor, or `getDisplayMedia` with
-  the system picker) and the reconciler publishes the tracks (web:
-  PartyTracks).
+  publishes the share by itself. The web has no native source
+  (`native: null`); this path is for native clients.
+- **Browser**: the platform's media stack captures the source (web:
+  `getDisplayMedia` with the system picker) and the reconciler publishes
+  the tracks (web: PartyTracks).
 
-A request uses the native path when it prefers it (`preferNative`; false
-after a native share lost its connection) and the native source says it is
-**eligible** (web: a picked desktop source that is not a capture device,
-and a hardware H.264 encoder was found).
+A request uses the native path when it prefers it (`preferNative`) and the
+native source says it is **eligible**. The web sets `preferNative: false`.
 
 ## States
 
@@ -277,7 +271,7 @@ share reconnects through its own transport; the reconciler's `publish` of
 the adopted native value does nothing, but records it, so stopping the
 share later still withdraws both names.
 
-A native reconnect (web: `NativeScreenShareTransport.reconnect`) starts the
+A native reconnect starts the
 pipeline again with the options it last started with:
 
 - Nothing to bring back (the share was stopped, or never started): nothing
