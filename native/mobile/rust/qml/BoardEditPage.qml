@@ -293,7 +293,8 @@ Rectangle {
                 // The ids in board order, reassigned when the order or the
                 // set changes; the rows are made from `members` (the set,
                 // sorted), so a move only slides them and the row TalkBack
-                // is on stays.
+                // is on stays. `restack` keeps the rows' order among their
+                // siblings that of the board, which TalkBack reads in.
                 property var ids: []
                 property var members: []
                 function syncIds() {
@@ -331,6 +332,7 @@ Rectangle {
                     // The board changed under a drag (undo from elsewhere):
                     // the widget goes back down.
                     endDrag(false)
+                    Qt.callLater(restack)
                     heldOrder = null
                     if (addedFrom !== null) {
                         const added = ids.find(id => addedFrom.indexOf(id) < 0)
@@ -338,6 +340,30 @@ Rectangle {
                         if (added)
                             Qt.callLater(widgetSheet.show, added)
                     }
+                }
+
+                // Rows in board order among the list's children: each goes to
+                // the end in turn (a reparent appends; stackAfter is C++ only).
+                function restack() {
+                    const shownOrder = children.filter(c => c.cellId !== undefined).map(c => c.cellId)
+                    const wanted = ids.filter(id => shownOrder.indexOf(id) >= 0)
+                    if (shownOrder.join("|") === wanted.join("|"))
+                        return
+                    const rowsById = {}
+                    for (let i = 0; i < rowRepeater.count; ++i) {
+                        const row = rowRepeater.itemAt(i)
+                        if (row)
+                            rowsById[row.cellId] = row
+                    }
+                    for (const id of wanted) {
+                        const row = rowsById[id]
+                        row.parent = holder
+                        row.parent = list
+                    }
+                }
+                Item {
+                    id: holder
+                    visible: false
                 }
 
                 function startDrag(id, row, offset, sceneY) {
@@ -404,7 +430,9 @@ Rectangle {
                 }
 
                 Repeater {
+                    id: rowRepeater
                     model: list.members
+                    onItemAdded: Qt.callLater(list.restack)
                     delegate: Item {
                         id: row
                         required property string modelData
