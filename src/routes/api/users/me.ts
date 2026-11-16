@@ -4,6 +4,7 @@ import { apiError, apiSuccess, getDB, requireAuth } from "@/lib/api-helpers";
 import { ensureUserProfileSchema } from "@/lib/ensure-user-profile-schema";
 import { getCurrentUser } from "@/lib/kova-auth-server";
 import { DEFAULT_MEDIA_CONTENT_FILTER } from "@/lib/media-content-filter";
+import { DEFAULT_DM_PERMISSION, type DmPermission } from "@/lib/dm-permission";
 import {
   applyProfileThemeDefaults,
   type DisplayNameStyle,
@@ -50,6 +51,7 @@ type UserProfileRow = {
   theme_sync_enabled: number;
   media_content_filter: string;
   share_activity?: boolean;
+  dm_permission?: DmPermission;
   updated_at: string | null;
   created_at: string | null;
   bio: string | null;
@@ -391,6 +393,7 @@ async function syncUserFromRalphAuth(
     theme_sync_enabled: 0,
     media_content_filter: DEFAULT_MEDIA_CONTENT_FILTER,
     share_activity: true,
+    dm_permission: DEFAULT_DM_PERMISSION,
     updated_at: now,
     created_at: now,
     bio,

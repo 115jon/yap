@@ -10,7 +10,10 @@ import { readJsonBody } from "@/lib/validate-body";
 import { AddReactionSchema, RemoveReactionSchema } from "@/lib/validations";
 import { addReaction, removeReaction } from "@/services/message.service";
 import { executeBroadcast } from "@/services/service-helpers";
-import { blockRefusal, dmBlockState } from "@/services/block.service";
+import {
+  contactRefusalError,
+  dmContactRefusal,
+} from "@/services/dm-permission.service";
 
 // PUT /api/channels/:id/reactions — add a reaction
 export const PUT = async ({ request, params }: any) => {
@@ -31,10 +34,11 @@ export const PUT = async ({ request, params }: any) => {
       return apiError("You do not have permission to add reactions", 403);
     }
   } else {
-    // No new reactions in a 1:1 DM closed by a block (removing one is fine).
-    const block = await dmBlockState(getDB(), userId, channelId);
-    if (block) {
-      const refusal = blockRefusal(block);
+    // No new reactions in a 1:1 DM closed by a block or by the recipient's
+    // "who can DM you" setting (removing one is fine).
+    const contact = await dmContactRefusal(getDB(), userId, channelId);
+    if (contact) {
+      const refusal = contactRefusalError(contact);
       return apiError(refusal.message, refusal.status, refusal.code);
     }
   }

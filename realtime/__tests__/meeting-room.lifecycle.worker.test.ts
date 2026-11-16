@@ -762,7 +762,7 @@ describe("MeetingRoom lifecycle", () => {
 
   it("serializes explicit nulls in a dedicated ProfileUpdate", async () => {
     await env.DB.prepare(
-      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL, display_name TEXT, avatar_url TEXT, avatar_display TEXT)",
+      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL, display_name TEXT, avatar_url TEXT, avatar_display TEXT, dm_permission TEXT)",
     ).run();
     const userId = `profile-refresh-${crypto.randomUUID()}`;
     await env.DB.prepare(
@@ -866,7 +866,7 @@ describe("MeetingRoom lifecycle", () => {
 
   it("preserves a newer shared profile when a stale session resumes", async () => {
     await env.DB.prepare(
-      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL, display_name TEXT, avatar_url TEXT, avatar_display TEXT)",
+      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL, display_name TEXT, avatar_url TEXT, avatar_display TEXT, dm_permission TEXT)",
     ).run();
     await env.DB.prepare(
       "CREATE TABLE IF NOT EXISTS channels (id TEXT PRIMARY KEY, server_id TEXT, channel_type TEXT NOT NULL)",
@@ -1118,7 +1118,7 @@ describe("MeetingRoom lifecycle", () => {
 
   it("reconciles every voice channel before a stale session can restore its old profile", async () => {
     await env.DB.prepare(
-      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL, display_name TEXT, avatar_url TEXT, avatar_display TEXT)",
+      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL, display_name TEXT, avatar_url TEXT, avatar_display TEXT, dm_permission TEXT)",
     ).run();
     await env.DB.prepare(
       "CREATE TABLE IF NOT EXISTS channels (id TEXT PRIMARY KEY, server_id TEXT, channel_type TEXT NOT NULL)",
@@ -1312,7 +1312,7 @@ describe("MeetingRoom lifecycle", () => {
 
   it("propagates identify profiles across live sessions and prevents stale resume identity", async () => {
     await env.DB.prepare(
-      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL, display_name TEXT, avatar_url TEXT, avatar_display TEXT)",
+      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL, display_name TEXT, avatar_url TEXT, avatar_display TEXT, dm_permission TEXT)",
     ).run();
 
     const userId = `identify-multi-session-${crypto.randomUUID()}`;
@@ -1575,6 +1575,14 @@ describe("MeetingRoom lifecycle", () => {
     await env.DB.prepare(
       "CREATE TABLE IF NOT EXISTS relationships (user_id TEXT NOT NULL, target_user_id TEXT NOT NULL, type INTEGER NOT NULL)",
     ).run();
+    // The ring reads the callee's "who can DM you" setting (users and
+    // messages): a DM call ring needs both tables.
+    await env.DB.prepare(
+      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT, display_name TEXT, avatar_url TEXT, avatar_display TEXT, status TEXT, dm_permission TEXT)",
+    ).run();
+    await env.DB.prepare(
+      "CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, author_id TEXT NOT NULL, content TEXT NOT NULL, reply_to_id TEXT, created_at TEXT, content_revision INTEGER, type TEXT, metadata TEXT)",
+    ).run();
 
     const roomName = crypto.randomUUID();
     const channelId = `call-profile-${crypto.randomUUID()}`;
@@ -1669,6 +1677,14 @@ describe("MeetingRoom lifecycle", () => {
     ).run();
     await env.DB.prepare(
       "CREATE TABLE IF NOT EXISTS relationships (user_id TEXT NOT NULL, target_user_id TEXT NOT NULL, type INTEGER NOT NULL)",
+    ).run();
+    // The ring reads the callee's "who can DM you" setting (users and
+    // messages): a DM call ring needs both tables.
+    await env.DB.prepare(
+      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT, display_name TEXT, avatar_url TEXT, avatar_display TEXT, status TEXT, dm_permission TEXT)",
+    ).run();
+    await env.DB.prepare(
+      "CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, author_id TEXT NOT NULL, content TEXT NOT NULL, reply_to_id TEXT, created_at TEXT, content_revision INTEGER, type TEXT, metadata TEXT)",
     ).run();
 
     const roomName = crypto.randomUUID();
@@ -1771,6 +1787,14 @@ describe("MeetingRoom lifecycle", () => {
     await env.DB.prepare(
       "CREATE TABLE IF NOT EXISTS relationships (user_id TEXT NOT NULL, target_user_id TEXT NOT NULL, type INTEGER NOT NULL)",
     ).run();
+    // The ring reads the callee's "who can DM you" setting (users and
+    // messages): a DM call ring needs both tables.
+    await env.DB.prepare(
+      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT, display_name TEXT, avatar_url TEXT, avatar_display TEXT, status TEXT, dm_permission TEXT)",
+    ).run();
+    await env.DB.prepare(
+      "CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, author_id TEXT NOT NULL, content TEXT NOT NULL, reply_to_id TEXT, created_at TEXT, content_revision INTEGER, type TEXT, metadata TEXT)",
+    ).run();
 
     const roomName = crypto.randomUUID();
     const channelId = `call-end-${crypto.randomUUID()}`;
@@ -1858,7 +1882,7 @@ describe("MeetingRoom lifecycle", () => {
       "CREATE TABLE IF NOT EXISTS channels (id TEXT PRIMARY KEY, server_id TEXT, channel_type TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS dm_recipients (channel_id TEXT NOT NULL, user_id TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS relationships (user_id TEXT NOT NULL, target_user_id TEXT NOT NULL, type INTEGER NOT NULL)",
-      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT, display_name TEXT, avatar_url TEXT, avatar_display TEXT, status TEXT)",
+      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT, display_name TEXT, avatar_url TEXT, avatar_display TEXT, status TEXT, dm_permission TEXT)",
       "CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, author_id TEXT NOT NULL, content TEXT NOT NULL, reply_to_id TEXT, created_at TEXT, content_revision INTEGER, type TEXT, metadata TEXT)",
     ]) {
       await env.DB.prepare(sql).run();
@@ -1976,7 +2000,7 @@ describe("MeetingRoom lifecycle", () => {
     for (const sql of [
       "CREATE TABLE IF NOT EXISTS channels (id TEXT PRIMARY KEY, server_id TEXT, channel_type TEXT)",
       "CREATE TABLE IF NOT EXISTS dm_recipients (channel_id TEXT NOT NULL, user_id TEXT NOT NULL)",
-      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT, display_name TEXT, avatar_url TEXT, avatar_display TEXT, status TEXT)",
+      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT, display_name TEXT, avatar_url TEXT, avatar_display TEXT, status TEXT, dm_permission TEXT)",
       "CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, author_id TEXT NOT NULL, content TEXT NOT NULL, reply_to_id TEXT, created_at TEXT, content_revision INTEGER, type TEXT, metadata TEXT)",
       "CREATE TABLE IF NOT EXISTS message_postprocessing_jobs (message_id TEXT NOT NULL, revision INTEGER NOT NULL, channel_id TEXT NOT NULL, notify INTEGER NOT NULL DEFAULT 1, attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT, created_at TEXT, PRIMARY KEY (message_id, revision))",
     ]) {
@@ -2271,7 +2295,7 @@ describe("MeetingRoom lifecycle", () => {
 
   it("only invalidates member caches when presence status changes", async () => {
     await env.DB.prepare(
-      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL, display_name TEXT, avatar_url TEXT, avatar_display TEXT, status TEXT DEFAULT 'online', updated_at TEXT)",
+      "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL, display_name TEXT, avatar_url TEXT, avatar_display TEXT, status TEXT DEFAULT 'online', updated_at TEXT, dm_permission TEXT)",
     ).run();
     await env.DB.prepare(
       "CREATE TABLE IF NOT EXISTS server_members (server_id TEXT NOT NULL, user_id TEXT NOT NULL)",

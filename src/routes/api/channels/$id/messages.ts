@@ -41,6 +41,10 @@ import {
 import { recordR2CleanupFailure } from "@/services/r2-cleanup.service";
 import { scheduleMessageSent } from "@/services/stats.service";
 import { blockRefusal, dmBlockState } from "@/services/block.service";
+import {
+  contactRefusalError,
+  dmContactRefusal,
+} from "@/services/dm-permission.service";
 import { cfTimeZone } from "@/lib/request-time-zone";
 
 // GET /api/channels/:id/messages — get message history (paginated)
@@ -128,10 +132,12 @@ export const POST = async ({ request, params }: any) => {
       );
     }
   } else {
-    // A block either way closes a 1:1 DM to new messages (Discord-style).
-    const block = await dmBlockState(getDB(), userId, channelId);
-    if (block) {
-      const refusal = blockRefusal(block);
+    // A block either way closes a 1:1 DM to new messages (Discord-style),
+    // and so does the recipient's "who can DM you" setting until they have
+    // written there themselves (dm-permission.service.ts).
+    const contact = await dmContactRefusal(getDB(), userId, channelId);
+    if (contact) {
+      const refusal = contactRefusalError(contact);
       return apiError(refusal.message, refusal.status, refusal.code);
     }
   }

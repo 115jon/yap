@@ -12,6 +12,7 @@ import {
   BLOCK_ERROR,
   type BlockState,
 } from "./block.service";
+import { dmNotAcceptingRefusal, newDmRefusedBy } from "./dm-permission.service";
 import { recordServerJoin } from "./profile-activity.service";
 
 // ─── listRelationships ───────────────────────────────────────────────────────
@@ -454,16 +455,18 @@ export async function getOrCreateDM(
     throw ServiceError.badRequest("Cannot DM yourself");
   }
 
-  const target = (await db
+  const targetRow = (await db
     .prepare(
-      `SELECT id, username, display_name, avatar_url, avatar_display, status, custom_status FROM users WHERE id = ?`,
+      `SELECT id, username, display_name, avatar_url, avatar_display, status, custom_status, dm_permission FROM users WHERE id = ?`,
     )
     .bind(targetUserId)
     .first()) as Record<string, unknown> | null;
 
-  if (!target) {
+  if (!targetRow) {
     throw ServiceError.notFound("User not found");
   }
+  // Their "who can DM you" setting is theirs alone: it never goes out.
+  const { dm_permission: targetDmPermission, ...target } = targetRow;
 
   // Check existing DM
   const existing = await db
@@ -492,6 +495,13 @@ export async function getOrCreateDM(
   // A block either way stops a new DM (an existing one still opens, to read).
   const block = await blockBetween(db, userId, targetUserId);
   if (block) throw blockRefusal(block);
+  // Then their "who can DM you" setting (dm-permission.service.ts).
+  const refusedBy = await newDmRefusedBy(db, userId, {
+    ...target,
+    id: targetUserId,
+    dm_permission: targetDmPermission,
+  });
+  if (refusedBy) throw dmNotAcceptingRefusal(refusedBy);
 
   // Create new DM
   const channelId = crypto.randomUUID();

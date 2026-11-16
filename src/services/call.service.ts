@@ -127,11 +127,18 @@ export type CallRingStopReason =
   | "abandoned"
   | "disconnected"
   /** One of the two blocked the other mid-ring: no missed call. */
-  | "blocked";
+  | "blocked"
+  /** The callee's "who can DM you" setting refused the ring (op 36 only). */
+  | "not_accepting";
 
 /** The callee never picked up: the ring becomes a missed call. */
 export function isMissedRingStop(reason: CallRingStopReason): boolean {
-  return reason !== "accepted" && reason !== "declined" && reason !== "blocked";
+  return (
+    reason !== "accepted" &&
+    reason !== "declined" &&
+    reason !== "blocked" &&
+    reason !== "not_accepting"
+  );
 }
 
 /**

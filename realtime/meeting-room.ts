@@ -56,6 +56,16 @@ import {
   blockBetween,
   dmBlockState,
 } from "../src/services/block.service";
+import {
+  dmContactRefusal,
+  dmPermissionRefusedBy,
+  type DmContactRefusal,
+} from "../src/services/dm-permission.service";
+import {
+  dmNotAcceptingCall,
+  dmNotAcceptingMessage,
+  RING_NOT_ACCEPTING_REASON,
+} from "../src/lib/dm-permission";
 import { CALL_STOP_BETWEEN_PATH } from "../src/services/user-sockets.service";
 import {
   parseVoiceMoveGrantRecord,
@@ -5520,17 +5530,25 @@ export class MeetingRoom extends DurableObject<Env> {
 
   /**
    * Refuses a send, edit or reaction in a 1:1 DM closed by a block (either way),
-   * with the same copy as the REST routes. True when refused; a failed
+   * with the same copy as the REST routes. With `setting`, the recipient's
+   * "who can DM you" setting closes it too (sends and reactions; an edit
+   * only changes what they already have). True when refused; a failed
    * lookup refuses too.
    */
   private async refuseBlockedDm(
     ws: WebSocket,
     userId: string,
     channelId: string,
+    setting = false,
   ): Promise<boolean> {
-    let block: Awaited<ReturnType<typeof dmBlockState>>;
+    let refusal: DmContactRefusal | null;
     try {
-      block = await dmBlockState(this.env.DB, userId, channelId);
+      if (setting) {
+        refusal = await dmContactRefusal(this.env.DB, userId, channelId);
+      } else {
+        const block = await dmBlockState(this.env.DB, userId, channelId);
+        refusal = block ? { kind: "block", block } : null;
+      }
     } catch (err) {
       log.error("DM block check failed:", err);
       this.sendTo(ws, {
@@ -5539,10 +5557,16 @@ export class MeetingRoom extends DurableObject<Env> {
       });
       return true;
     }
-    if (!block) return false;
+    if (!refusal) return false;
     this.sendTo(ws, {
       op: Op.Error,
-      d: { code: 4003, message: BLOCK_MESSAGE_COPY[block] },
+      d: {
+        code: 4003,
+        message:
+          refusal.kind === "block"
+            ? BLOCK_MESSAGE_COPY[refusal.block]
+            : dmNotAcceptingMessage(refusal.recipient.name),
+      },
     });
     return true;
   }
@@ -5598,7 +5622,7 @@ export class MeetingRoom extends DurableObject<Env> {
 
     if (
       !access.serverId &&
-      (await this.refuseBlockedDm(ws, session.user_id, d.channel_id))
+      (await this.refuseBlockedDm(ws, session.user_id, d.channel_id, true))
     ) {
       return;
     }
@@ -6015,10 +6039,11 @@ export class MeetingRoom extends DurableObject<Env> {
       return;
     }
 
-    // Nobody types into a 1:1 DM closed by a block: drop it quietly.
+    // Nobody types into a 1:1 DM closed by a block or by the recipient's
+    // "who can DM you" setting: drop it quietly.
     if (
       !access.serverId &&
-      (await dmBlockState(this.env.DB, session.user_id, d.channel_id).catch(
+      (await dmContactRefusal(this.env.DB, session.user_id, d.channel_id).catch(
         () => null,
       ))
     ) {
@@ -6099,7 +6124,7 @@ export class MeetingRoom extends DurableObject<Env> {
 
     if (
       !access.serverId &&
-      (await this.refuseBlockedDm(ws, session.user_id, d.channel_id))
+      (await this.refuseBlockedDm(ws, session.user_id, d.channel_id, true))
     ) {
       return;
     }
@@ -6387,6 +6412,34 @@ export class MeetingRoom extends DurableObject<Env> {
       }
     } catch (e) {
       log.error("Call relationship check failed:", e);
+      unavailable();
+      return;
+    }
+
+    // The callee's "who can DM you" setting (dm-permission.service.ts): no
+    // ring unless it allows the caller or the callee has written in this DM.
+    try {
+      const refusedBy = await dmPermissionRefusedBy(
+        this.env.DB,
+        callerId,
+        d.channel_id,
+      );
+      if (refusedBy) {
+        this.sendTo(ws, {
+          op: Op.Dispatch,
+          d: {
+            event: "CALL_RING_STOP",
+            data: {
+              call_id: null,
+              reason: RING_NOT_ACCEPTING_REASON,
+              message: dmNotAcceptingCall(refusedBy.name),
+            },
+          },
+        });
+        return;
+      }
+    } catch (e) {
+      log.error("Call DM permission check failed:", e);
       unavailable();
       return;
     }

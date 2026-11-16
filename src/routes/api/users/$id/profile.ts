@@ -25,11 +25,13 @@ const GET = async ({ request, params }: any) => {
     // Someone else's profile carries only their tier; the plan's dates and
     // source are for the user themselves. Connections are the shown ones
     // only (getMe), and none for someone the user has blocked.
+    // "Who can DM you" is the user's own: no one else learns it.
+    const { dm_permission: _dmPermission, ...others } = user;
     const shown =
       targetUserId === currentUserId
         ? user
         : {
-            ...user,
+            ...others,
             entitlement: { tier: effectiveTier(user.entitlement) },
             connections: blocked || pending ? [] : (user.connections ?? []),
             // An account waiting for deletion shows as "Deleted user" (its
