@@ -303,3 +303,129 @@ fn signing_out_should_forget_the_list() {
     client.user(Command::SignOut);
     assert!(!client.view.loaded);
 }
+
+#[test]
+fn a_401_on_the_first_list_should_not_stick_into_the_next_session() {
+    let mut client = Client::with_list(json!({ "connections": [] }));
+    client.command(ConnectionsCommand::Load);
+    client.fail(&list(), ApiError::Unauthorized);
+    // Signed out by the 401; sign in again.
+    client.user(Command::UseToken("tok_fixture".into()));
+    client.respond(&ApiRequest::Me, fixture("user-me.json"));
+    let before = client.asked.len();
+    client.command(ConnectionsCommand::Load);
+    assert!(
+        client.asked[before..].iter().any(|(_, r)| *r == list()),
+        "the next session asks again"
+    );
+    assert_eq!(client.view.busy, "");
+}
+
+#[test]
+fn signing_out_mid_list_should_drop_the_late_answer() {
+    let mut client = Client::with_list(json!({ "connections": [] }));
+    client.command(ConnectionsCommand::Load);
+    let id = client.asked_for(&list()).expect("list");
+    client.user(Command::SignOut);
+    let result = list().decode(steam_row(true));
+    client.input(Input::Http { id, result });
+    assert!(!client.view.cards.iter().any(|c| c.linked));
+}
+
+#[test]
+fn the_reload_after_a_claim_should_supersede_a_list_in_flight() {
+    let mut client = Client::with_list(json!({ "connections": [] }));
+    client.command(ConnectionsCommand::Load);
+    let stale = client.asked_for(&list()).expect("list");
+    client.user(Command::Invites(InviteCommand::OpenLink(
+        Link::Connection {
+            provider: "steam".into(),
+            outcome: ConnectionOutcome::Code(CODE.into()),
+        },
+    )));
+    let complete = connections(ConnectionsRequest::Complete {
+        provider: "steam".into(),
+        code: CODE.into(),
+    });
+    client.respond(
+        &complete,
+        json!({ "provider": "steam", "status": "linked" }),
+    );
+    // The old list (read before the claim) answers last-but-one: ignored.
+    let result = list().decode(json!({ "connections": [] }));
+    client.input(Input::Http { id: stale, result });
+    client.respond(&list(), steam_row(true));
+    assert!(client.view.cards[0].linked);
+    assert!(!client.view.loading);
+}
+
+#[test]
+fn another_answer_should_not_free_the_claims_slot() {
+    let mut client = Client::with_list(steam_row(true));
+    client.command(ConnectionsCommand::SetShown {
+        provider: "steam".into(),
+        show: false,
+    });
+    client.user(Command::Invites(InviteCommand::OpenLink(
+        Link::Connection {
+            provider: "steam".into(),
+            outcome: ConnectionOutcome::Code(CODE.into()),
+        },
+    )));
+    assert_eq!(client.view.busy, "complete:steam");
+    let patch = connections(ConnectionsRequest::SetShown {
+        provider: "steam".into(),
+        show: false,
+    });
+    client.respond(
+        &patch,
+        json!({ "provider": "steam", "show_on_profile": false }),
+    );
+    assert_eq!(client.view.busy, "complete:steam");
+}
+
+#[test]
+fn unlink_should_clear_the_last_outcome() {
+    let mut client = Client::with_list(steam_row(true));
+    client.user(Command::Invites(InviteCommand::OpenLink(
+        Link::Connection {
+            provider: "steam".into(),
+            outcome: ConnectionOutcome::Status("linked".into()),
+        },
+    )));
+    assert_eq!(client.view.notice, "Steam connected");
+    client.respond(&list(), steam_row(true));
+    client.command(ConnectionsCommand::Unlink("steam".into()));
+    assert_eq!(client.view.notice, "");
+}
+
+#[test]
+fn a_taken_claim_and_a_failed_start_should_say_so() {
+    let mut client = Client::with_list(json!({ "connections": [] }));
+    client.user(Command::Invites(InviteCommand::OpenLink(
+        Link::Connection {
+            provider: "steam".into(),
+            outcome: ConnectionOutcome::Code(CODE.into()),
+        },
+    )));
+    let complete = connections(ConnectionsRequest::Complete {
+        provider: "steam".into(),
+        code: CODE.into(),
+    });
+    client.respond(&complete, json!({ "provider": "steam", "status": "taken" }));
+    assert_eq!(
+        client.view.notice,
+        "That Steam account is already connected to another Yap account."
+    );
+    client.command(ConnectionsCommand::Connect {
+        provider: "steam".into(),
+        app: "windows".into(),
+    });
+    let start = connections(ConnectionsRequest::Start {
+        provider: "steam".into(),
+        app: "windows".into(),
+    });
+    client.fail(&start, ApiError::Network("offline".into()));
+    assert!(!client.view.action_error.is_empty());
+    assert_eq!(client.view.busy, "");
+}

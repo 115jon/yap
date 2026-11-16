@@ -37,6 +37,7 @@ impl State {
                     return;
                 }
                 self.connections.action_error.clear();
+                self.connections.notice = None;
                 let request = ConnectionsRequest::Unlink {
                     provider: provider.clone(),
                 };
@@ -79,7 +80,6 @@ impl State {
                     provider: provider.clone(),
                     code,
                 };
-                self.connections.busy = None;
                 self.connections_http(fx, request, ConnectionsOp::Complete(provider), "complete");
             }
             ConnectionOutcome::Status(status) => {
@@ -114,9 +114,11 @@ impl State {
         Some(previous)
     }
 
+    /// Asks for the list; a newer ask supersedes one in flight (its answer
+    /// may predate a claim or an unlink).
     fn load_connections(&mut self, fx: &mut Effects) {
-        if self.connections.loading.is_some() {
-            return;
+        if let Some(old) = self.connections.loading.take() {
+            self.connections.pending.remove(&old);
         }
         self.connections.load_error.clear();
         let id = self.http(fx, ApiRequest::Connections(ConnectionsRequest::List));
@@ -142,7 +144,7 @@ impl State {
         };
         if let Some(id) = self.http(fx, ApiRequest::Connections(request)) {
             self.connections.pending.insert(id, op);
-            self.connections.busy = Some((provider, action));
+            self.connections.busy = Some((provider, action, id));
         }
     }
 
@@ -155,6 +157,13 @@ impl State {
         let Some(op) = self.connections.pending.remove(&id) else {
             return false;
         };
+        if self.connections.loading == Some(id) {
+            self.connections.loading = None;
+        }
+        // Only the request that holds the slot frees it.
+        if self.connections.busy.as_ref().is_some_and(|b| b.2 == id) {
+            self.connections.busy = None;
+        }
         let Some(result) = answer.take() else {
             return true;
         };
@@ -168,23 +177,15 @@ impl State {
             ApiResponse::Connections(response) => Ok(response),
             _ => Err(ApiError::Decode("unexpected response".into())),
         });
-        if !matches!(op, ConnectionsOp::List) {
-            self.connections.busy = None;
-        }
         match (op, result) {
-            (ConnectionsOp::List, result) => {
-                if self.connections.loading == Some(id) {
-                    self.connections.loading = None;
-                    match result {
-                        Ok(ConnectionsResponse::List(list)) => self.connections.list = Some(list),
-                        Ok(_) => {}
-                        Err(error) => {
-                            self.connections.load_error =
-                                describe_api_error(&error, "load your connections");
-                        }
-                    }
+            (ConnectionsOp::List, result) => match result {
+                Ok(ConnectionsResponse::List(list)) => self.connections.list = Some(list),
+                Ok(_) => {}
+                Err(error) => {
+                    self.connections.load_error =
+                        describe_api_error(&error, "load your connections");
                 }
-            }
+            },
             (ConnectionsOp::Start(_), Ok(ConnectionsResponse::Started(url))) => {
                 self.connections.open_url = url;
                 self.connections.open_seq += 1;
@@ -199,6 +200,7 @@ impl State {
             (ConnectionsOp::Complete(provider), Ok(ConnectionsResponse::Completed(status))) => {
                 self.set_notice(&provider, &status);
                 self.load_connections(fx);
+                self.reload_own_board(fx);
             }
             (ConnectionsOp::Complete(provider), Ok(_) | Err(_)) => {
                 let label = connections::label(&provider);
@@ -212,6 +214,7 @@ impl State {
                 if let Some(list) = self.connections.list.as_mut() {
                     list.retain(|c| c.provider != provider);
                 }
+                self.reload_own_board(fx);
             }
             (ConnectionsOp::Unlink(provider), Err(error)) => {
                 let label = connections::label(&provider);
@@ -225,6 +228,20 @@ impl State {
             }
         }
         true
+    }
+
+    /// The open profile board is ours: load it again, so a widget that
+    /// reads the link (Deadlock) follows it.
+    fn reload_own_board(&mut self, fx: &mut Effects) {
+        let me = self.me().map(|me| me.id.clone());
+        let own = match self.board.user_id.as_deref() {
+            Some("me") => true,
+            Some(user) => me.as_deref() == Some(user),
+            None => false,
+        };
+        if own {
+            self.load_board(fx);
+        }
     }
 
     /// Forgets the list (a session ended); the view follows.
@@ -242,11 +259,8 @@ impl State {
 
     pub(super) fn sync_connections(&mut self, fx: &mut Effects) {
         if self.signed_in().is_none() {
-            // Signed out: nothing to draw (and nothing sent before a
-            // session ever began).
-            if self.connections.list.is_some() || self.connections.shown.loaded {
-                self.reset_connections();
-            }
+            // Signed out (end_session forgot the state): nothing to draw,
+            // and nothing sent before a session ever began.
             if self.connections.shown != ConnectionsView::default() {
                 let view = ConnectionsView {
                     open_seq: self.connections.open_seq,
@@ -303,7 +317,7 @@ impl State {
             busy: state
                 .busy
                 .as_ref()
-                .map(|(provider, action)| format!("{action}:{provider}"))
+                .map(|(provider, action, _)| format!("{action}:{provider}"))
                 .unwrap_or_default(),
             action_error: state.action_error.clone(),
             notice_tone: state

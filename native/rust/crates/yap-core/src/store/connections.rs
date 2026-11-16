@@ -47,7 +47,7 @@ pub struct ConnectionsState {
     pub(super) pending: std::collections::HashMap<RequestId, ConnectionsOp>,
     /// The provider and action in flight (`connect`, `complete`,
     /// `unlink`, `show`), at most one at a time.
-    pub(super) busy: Option<(String, &'static str)>,
+    pub(super) busy: Option<(String, &'static str, RequestId)>,
     pub(super) action_error: String,
     /// The last outcome: its tone and words.
     pub(super) notice: Option<(&'static str, String)>,

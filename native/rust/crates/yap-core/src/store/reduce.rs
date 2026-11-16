@@ -2092,6 +2092,7 @@ impl State {
 
     fn end_session(&mut self, fx: &mut Effects, revoke: bool) {
         self.reset_deletion();
+        self.reset_connections();
         // A sign-out during a drop: the next session starts with no strip.
         self.set_link(fx, 0, false);
         // The next account registers the push token again.
