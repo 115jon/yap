@@ -41,6 +41,7 @@ circle-notch-bold.svg
 clipboard-text-bold.svg
 clipboard-text-fill.svg
 clock-bold.svg
+cloud-slash-bold.svg
 copy-bold.svg
 cpu-bold.svg
 crop-bold.svg
@@ -137,6 +138,8 @@ phone-fill.svg
 play-bold.svg
 play-fill.svg
 playlist-bold.svg
+plugs-connected-bold.svg
+plugs-connected-fill.svg
 plus-bold.svg
 power-bold.svg
 presentation-chart-bold.svg
@@ -170,6 +173,8 @@ square-bold.svg
 squares-four-bold.svg
 star-bold.svg
 star-fill.svg
+steam-logo-bold.svg
+steam-logo-fill.svg
 sticker-bold.svg
 sticker-fill.svg
 stop-bold.svg

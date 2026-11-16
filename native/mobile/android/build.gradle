@@ -33,6 +33,9 @@ dependencies {
     // and its PlayerView, full screen (the phone's Qt has no Multimedia).
     implementation 'androidx.media3:media3-exoplayer:1.8.0'
     implementation 'androidx.media3:media3-ui:1.8.0'
+    // Custom Tabs (BrowserTab.java): a provider's sign-in for Settings ›
+    // Connections, in the browser over the app.
+    implementation 'androidx.browser:browser:1.8.0'
 }
 
 // Firebase without the google-services plugin: the string resources it

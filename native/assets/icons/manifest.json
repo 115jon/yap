@@ -402,6 +402,9 @@
     "offline": {
       "glyph": "wifi-slash"
     },
+    "cloudOff": {
+      "glyph": "cloud-slash"
+    },
     "sessions": {
       "glyph": "devices",
       "fill": true
@@ -516,6 +519,14 @@
     },
     "gamepad": {
       "glyph": "game-controller"
+    },
+    "connections": {
+      "glyph": "plugs-connected",
+      "fill": true
+    },
+    "steam": {
+      "glyph": "steam-logo",
+      "fill": true
     },
     "file": {
       "glyph": "file"

@@ -185,6 +185,10 @@
                      (yap://signin?code=…, sent as an intent link): it only
                      brings the app forward; the app's own poll signs in. -->
                 <data android:host="signin" />
+                <!-- A connection's sign-in in the browser handing its
+                     outcome back (yap://connection?provider=…): the core
+                     claims or reports it (Settings › Connections). -->
+                <data android:host="connection" />
             </intent-filter>
         </activity>
 

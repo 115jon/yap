@@ -559,6 +559,7 @@ T.Popup {
         case "account": return accountPanel
         case "loud": return loudPanel
         case "sessions": return sessionsPanel
+        case "connections": return connectionsPanel
         case "privacy": return privacyPanel
         case "voice": return voicePanel
         case "soundboard": return soundboardPanel
@@ -572,6 +573,7 @@ T.Popup {
     Component { id: accountPanel; AccountPanel { host: dialog } }
     Component { id: loudPanel; LoudPanel {} }
     Component { id: sessionsPanel; SessionsPanel {} }
+    Component { id: connectionsPanel; ConnectionsPanel {} }
     Component { id: privacyPanel; PrivacyPanel { host: dialog } }
     Component { id: voicePanel; VoicePanel {} }
     Component { id: soundboardPanel; SoundboardPanel {} }

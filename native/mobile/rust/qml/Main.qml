@@ -368,6 +368,24 @@ Window {
     function openFriends() {
         openPage("FriendsPage")
     }
+    // Settings › Connections (the Steam link): its page, once on top.
+    function openConnections() {
+        if (ready)
+            openPage("ConnectionsPage", {}, { whileBusy: true })
+    }
+    // A Connect's begin URL goes to a Custom Tab; the tab's outcome link
+    // (yap://connection) or the Deadlock widget's Link Steam shows the page.
+    ConnectionsModel {
+        driver: true
+        onOpenRequested: url => Native.openTab(url)
+        onShowRequested: window.openConnections()
+    }
+    Connections {
+        target: ShellState
+        function onConnectionsRequested() {
+            window.openConnections()
+        }
+    }
     // A voice channel's row: the call page if we are in it, else a join,
     // once the microphone is allowed (the system asks the first time).
     property string wantedVoice: ""

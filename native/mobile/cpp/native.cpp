@@ -5,7 +5,9 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QMetaObject>
+#include <QtCore/QUrl>
 #include <QtGui/QClipboard>
+#include <QtGui/QDesktopServices>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QKeyEvent>
 
@@ -299,6 +301,21 @@ void Native::share(const QString& text, const QString& title) const
 void Native::copy(const QString& text) const
 {
   QGuiApplication::clipboard()->setText(text);
+}
+
+void Native::openTab(const QString& url) const
+{
+  const QUrl target(url);
+  if (target.scheme() != QLatin1String("https") && target.scheme() != QLatin1String("http"))
+    return;
+#ifdef Q_OS_ANDROID
+  QJniObject::callStaticMethod<void>("dev/yap/qtproto/BrowserTab", "open",
+                                     "(Landroid/app/Activity;Ljava/lang/String;)V",
+                                     QNativeInterface::QAndroidApplication::context().object(),
+                                     QJniObject::fromString(url).object<jstring>());
+#else
+  QDesktopServices::openUrl(target);
+#endif
 }
 
 namespace {

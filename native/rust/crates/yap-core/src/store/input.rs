@@ -336,6 +336,8 @@ pub enum Command {
     Calls(super::calls::CallsCommand),
     /// The site announcement banner.
     Site(super::site::SiteCommand),
+    /// Settings › Connections (the Steam link).
+    Connections(super::connections::ConnectionsCommand),
     /// The app is quitting: leave the call (its sockets close cleanly).
     Quit,
 }

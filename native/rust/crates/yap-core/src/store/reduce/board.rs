@@ -51,7 +51,7 @@ impl State {
             .or_else(|| self.board.user_id.clone())
     }
 
-    fn load_board(&mut self, fx: &mut Effects) {
+    pub(super) fn load_board(&mut self, fx: &mut Effects) {
         let Some(user) = self.board.user_id.clone() else {
             return;
         };

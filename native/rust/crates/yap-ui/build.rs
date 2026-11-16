@@ -40,6 +40,8 @@ fn main() {
         QmlFile::from("qml/components/EaseColor.qml"),
         QmlFile::from("qml/components/EaseNumber.qml"),
         QmlFile::from("qml/components/ConnectionStrip.qml"),
+        QmlFile::from("qml/components/ConnectionCard.qml"),
+        QmlFile::from("qml/components/ConnectionsModel.qml"),
         QmlFile::from("qml/components/FloatPlate.qml"),
         QmlFile::from("qml/components/FloatShadow.qml"),
         QmlFile::from("qml/components/FriendsModel.qml"),
