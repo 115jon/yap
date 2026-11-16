@@ -349,8 +349,11 @@ Window {
         if (userId.length > 0)
             openPage("ProfilePage", { userId: userId }, { sheet: true, key: userId })
     }
-    function openSettings() {
+    // Settings' hub, and `page` (one of its categories) over it when named.
+    function openSettings(page) {
         openPage("SettingsPage", {}, { whileBusy: true })
+        if (page && page.length > 0)
+            openPage(page, {}, { whileBusy: true, key: page })
     }
     // Edit profile, over Settings, your own profile or from the account
     // panel.
@@ -1019,9 +1022,9 @@ Window {
         id: accountPanel
         anchors.fill: parent
         anchors.bottomMargin: Native.clippedBottom
-        onSettingsRequested: {
+        onSettingsRequested: page => {
             accountPanel.close()
-            window.openSettings()
+            window.openSettings(page)
         }
         onProfileRequested: userId => {
             accountPanel.close()
