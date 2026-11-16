@@ -52,7 +52,8 @@ SettingsFrame {
     property bool testing: false
     property bool askingMic: false
     property bool micRefused: false
-    readonly property bool testRuns: testing && !inCall && Qt.application.state === Qt.ApplicationActive
+    property bool micFailed: false
+    readonly property bool testRuns: testing && visible && !inCall && Qt.application.state === Qt.ApplicationActive
     onTestRunsChanged: Native.micTest = testRuns
     Component.onDestruction: Native.micTest = false
 
@@ -72,10 +73,12 @@ SettingsFrame {
                 return
             root.askingMic = false
             root.micRefused = !granted
+            root.micFailed = false
             root.testing = granted
         }
         function onMicTestFailed() {
             root.testing = false
+            root.micFailed = true
         }
     }
 
@@ -85,7 +88,7 @@ SettingsFrame {
         Repeater {
             model: [
                 { id: "default", icon: "headphones", text: qsTr("Automatic"), hint: qsTr("A headset or Bluetooth when connected, else the speaker") },
-                { id: "speaker", icon: "speakerHigh", text: qsTr("Speaker"), hint: "" },
+                { id: "speaker", icon: "speakerHigh", text: qsTr("Speaker"), hint: qsTr("Unless a headset is connected") },
                 { id: "earpiece", icon: "call", text: qsTr("Phone"), hint: qsTr("The earpiece, held to your ear") }
             ]
             delegate: RadioRow {
@@ -200,10 +203,11 @@ SettingsFrame {
             }
         }
         Caption {
-            visible: root.micRefused && !root.inCall
+            visible: (root.micRefused || root.micFailed) && !root.inCall
             topPadding: 8
             color: Theme.dangerInk
-            text: qsTr("Yap can't use the microphone. Allow it in Android's settings.")
+            text: root.micRefused ? qsTr("Yap can't use the microphone. Allow it in Android's settings.")
+                : qsTr("The microphone didn't open. Another app may be using it.")
         }
         SettingsActionRow {
             visible: root.micRefused && !root.inCall

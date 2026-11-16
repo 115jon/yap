@@ -117,7 +117,7 @@ SettingsFrame {
 
     function open(page) {
         Qt.inputMethod.hide()
-        Router.open(page, {}, { key: page })
+        Router.open(page)
     }
 
     title: qsTr("Settings")
