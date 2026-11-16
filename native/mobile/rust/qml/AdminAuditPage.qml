@@ -15,6 +15,7 @@ AdminPage {
 
     readonly property AuditCore core: AuditCore {
         admin: root.model
+        live: root.onTop
     }
     readonly property var list: core.list
     // The entry showing its exact time and ID.
@@ -102,9 +103,11 @@ AdminPage {
                 height: implicitHeight
                 Accessible.role: Accessible.Button
                 Accessible.name: root.core.sentence(modelData)
-                Accessible.description: [entry.modelData.details.map(detail => (detail.sign ?? "") + root.core.detailText(detail)).join(", "),
+                Accessible.description: [entry.modelData.details.map(detail => root.core.detailSpoken(detail)).join(", "),
                     entry.modelData.reason.length > 0 ? qsTr("Reason: %1").arg(entry.modelData.reason) : "",
-                    entry.modelData.when].filter(part => part.length > 0).join(". ")
+                    entry.modelData.when,
+                    entry.opened && entry.target && entry.target.id.length > 0 ? qsTr("ID %1").arg(entry.target.id) : ""]
+                    .filter(part => part.length > 0).join(". ")
                 Accessible.onPressAction: root.openedId = entry.opened ? "" : entry.modelData.id
 
                 Rectangle {
@@ -177,6 +180,7 @@ AdminPage {
                                 text: detail.modelData.sign ?? ""
                                 color: detail.modelData.sign === "+" ? Theme.successInk : Theme.dangerInk
                                 font: Theme.type.occupant
+                                Accessible.name: detail.modelData.sign === "+" ? qsTr("Allowed") : qsTr("Removed")
                             }
                             Text {
                                 width: body.width - (detail.modelData.type === "perm" ? 18 : 0)
@@ -201,7 +205,7 @@ AdminPage {
                         width: parent.width
                         topPadding: 2
                         textFormat: Text.PlainText
-                        text: entry.opened ? entry.modelData.when : entry.modelData.ago
+                        text: entry.opened ? entry.modelData.when : root.core.ago(entry.modelData.at)
                         color: Theme.ink3
                         font: Theme.type.caption
                     }
@@ -287,6 +291,8 @@ AdminPage {
             anchors.fill: parent
             title: qsTr("Show entries by")
             contentHeight: actorColumn.implicitHeight
+            // Everyone who acted in the pages loaded: it scrolls.
+            flickable: actorFlick
 
             function choose(id) {
                 Native.haptic(Native.Tick)
@@ -294,41 +300,48 @@ AdminPage {
                 close()
             }
 
-            Column {
-                id: actorColumn
-                width: parent.width
-                bottomPadding: 8
-                SheetRow {
-                    text: qsTr("Everyone")
-                    iconName: root.core.actorFilter.length === 0 ? "check" : ""
-                    hint: String(root.core.all.length)
-                    Accessible.role: Accessible.RadioButton
-                    Accessible.checkable: true
-                    Accessible.checked: root.core.actorFilter.length === 0
-                    onTriggered: actorSheet.choose("")
-                }
-                Repeater {
-                    model: root.core.actors
-                    delegate: SheetRow {
-                        required property var modelData
-                        text: modelData.name
-                        iconName: root.core.actorFilter === modelData.id ? "check" : ""
-                        hint: String(modelData.count)
+            Flickable {
+                id: actorFlick
+                anchors.fill: parent
+                contentHeight: actorColumn.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                Column {
+                    id: actorColumn
+                    width: parent.width
+                    bottomPadding: 8
+                    SheetRow {
+                        text: qsTr("Everyone")
+                        iconName: root.core.actorFilter.length === 0 ? "check" : ""
+                        hint: String(root.core.all.length)
                         Accessible.role: Accessible.RadioButton
                         Accessible.checkable: true
-                        Accessible.checked: root.core.actorFilter === modelData.id
-                        onTriggered: actorSheet.choose(modelData.id)
+                        Accessible.checked: root.core.actorFilter.length === 0
+                        onTriggered: actorSheet.choose("")
                     }
-                }
-                Text {
-                    x: 16
-                    width: parent.width - 32
-                    topPadding: 8
-                    textFormat: Text.PlainText
-                    wrapMode: Text.Wrap
-                    text: qsTr("People who acted in the entries loaded so far.")
-                    color: Theme.ink3
-                    font: Theme.type.caption
+                    Repeater {
+                        model: root.core.actors
+                        delegate: SheetRow {
+                            required property var modelData
+                            text: modelData.name
+                            iconName: root.core.actorFilter === modelData.id ? "check" : ""
+                            hint: String(modelData.count)
+                            Accessible.role: Accessible.RadioButton
+                            Accessible.checkable: true
+                            Accessible.checked: root.core.actorFilter === modelData.id
+                            onTriggered: actorSheet.choose(modelData.id)
+                        }
+                    }
+                    Text {
+                        x: 16
+                        width: parent.width - 32
+                        topPadding: 8
+                        textFormat: Text.PlainText
+                        wrapMode: Text.Wrap
+                        text: qsTr("People who acted in the entries loaded so far.")
+                        color: Theme.ink3
+                        font: Theme.type.caption
+                    }
                 }
             }
         }
