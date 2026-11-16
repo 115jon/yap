@@ -53,25 +53,9 @@ Column {
     // plays only while pointed at. Ours to change: Change media and Remove
     // media, 28 px ply-3 keys 6 px in at the top right, shown on hover or
     // focus.
-    // Parsed in one binding from `media` alone: split over several
-    // (the "#" position, then the URL from it) a new picture could be read
-    // with the old one's "#" position or type for a moment, and the picture
-    // or the clip player was handed a cut-off URL or the other kind's file.
-    // A clip that failed that way stayed blank (ClipPreview's `failed`).
-    readonly property var mediaInfo: {
-        const at = media.lastIndexOf("#")
-        const tail = at >= 0 ? media.slice(at + 1) : ""
-        const semi = tail.lastIndexOf(";")
-        const size = semi >= 0 ? tail.slice(semi + 1).split("x") : []
-        const type = semi >= 0 ? tail.slice(0, semi) : ""
-        return {
-            url: at >= 0 ? media.slice(0, at) : media,
-            type: type,
-            video: type.indexOf("video/") === 0,
-            w: Math.max(1, Number(size[0]) || 1),
-            h: Math.max(1, Number(size[1]) || 1)
-        }
-    }
+    // Read by Yap.Ui's VoiceStatusMedia (shared with the phone's line).
+    readonly property VoiceStatusMedia mediaParse: VoiceStatusMedia { media: root.media }
+    readonly property var mediaInfo: mediaParse.info
     // Remove media is in flight until the picture goes.
     property bool removing: false
     onMediaChanged: removing = false

@@ -19,33 +19,24 @@ import Yap.Ui
 PlateDialog {
     id: dialog
 
-    property string channelId
-    property string channelName
-    property bool media: false
-    property string initialText: ""
-    property int savedAt: 0
-    // A file the upload refused before it went (its type).
-    property string localError: ""
-    // A file over the vibe limit: its too-big card, never uploaded.
-    property string tooBig: ""
-
-    readonly property var status: JSON.parse(Extras.voiceStatus)
-    readonly property string normalized: field.text.replace(/\s+/g, " ").trim()
-    readonly property bool mediaBusy: status.saving || status.uploading
+    // The editor's state and bookkeeping (Yap.Ui's VoiceStatusCore,
+    // shared with the phone's VoiceStatusSheet).
+    VoiceStatusCore {
+        id: core
+        draft: field.text
+        onSaved: dialog.close()
+    }
+    readonly property alias channelId: core.channelId
+    readonly property alias channelName: core.channelName
+    readonly property alias media: core.media
+    readonly property var status: core.status
+    readonly property bool mediaBusy: core.mediaBusy
     // md: the cards go two up and the masonry three across.
     readonly property bool wide: parent ? parent.width >= 768 : true
 
     function start(channelId, name, media, text) {
-        dialog.channelId = channelId
-        dialog.channelName = name
-        dialog.media = media
-        dialog.initialText = text
-        dialog.localError = ""
-        dialog.tooBig = ""
         field.text = text
-        dialog.savedAt = status.saved
-        if (media)
-            Extras.loadVoiceMedia(channelId)
+        core.start(channelId, name, media, text)
         open()
     }
 
@@ -53,57 +44,7 @@ PlateDialog {
         const paths = Files.pickFiles(qsTr("Upload media status"))
         if (paths.length === 0)
             return
-        dialog.tooBig = Limits.check("vibe", paths[0])
-        dialog.localError = dialog.tooBig.length > 0 ? ""
-            : Extras.uploadVoiceMedia(dialog.channelId, paths[0])
-    }
-
-    // CSS columns: items in order, top to bottom, column by column, at the
-    // shortest height that holds them in `cols` (balanced). Each tile is
-    // the picture's shape plus its 1 px edge and 4 px padding; mb-3 apart.
-    function masonry(items, cols, width) {
-        const gap = 12
-        const colW = (width - gap * (cols - 1)) / cols
-        const heights = items.map(item => 10 + (colW - 10) * item.height / Math.max(1, item.width))
-        const fits = limit => {
-            let used = 1
-            let h = 0
-            for (const t of heights) {
-                const add = h > 0 ? gap + t : t
-                if (h > 0 && h + add > limit + 0.5) {
-                    used += 1
-                    h = t
-                } else {
-                    h += add
-                }
-            }
-            return used <= cols
-        }
-        let lo = Math.max(0, ...heights)
-        let hi = heights.reduce((a, b) => a + b, 0) + gap * Math.max(0, heights.length - 1)
-        for (let i = 0; i < 24 && hi - lo > 0.5; ++i) {
-            const mid = (lo + hi) / 2
-            if (fits(mid))
-                hi = mid
-            else
-                lo = mid
-        }
-        const tiles = []
-        let col = 0
-        let y = 0
-        let bottom = 0
-        for (const t of heights) {
-            if (y > 0 && y + gap + t > hi + 0.5 && col < cols - 1) {
-                col += 1
-                y = 0
-            }
-            if (y > 0)
-                y += gap
-            tiles.push({ x: col * (colW + gap), y: y, w: colW, h: t })
-            y += t
-            bottom = Math.max(bottom, y)
-        }
-        return { tiles: tiles, height: bottom }
+        core.upload(paths[0])
     }
 
     c1: true
@@ -112,15 +53,7 @@ PlateDialog {
         : qsTr("Let others know what you're up to in the voice channel.")
     busy: status.saving || status.uploading
     onOpened: media ? uploadCard.forceActiveFocus() : field.forceActiveFocus()
-    onClosed: Extras.closeVoiceStatus()
-
-    // A save that went through closes it.
-    onStatusChanged: {
-        if (opened && status.saved !== savedAt) {
-            savedAt = status.saved
-            close()
-        }
-    }
+    onClosed: core.close()
 
     Column {
         visible: !dialog.media
@@ -134,7 +67,7 @@ PlateDialog {
                 id: field
                 large: true
                 trailingInset: 32
-                maximumLength: 120
+                maximumLength: core.maxLength
                 placeholderText: qsTr("Status for %1").arg(dialog.channelName)
                 Keys.onReturnPressed: saveKey.clicked()
                 IconKey {
@@ -153,7 +86,7 @@ PlateDialog {
         Text {
             width: parent.width
             horizontalAlignment: Text.AlignRight
-            text: qsTr("%1 / 120").arg(dialog.normalized.length)
+            text: qsTr("%1 / 120").arg(core.normalized.length)
             color: Theme.ink3
             font: Theme.type.num
         }
@@ -199,9 +132,9 @@ PlateDialog {
     }
 
     TooBigCard {
-        visible: dialog.media && dialog.tooBig.length > 0
+        visible: dialog.media && core.tooBig.length > 0
         width: parent.width
-        info: dialog.tooBig.length > 0 ? JSON.parse(dialog.tooBig) : ({})
+        info: core.tooBig.length > 0 ? JSON.parse(core.tooBig) : ({})
         onAction: dialog.chooseFile()
     }
 
@@ -212,9 +145,8 @@ PlateDialog {
         width: parent.width
         spacing: 12
 
-        readonly property int cols: dialog.status.recents.length <= 1 ? 1
-            : dialog.status.recents.length === 2 ? 2 : dialog.wide ? 3 : 2
-        readonly property var layout: dialog.masonry(dialog.status.recents, cols, width)
+        readonly property int cols: core.recentColumns(dialog.status.recents.length, dialog.wide)
+        readonly property var layout: core.masonry(dialog.status.recents, cols, width)
         // The plate stops short of the window (max-h, overflow-y-auto): the
         // masonry scrolls in what is left after the rest of the plate.
         readonly property real fixedHeight: 50 + Theme.type.dialogTitleLine + 8 + Theme.type.dialogBodyLine
@@ -272,7 +204,7 @@ PlateDialog {
                     Accessible.name: modelData.title.length > 0 ? modelData.title : qsTr("Recent voice channel status media")
                     Keys.onReturnPressed: clicked()
                     Keys.onEnterPressed: clicked()
-                    onClicked: Extras.useVoiceMedia(dialog.channelId, modelData.id)
+                    onClicked: core.useRecent(modelData.id)
                     HoverHandler { cursorShape: Qt.PointingHandCursor }
 
                     background: Rectangle {
@@ -329,10 +261,7 @@ PlateDialog {
         id: errorRow
         width: parent.width
         above: 0
-        text: dialog.media
-            ? (dialog.localError.length > 0 ? dialog.localError
-                : dialog.status.error.length > 0 ? dialog.status.error : dialog.status.mediaError)
-            : dialog.status.error
+        text: core.error
     }
 
     footer: [
@@ -356,8 +285,8 @@ PlateDialog {
             ground: Theme.ply3
             text: qsTr("Set status")
             loading: dialog.status.saving
-            enabled: !dialog.status.saving && dialog.normalized !== dialog.initialText
-            onClicked: if (enabled) Extras.saveVoiceStatus(dialog.channelId, field.text)
+            enabled: core.canSave
+            onClicked: if (enabled) core.save()
         }
     ]
 
@@ -373,7 +302,7 @@ PlateDialog {
         id: gifs
         // VoiceChannelMediaStatusModal.tsx: `initialExpanded lockExpanded`.
         lockExpanded: true
-        onPicked: gifId => Extras.setVoiceMediaGif(dialog.channelId, gifId)
+        onPicked: gifId => core.useGif(gifId)
     }
 
     // ACTION_CARD: min-h-20, p-4, gap-3, a 1 px line edge on ply-2 (tint-1
