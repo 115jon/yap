@@ -967,6 +967,9 @@ pub struct BanRow {
 #[serde(rename_all = "camelCase")]
 pub struct AuditRow {
     pub id: String,
+    /// `role`, `channel`, `invite`, `member` or `server` (the type filter).
+    pub kind: String,
+    pub actor_id: String,
     pub actor: String,
     pub actor_avatar: String,
     pub actor_initials: String,
@@ -975,6 +978,17 @@ pub struct AuditRow {
     pub reason: String,
     /// "Nov 5, 2026, 3:04 PM".
     pub when: String,
+    /// "5m ago", "2d ago", then "Nov 5".
+    pub ago: String,
+}
+
+/// The audit log's older pages: whether there is one, and how its load goes.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct AuditPaging {
+    pub more: bool,
+    /// `idle`, `loading` or `error`.
+    pub state: String,
+    pub error: String,
 }
 
 /// One channel permission override (ChannelPermissionsTab.tsx).
@@ -1059,6 +1073,7 @@ pub struct AdminView {
     pub invites: Load<Vec<InviteRow>>,
     pub bans: Load<Vec<BanRow>>,
     pub audit: Load<Vec<AuditRow>>,
+    pub audit_paging: AuditPaging,
     pub channel: Option<AdminChannelView>,
     pub overrides: Load<Vec<OverrideRow>>,
     /// The lists' server's members.

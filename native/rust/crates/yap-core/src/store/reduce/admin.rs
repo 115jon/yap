@@ -17,14 +17,14 @@ use crate::api::ApiError;
 use crate::settings::describe_api_error;
 use crate::store::admin::{AdminOp, AdminThen};
 use crate::store::state::{ServerChannels, State};
-use crate::store::time::{local_date, local_date_time, parse_rfc3339};
+use crate::store::time::{local_date, local_date_time, parse_rfc3339, relative_time};
 use crate::store::view::{
-    absolute_url, avatar_url, initials, AdminChannelView, AdminServerView, AdminView, AuditRow,
-    BanRow, InviteRow, Load, MemberOption, NamedOption, OverrideRow, RoleRow, ViewUpdate,
+    absolute_url, avatar_url, initials, AdminChannelView, AdminServerView, AdminView, AuditPaging,
+    AuditRow, BanRow, InviteRow, Load, MemberOption, NamedOption, OverrideRow, RoleRow, ViewUpdate,
 };
 use crate::store::{
-    AdminCommand, AdminList, AdminRequest, AdminResponse, ApiRequest, ApiResponse, CacheWrite,
-    Effect, OverrideDraft, ProfileAsset, RequestId, ServerDraft,
+    admin::AUDIT_PAGE, AdminCommand, AdminList, AdminRequest, AdminResponse, ApiRequest,
+    ApiResponse, CacheWrite, Effect, OverrideDraft, ProfileAsset, RequestId, ServerDraft,
 };
 
 fn role_row(role: &Role) -> RoleRow {
@@ -184,6 +184,7 @@ impl State {
             self.admin.invites = Load::Idle;
             self.admin.bans = Load::Idle;
             self.admin.audit = Load::Idle;
+            self.admin.audit_more = Load::Idle;
         }
     }
 
@@ -194,6 +195,12 @@ impl State {
             AdminList::Invites => self.admin.invites.is_loading(),
             AdminList::Bans => self.admin.bans.is_loading(),
             AdminList::Audit => self.admin.audit.is_loading(),
+            // Only after a first page, while there is an older one.
+            AdminList::AuditMore => {
+                self.admin.audit_more.is_loading()
+                    || self.admin.audit_end
+                    || self.admin.audit.ready().is_none()
+            }
         };
         if slot {
             return;
@@ -211,6 +218,11 @@ impl State {
             },
             AdminList::Audit => AdminRequest::AuditLogs {
                 server_id: server_id.clone(),
+                page: 1,
+            },
+            AdminList::AuditMore => AdminRequest::AuditLogs {
+                server_id: server_id.clone(),
+                page: self.admin.audit_page + 1,
             },
         };
         if !self.admin_http(fx, request, AdminOp::List { server_id, list }) {
@@ -220,8 +232,10 @@ impl State {
             AdminList::Roles => self.admin.roles = Load::Loading,
             AdminList::Invites => self.admin.invites = Load::Loading,
             AdminList::Bans => self.admin.bans = Load::Loading,
+            AdminList::AuditMore => self.admin.audit_more = Load::Loading,
             AdminList::Audit => {
                 self.admin.audit = Load::Loading;
+                self.admin.audit_more = Load::Idle;
                 // Names for its targets, from what this user may read
                 // (AuditLogTab.tsx `useAuditLookup`; each is optional).
                 let access = self.admin_access();
@@ -1148,11 +1162,40 @@ impl State {
             }
             AdminList::Audit => {
                 self.admin.audit = match result {
-                    Ok(AdminResponse::Audit(logs)) => Load::Ready(logs),
-                    Ok(_) => Load::Ready(Vec::new()),
+                    Ok(AdminResponse::Audit(logs)) => {
+                        self.admin.audit_page = 1;
+                        self.admin.audit_end = logs.len() < AUDIT_PAGE;
+                        Load::Ready(logs)
+                    }
+                    Ok(_) => {
+                        self.admin.audit_end = true;
+                        Load::Ready(Vec::new())
+                    }
                     Err(error) => Load::Failed(failed(&error, "load the audit log")),
                 }
             }
+            AdminList::AuditMore => match result {
+                Ok(response) => {
+                    let logs = match response {
+                        AdminResponse::Audit(logs) => logs,
+                        _ => Vec::new(),
+                    };
+                    self.admin.audit_more = Load::Idle;
+                    self.admin.audit_end = logs.len() < AUDIT_PAGE;
+                    if let Load::Ready(list) = &mut self.admin.audit {
+                        self.admin.audit_page += 1;
+                        // Entries logged since the first page push older
+                        // ones onto the next: each shows once.
+                        let seen: std::collections::HashSet<String> =
+                            list.iter().map(|log| log.id.clone()).collect();
+                        list.extend(logs.into_iter().filter(|log| !seen.contains(&log.id)));
+                    }
+                }
+                Err(error) => {
+                    self.admin.audit_more =
+                        Load::Failed(failed(&error, "load older audit log entries"));
+                }
+            },
         }
     }
 
@@ -1725,8 +1768,11 @@ impl State {
                         .filter(|name| !name.is_empty())
                         .unwrap_or_else(|| "Unknown".into());
                     let prior = previous.get(&log.id).and_then(Option::as_ref);
+                    let at = parse_rfc3339(&log.created_at);
                     AuditRow {
                         id: log.id.clone(),
+                        kind: admin::audit_kind(&log.action_type).to_owned(),
+                        actor_id: log.actor_id.clone(),
                         actor_initials: initials(&actor),
                         actor_avatar: log
                             .actor
@@ -1737,13 +1783,26 @@ impl State {
                         actor,
                         entry: describe_audit(log, &lookup, prior),
                         reason: log.reason.clone().unwrap_or_default(),
-                        when: parse_rfc3339(&log.created_at)
+                        when: at
                             .map(|ms| local_date_time(ms, self.local_offset))
+                            .unwrap_or_default(),
+                        ago: at
+                            .map(|ms| relative_time(ms, self.clock_ms(), self.local_offset))
                             .unwrap_or_default(),
                     }
                 })
                 .collect()
         });
+        view.audit_paging = AuditPaging {
+            more: a.audit.ready().is_some() && !a.audit_end,
+            state: match &a.audit_more {
+                Load::Loading => "loading",
+                Load::Failed(_) => "error",
+                _ => "idle",
+            }
+            .into(),
+            error: a.audit_more.error().to_owned(),
+        };
         let channel = a.channel_id.as_deref().and_then(|id| self.find_channel(id));
         view.channel = channel.map(|channel| {
             let voice = channel.channel_type == ChannelType::Voice;

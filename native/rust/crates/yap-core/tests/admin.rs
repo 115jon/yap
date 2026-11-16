@@ -1647,6 +1647,7 @@ fn audit_rows_should_carry_the_local_time() {
     client.respond(
         &admin(AdminRequest::AuditLogs {
             server_id: SERVER.into(),
+            page: 1,
         }),
         json!([{ "id": "1", "actor_id": ME, "action_type": "CHANNEL_CREATE",
                  "target_id": TEXT, "changes": { "name": "general" },
@@ -1662,6 +1663,91 @@ fn audit_rows_should_carry_the_local_time() {
         ),
         ("Fixture Me", "Nov 4, 2026, 11:22 PM", "created channel")
     );
+}
+
+fn audit_page(from: usize, count: usize) -> Value {
+    Value::Array(
+        (from..from + count)
+            .map(|n| {
+                json!({ "id": n.to_string(), "actor_id": ME, "action_type": "ROLE_UPDATE",
+                         "target_id": MOD, "changes": {}, "created_at": "2026-11-04 23:22:59",
+                         "actor": { "id": ME, "username": "me", "display_name": "Fixture Me" } })
+            })
+            .collect(),
+    )
+}
+
+#[test]
+fn the_audit_log_should_page_older_entries() {
+    let mut client = Client::owner();
+    client.command(AdminCommand::OpenServer(SERVER.into()));
+    client.command(AdminCommand::Load {
+        server_id: SERVER.into(),
+        list: AdminList::Audit,
+    });
+    client.respond(
+        &admin(AdminRequest::AuditLogs {
+            server_id: SERVER.into(),
+            page: 1,
+        }),
+        audit_page(0, 50),
+    );
+    assert!(client.view.audit_paging.more);
+    let row = &client.view.audit.ready().expect("audit")[0];
+    assert_eq!((row.kind.as_str(), row.actor_id.as_str()), ("role", ME));
+    client.command(AdminCommand::Load {
+        server_id: SERVER.into(),
+        list: AdminList::AuditMore,
+    });
+    let page_two = admin(AdminRequest::AuditLogs {
+        server_id: SERVER.into(),
+        page: 2,
+    });
+    assert!(client.asked.iter().any(|(_, r)| *r == page_two));
+    assert_eq!(client.view.audit_paging.state, "loading");
+    // One entry repeats (a new one pushed it onto page two): it shows once.
+    client.respond(&page_two, audit_page(49, 10));
+    assert_eq!(client.view.audit.ready().expect("audit").len(), 59);
+    assert!(!client.view.audit_paging.more);
+    assert_eq!(client.view.audit_paging.state, "idle");
+}
+
+#[test]
+fn a_short_audit_log_should_have_no_older_page() {
+    let mut client = Client::owner();
+    client.command(AdminCommand::OpenServer(SERVER.into()));
+    client.command(AdminCommand::Load {
+        server_id: SERVER.into(),
+        list: AdminList::Audit,
+    });
+    client.respond(
+        &admin(AdminRequest::AuditLogs {
+            server_id: SERVER.into(),
+            page: 1,
+        }),
+        audit_page(0, 3),
+    );
+    assert!(!client.view.audit_paging.more);
+    let before = client.asked.len();
+    client.command(AdminCommand::Load {
+        server_id: SERVER.into(),
+        list: AdminList::AuditMore,
+    });
+    assert_eq!(client.asked.len(), before);
+}
+
+#[test]
+fn audit_pages_after_the_first_should_ask_for_their_page() {
+    let first = AdminRequest::AuditLogs {
+        server_id: "s1".into(),
+        page: 1,
+    };
+    let third = AdminRequest::AuditLogs {
+        server_id: "s1".into(),
+        page: 3,
+    };
+    assert_eq!(first.path(), "/api/servers/s1/audit-logs");
+    assert_eq!(third.path(), "/api/servers/s1/audit-logs?page=3");
 }
 
 #[test]
