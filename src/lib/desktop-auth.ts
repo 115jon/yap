@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { KOVA_AUTH_PUBLISHABLE_KEY } from "@/lib/kova-auth-config";
 import { clog } from "@/lib/console-logger";
-import { isTauri } from "@/lib/runtime";
 
-const TOKEN_KEY = "desktop_auth_token";
-const TOKEN_EVENT = "ralphmeet:desktop-token-change";
-const LOGOUT_INTENT_KEY = "ralphmeet:logout-intent";
+const TOKEN_EVENT = "yap:session-token-change";
+const LOGOUT_INTENT_KEY = "yap:logout-intent";
 export const DEBUG_DESKTOP_AUTH = false;
 
 const log = clog("DesktopAuth");
@@ -97,7 +95,6 @@ export function setStoredKovaAuthSessionToken(token: string) {
 }
 
 export function setDesktopAuthSession(token: string) {
-  setDesktopToken(token);
   setStoredKovaAuthSessionToken(token);
 }
 
@@ -113,31 +110,8 @@ export function clearStoredKovaAuthSessionToken() {
   notifyDesktopTokenChanged(null);
 }
 
-function setDesktopToken(token: string) {
-  if (isTauri() && typeof localStorage !== "undefined") {
-    if (localStorage.getItem(TOKEN_KEY) === token) {
-      notifyDesktopTokenChanged(token);
-      return;
-    }
-    if (DEBUG_DESKTOP_AUTH) {
-      log.info("Persisting desktop token", {
-        tokenLength: token.length,
-      });
-    }
-    localStorage.setItem(TOKEN_KEY, token);
-    notifyDesktopTokenChanged(token);
-  }
-}
-
-export function getDesktopToken(): string | null {
-  if (isTauri() && typeof localStorage !== "undefined") {
-    return localStorage.getItem(TOKEN_KEY);
-  }
-  return null;
-}
-
 export function getDesktopAuthHandoffToken(): string | null {
-  return getDesktopToken() ?? getStoredKovaAuthSessionToken();
+  return getStoredKovaAuthSessionToken();
 }
 
 export async function waitForDesktopToken(
@@ -154,16 +128,6 @@ export async function waitForDesktopToken(
   }
 
   return getDesktopAuthHandoffToken();
-}
-
-function clearDesktopToken() {
-  if (isTauri() && typeof localStorage !== "undefined") {
-    if (DEBUG_DESKTOP_AUTH) {
-      log.info("Clearing desktop token");
-    }
-    localStorage.removeItem(TOKEN_KEY);
-    notifyDesktopTokenChanged(null);
-  }
 }
 
 export function subscribeDesktopTokenChanges(
@@ -187,16 +151,12 @@ function notifyDesktopTokenChanged(token: string | null) {
 }
 
 export function clearDesktopAuthSession() {
-  clearDesktopToken();
   clearStoredKovaAuthSessionToken();
 }
 
 /**
- * Record a session token the SDK produced. On desktop it always lands in
- * `desktop_auth_token` too: that key doesn't depend on the publishable key,
- * so a pk change can't orphan the session. (The SDK writes its pk-scoped key
- * before reporting the token, so checking the handoff token here would always
- * find it and skip the desktop key.) On the web, only fill an empty slot.
+ * Record a session token the SDK produced: only fill an empty slot (the SDK
+ * writes its pk-scoped key itself before reporting the token).
  *
  * Always announces the token, filled slot or not: the SDK's own pk-scoped
  * write emits no event, and this call (from `onSessionTokenChange` or the
@@ -207,10 +167,7 @@ function rememberKovaSessionToken(token: string) {
   // memory and hands it back on every sync tick, which would otherwise put
   // a dead token back in storage (or announce it over a freshly minted one).
   if (isSessionTokenRejected(token)) return;
-  const missing = isTauri()
-    ? !getDesktopToken()
-    : !getDesktopAuthHandoffToken();
-  if (missing) setDesktopAuthSession(token);
+  if (!getDesktopAuthHandoffToken()) setDesktopAuthSession(token);
   else notifyDesktopTokenChanged(token);
 }
 
@@ -257,10 +214,6 @@ export function consumeAuthLogoutIntent(): boolean {
   return true;
 }
 
-export function isDesktopAuthenticated(): boolean {
-  return !!getDesktopAuthHandoffToken();
-}
-
 // ── Rejected tokens ─────────────────────────────────────────────────────────
 // Tokens a Ralph API call (401) or Kova's get-session (null) refused in this
 // page's lifetime. Kova never hands a revoked token back out, so a refused
@@ -303,7 +256,6 @@ export function useKovaAuthTokenSync(
           isLoaded,
           isSignedIn,
           hasToken: !!token,
-          existingDesktopToken: !!getDesktopToken(),
         });
       }
       if (token) {

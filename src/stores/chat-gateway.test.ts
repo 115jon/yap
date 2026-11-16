@@ -19,26 +19,12 @@ vi.mock("@/lib/voice/socket-ticket-client", () => ({
 }));
 vi.mock("@/lib/platform", () => ({
   getCurrentPresencePlatform: () => "web",
-  isTauri: false,
   wsUrl: (path: string) => `wss://meet.test${path}`,
 }));
 vi.mock("@/lib/console-logger", () => ({
   clog: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("@/lib/display-name", () => ({ getDisplayName: vi.fn() }));
-vi.mock("@/lib/desktop-notifications", () => ({
-  getUnreadChannelState: vi.fn(() => ({
-    unreadDmChannelIds: [],
-    unreadServerChannelIds: [],
-  })),
-  shouldNativeNotifyForChannelActivity: vi.fn(() => false),
-  shouldNativeNotifyForMessage: vi.fn(() => false),
-}));
-vi.mock("@/lib/desktop-native-sync", () => ({
-  MOBILE_ACTION_TYPE_ID: "test",
-  showNativeDesktopToast: vi.fn(),
-  syncDesktopNotificationState: vi.fn(),
-}));
 vi.mock("@/lib/presence-platform", () => ({
   normalizePresencePlatforms: (platforms: unknown) => platforms,
 }));
@@ -60,11 +46,6 @@ vi.mock("@/lib/sounds", () => ({
 }));
 vi.mock("./useCallStore", () => ({
   useCallStore: { getState: () => mocks.callState },
-}));
-vi.mock("./useDesktopSettingsStore", () => ({
-  useDesktopSettingsStore: {
-    getState: () => ({ desktopNotifications: false }),
-  },
 }));
 vi.mock("./useSoundSettingsStore", () => ({
   isSoundEnabled: vi.fn(() => false),

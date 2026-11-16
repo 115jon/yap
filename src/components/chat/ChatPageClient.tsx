@@ -23,17 +23,8 @@ import {
   shouldShowVoiceSwitchModal,
 } from "@/components/chat/voice-confirmation-preferences";
 import { useBackButton } from "@/hooks/useBackButton";
-import { getUnreadChannelState } from "@/lib/desktop-notifications";
-import {
-  createNotificationMuteLookup,
-  mutedChannelPredicate,
-} from "@/lib/notification-settings-client";
-import {
-  MOBILE_ACTION_TYPE_ID as _MOBILE_ACTION_TYPE_ID,
-  syncDesktopNotificationState,
-} from "@/lib/desktop-native-sync";
+import { createNotificationMuteLookup } from "@/lib/notification-settings-client";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
-import { isDesktop, isTauri } from "@/lib/platform";
 import {
   resolveStreamPreviewAutomation,
   type StreamPreviewAutomationState,
@@ -107,13 +98,8 @@ const VoiceMediaManager = lazy(() =>
   })),
 );
 
-// Desktop-only (taskbar thumbnail buttons) and the shop tab: neither is on
-// screen when the shell first paints, so neither ships with it.
-const DesktopThumbnailToolbarSync = lazy(() =>
-  import("@/components/chat/DesktopThumbnailToolbarSync").then((mod) => ({
-    default: mod.DesktopThumbnailToolbarSync,
-  })),
-);
+// The shop tab is not on screen when the shell first paints, so it does not
+// ship with it.
 const ShopView = lazy(() => import("@/components/chat/ShopView"));
 
 const EMPTY_GRID_ITEMS: never[] = [];
@@ -198,13 +184,8 @@ export default function ChatPage() {
       notifications: s.notifications,
     })),
   );
-  const {
-    dispatch,
-    markChannelRead,
-    markNotificationsRead,
-    openDm,
-    sendMessage,
-  } = useChatActions();
+  const { dispatch, markChannelRead, markNotificationsRead, openDm } =
+    useChatActions();
 
   const {
     ui,
@@ -964,86 +945,6 @@ export default function ChatPage() {
     [channelsByServerId],
   );
 
-  useEffect(() => {
-    const { unreadDmChannelIds, unreadServerChannelIds } =
-      getUnreadChannelState({
-        lastMessageAt,
-        readStates,
-        dmChannelIds: dmChannels.map((dm) => dm.id),
-        isMuted: mutedChannelPredicate({
-          notificationSettings,
-          notificationSettingsNow,
-          channelsByServerId,
-          channels,
-        }),
-      });
-
-    void syncDesktopNotificationState({
-      notifications,
-      unreadDmChannelIds,
-      unreadServerChannelIds,
-    });
-  }, [
-    channels,
-    channelsByServerId,
-    dmChannels,
-    lastMessageAt,
-    notifications,
-    notificationSettings,
-    notificationSettingsNow,
-    readStates,
-  ]);
-
-  useEffect(() => {
-    const handleMarkRead = (event: Event) => {
-      const detail = (
-        event as CustomEvent<{ channelId?: string; messageId?: string }>
-      ).detail;
-      if (!detail?.channelId) return;
-
-      const notifIds = collectUnreadNotificationIds(
-        notifications,
-        (notification) => notification.channel_id === detail.channelId,
-      );
-      if (notifIds.length > 0) {
-        void markNotificationsRead(notifIds);
-      }
-      markChannelRead(detail.channelId);
-    };
-
-    const handleReply = (event: Event) => {
-      const detail = (
-        event as CustomEvent<{
-          channelId?: string;
-          content?: string;
-          messageId?: string;
-        }>
-      ).detail;
-      if (!detail?.channelId || !detail.content?.trim()) return;
-      void sendMessage(
-        detail.channelId,
-        detail.content.trim(),
-        detail.messageId,
-      );
-    };
-
-    window.addEventListener(
-      "notification-mark-read",
-      handleMarkRead as EventListener,
-    );
-    window.addEventListener("notification-reply", handleReply as EventListener);
-    return () => {
-      window.removeEventListener(
-        "notification-mark-read",
-        handleMarkRead as EventListener,
-      );
-      window.removeEventListener(
-        "notification-reply",
-        handleReply as EventListener,
-      );
-    };
-  }, [markChannelRead, markNotificationsRead, notifications, sendMessage]);
-
   const onSelectDm = useCallback(
     (channelId: string) => {
       // Switch to @me mode first if not already there, then select the DM channel
@@ -1157,7 +1058,7 @@ export default function ChatPage() {
 
       if (sidebarOpen) {
         // If we are ON the sidebar, we want the back button to exit the application.
-        // Return false to NOT consume the event, letting Tauri (or the browser) exit.
+        // Return false to NOT consume the event, letting the browser go back.
         return false;
       } else {
         // If we are in the main chat area (sidebar closed), pressing back should open the sidebar.
@@ -1173,7 +1074,7 @@ export default function ChatPage() {
       className="flex h-full flex-col overflow-hidden bg-ply-0"
       data-app-layout="true"
     >
-      {!isTauri() && <WebAppTitleBar />}
+      <WebAppTitleBar />
       <SiteAnnouncementBanner />
       <div
         className="flex flex-1 overflow-hidden relative"
@@ -1650,16 +1551,6 @@ export default function ChatPage() {
               }}
             />
           ))}
-
-        {isDesktop() && (
-          <Suspense fallback={null}>
-            <DesktopThumbnailToolbarSync
-              currentUserId={user?.id ?? null}
-              localStreamState={localStreamState}
-              voiceJoined={voiceState.joined}
-            />
-          </Suspense>
-        )}
 
         {(localStreamState?.sfu ?? null) && (
           <Suspense fallback={null}>

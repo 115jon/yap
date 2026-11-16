@@ -23,7 +23,7 @@ import {
   CAMERA_QUALITY_PROFILES,
   buildCameraVideoConstraints,
 } from "@/lib/camera-quality";
-import { getAuthAssetUrl, isDesktop } from "@/lib/platform";
+import { getAuthAssetUrl } from "@/lib/platform";
 import type { TooBigSituation } from "@/lib/too-big-copy";
 import { useMediaDevices } from "@/lib/useMediaDevices";
 import { cn } from "@/lib/utils";
@@ -554,9 +554,8 @@ export default function CameraCard({
 
   const starting = previewOn && !previewStream && !previewProblem && !noCamera;
 
-  const deniedBody = isDesktop()
-    ? "Allow Yap to use your camera in your system's privacy settings, then try again."
-    : "Allow camera access from the lock icon in your browser's address bar. If it's already allowed, check your system's privacy settings.";
+  const deniedBody =
+    "Allow camera access from the lock icon in your browser's address bar. If it's already allowed, check your system's privacy settings.";
 
   let preview: ReactNode;
   if (noCamera) {

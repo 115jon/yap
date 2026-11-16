@@ -19,8 +19,6 @@ import {
   apiError,
   apiSuccess,
   buildVoiceChannelRoomSlug,
-  getCorsHeaders,
-  handleCorsPreflightIfNeeded,
 } from "@/lib/api-helpers";
 import { AuditLogAction, logAuditAction } from "@/lib/audit-logger";
 import { getDisplayName } from "@/lib/display-name";
@@ -54,10 +52,6 @@ export const voiceMoveBodySchema = Schema.Struct({
   to_channel_id: Id,
   server_id: Schema.optional(Id),
 });
-
-const OPTIONS = async ({ request }: { request: Request }) =>
-  handleCorsPreflightIfNeeded(request) ??
-  new Response(null, { status: 204, headers: getCorsHeaders(request) });
 
 interface ChannelRow {
   id: string;
@@ -351,7 +345,6 @@ function noStore(response: Response): Response {
 /** The handlers, on the given services (the live ones by default). */
 export function voiceMoveRoutes(services?: Layer.Layer<RouteServices>) {
   return {
-    OPTIONS,
     POST: async ({ request }: { request: Request }) =>
       noStore(
         await runRoute("voice.move", request, moveMember(request), services),

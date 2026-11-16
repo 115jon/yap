@@ -9,12 +9,6 @@ vi.mock("@kova/react", () => ({
   useLinkedAccounts: () => ({ accounts: [], isLoaded: true, error: null }),
 }));
 
-vi.mock("@/lib/platform", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/platform")>("@/lib/platform");
-  return { ...actual, isDesktop: () => false };
-});
-
 import SettingsModal from "../SettingsModal";
 
 describe("SettingsModal mobile panel isolation", () => {

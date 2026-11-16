@@ -8,12 +8,6 @@ vi.mock("@kova/react", () => ({
   useUser: () => ({ isLoaded: true, user: { id: "user-1" } }),
 }));
 
-vi.mock("@/lib/platform", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/platform")>("@/lib/platform");
-  return { ...actual, isDesktop: () => false };
-});
-
 const panels = vi.hoisted(() => ({
   voice: vi.fn(),
   camera: vi.fn(),

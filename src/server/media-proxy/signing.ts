@@ -202,22 +202,16 @@ export function readMediaPassCookie(
 }
 
 /**
- * Set-Cookie for the pass. Scoped to the proxy's path and HttpOnly.
- * SameSite=Lax for the web app (the same site as the API); SameSite=None
- * only with `crossSite`, for the desktop webview, whose origin is another
- * site and would never send a Lax cookie on its image requests.
+ * Set-Cookie for the pass. Scoped to the proxy's path, HttpOnly and
+ * SameSite=Lax (the web app is the same site as the API).
  */
-export function mediaPassCookie(
-  value: string,
-  maxAgeSeconds: number,
-  options: { crossSite?: boolean } = {},
-): string {
+export function mediaPassCookie(value: string, maxAgeSeconds: number): string {
   return [
     `${MEDIA_PASS_COOKIE}=${value}`,
     "Path=/api/proxy-media",
     `Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}`,
     "HttpOnly",
     "Secure",
-    options.crossSite ? "SameSite=None" : "SameSite=Lax",
+    "SameSite=Lax",
   ].join("; ");
 }

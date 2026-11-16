@@ -1,16 +1,10 @@
 import { announcePendingDeletion } from "@/lib/account-deletion-events";
+import { recoverAppSession } from "@/lib/app-session-recovery";
 import {
-  getAppSessionState,
-  recoverAppSession,
-} from "@/lib/app-session-recovery";
-import {
-  getDesktopAuthHandoffToken,
-  getDesktopToken,
   getStoredKovaAuthSessionToken,
   waitForDesktopToken,
 } from "@/lib/desktop-auth";
-import { apiUrl, isTauri } from "@/lib/platform";
-import { KOVA_AUTH_PUBLISHABLE_KEY } from "@/lib/kova-auth-config";
+import { apiUrl } from "@/lib/platform";
 import { clog } from "@/lib/console-logger";
 
 const log = clog("api-client");
@@ -28,14 +22,7 @@ function logHttpFailure(status: number, message: string, ...args: unknown[]) {
 }
 
 function getClientBearerToken(): string | null {
-  return getDesktopToken() ?? getStoredKovaAuthSessionToken();
-}
-
-function createDesktopAuthRequiredError(): Error {
-  const error = new Error("Desktop authentication required");
-  (error as any).code = "DESKTOP_AUTH_REQUIRED";
-  (error as any).status = 401;
-  return error;
+  return getStoredKovaAuthSessionToken();
 }
 
 function createAuthRequiredError(): Error {
@@ -92,30 +79,19 @@ function parseRetryAfterMs(value: string | null): number | null {
 export const UPLOAD_STALL_TIMEOUT_MS = 60_000;
 
 async function getInitialBearerToken(): Promise<string | null> {
-  if (!isTauri()) {
-    return getStoredKovaAuthSessionToken() ?? (await waitForDesktopToken(750));
-  }
-
-  const existing = getDesktopAuthHandoffToken();
-  if (existing) return existing;
-
-  return waitForDesktopToken();
+  return getStoredKovaAuthSessionToken() ?? (await waitForDesktopToken(750));
 }
 
 /**
  * A 401 for `rejectedToken`: ask Kova for a fresh app token (one mint shared
  * by every refused call, see app-session-recovery). The fresh token to retry
- * with, or null. On desktop a session that is gone for good is the
- * device-code sign-in's job, so it throws DESKTOP_AUTH_REQUIRED.
+ * with, or null.
  */
 async function recoverFrom401(
   rejectedToken: string | null,
 ): Promise<string | null> {
   const freshToken = await recoverAppSession(rejectedToken);
   if (freshToken && freshToken !== rejectedToken) return freshToken;
-  if (isTauri() && getAppSessionState() === "signed-out") {
-    throw createDesktopAuthRequiredError();
-  }
   return null;
 }
 
@@ -133,11 +109,10 @@ function apiGetDedupeKey(url: string, opts?: ApiOptions) {
  * Otherwise it returns the parsed JSON directly as T.
  *
  * Accepts an optional AbortSignal for request cancellation.
- * Automatically prefixes relative paths with the API base URL
- * for cross-platform (web / Tauri desktop) compatibility.
+ * Automatically prefixes relative paths with the API base URL.
  *
  * On a 401 it asks Kova for a fresh app session token from the still-valid
- * auth-domain session and retries the request once (web and desktop).
+ * auth-domain session and retries the request once.
  */
 interface ApiFetchInit extends RequestInit {
   skipAuth?: boolean;
@@ -154,10 +129,7 @@ async function apiFetch<T>(
     typeof input === "string" && input.startsWith("/") ? apiUrl(input) : input;
   const initialToken = skipAuth ? null : await getInitialBearerToken();
 
-  if (!skipAuth && isTauri() && !initialToken) {
-    throw createDesktopAuthRequiredError();
-  }
-  if (!skipAuth && !isTauri() && !initialToken) {
+  if (!skipAuth && !initialToken) {
     throw createAuthRequiredError();
   }
 
@@ -169,9 +141,6 @@ async function apiFetch<T>(
     sentToken = t;
     if (t) {
       authHeaders["Authorization"] = `Bearer ${t}`;
-    }
-    if (!skipAuth && isTauri() && KOVA_AUTH_PUBLISHABLE_KEY) {
-      authHeaders["X-Publishable-Key"] = KOVA_AUTH_PUBLISHABLE_KEY;
     }
 
     log.info("Request", {
@@ -418,10 +387,7 @@ export async function apiUpload<T>(
   const resolved = url.startsWith("/") ? apiUrl(url) : url;
   const initialToken = await getInitialBearerToken();
 
-  if (isTauri() && !initialToken) {
-    throw createDesktopAuthRequiredError();
-  }
-  if (!isTauri() && !initialToken) {
+  if (!initialToken) {
     throw createAuthRequiredError();
   }
 
@@ -433,10 +399,6 @@ export async function apiUpload<T>(
     if (t) {
       headers["Authorization"] = `Bearer ${t}`;
     }
-    if (isTauri() && KOVA_AUTH_PUBLISHABLE_KEY) {
-      headers["X-Publishable-Key"] = KOVA_AUTH_PUBLISHABLE_KEY;
-    }
-
     return fetch(resolved, {
       method: "POST",
       body: formData,
@@ -584,8 +546,7 @@ export async function apiSendBlob<T>(
 ): Promise<T> {
   const resolved = url.startsWith("/") ? apiUrl(url) : url;
   const initialToken = await getInitialBearerToken();
-  if (isTauri() && !initialToken) throw createDesktopAuthRequiredError();
-  if (!isTauri() && !initialToken) throw createAuthRequiredError();
+  if (!initialToken) throw createAuthRequiredError();
 
   let sentToken: string | null = null;
   const attempt = (token?: string | null) => {
@@ -595,9 +556,6 @@ export async function apiSendBlob<T>(
     const t = token ?? getClientBearerToken();
     sentToken = t;
     if (t) headers["Authorization"] = `Bearer ${t}`;
-    if (isTauri() && KOVA_AUTH_PUBLISHABLE_KEY) {
-      headers["X-Publishable-Key"] = KOVA_AUTH_PUBLISHABLE_KEY;
-    }
     return sendBlobOnce(resolved, opts.method ?? "PUT", body, headers, opts);
   };
 

@@ -2,7 +2,6 @@ import {
   ExternalLinkConfirmModal,
   type PendingExternalLink,
 } from "@/components/ui/ExternalLinkConfirmModal";
-import { getHost } from "@/lib/host";
 import { useCallback, useMemo, useState } from "react";
 
 const TRUSTED_EXTERNAL_DOMAINS_KEY = "ralph-meet:trusted-external-link-domains";
@@ -55,8 +54,8 @@ function isLeavingApplication(url: URL): boolean {
   return url.origin !== window.location.origin;
 }
 
-function openExternalUrl(url: string): Promise<void> {
-  return getHost().window.openExternal(url);
+async function openExternalUrl(url: string): Promise<void> {
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 export function useExternalLinkConfirmation() {

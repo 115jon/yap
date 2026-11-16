@@ -21,7 +21,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { type IconName } from "@/components/ui/icon";
 import { clog } from "@/lib/console-logger";
-import { isTauri } from "@/lib/platform";
 import { useRouter, type ErrorComponentProps } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
@@ -97,17 +96,7 @@ export function RouteErrorPage({
       >
         Try again
       </Button>
-      {isTauri() ? (
-        <Button
-          variant="ghost"
-          size="lg"
-          onClick={() => window.location.reload()}
-        >
-          Reload app
-        </Button>
-      ) : (
-        <HomeLink />
-      )}
+      <HomeLink />
     </PageState>
   );
 }

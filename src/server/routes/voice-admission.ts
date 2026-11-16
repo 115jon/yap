@@ -28,7 +28,6 @@ import {
   createServerTiming,
   getSocketTicketConfig,
   noStore,
-  socketAdmissionOptions,
   type SocketAdmission,
 } from "./socket-admission";
 
@@ -87,9 +86,8 @@ const admit = Effect.fn("voice.admission")(function* (request: Request) {
     );
   }
 
-  // A moved user's grant is spent once per use, as the two tickets of the
-  // deprecated flow each spent it: a join (or a room reconnect) spends the
-  // "room" use, a voice-only reconnect the "voice" use.
+  // A moved user's grant is spent once per use: a join (or a room
+  // reconnect) spends the "room" use, a voice-only reconnect the "voice" use.
   const admission = yield* timing.measure(
     "admission",
     admitCallSocket(
@@ -240,7 +238,6 @@ const turnLog = {
 /** The handlers, on the given services (the live ones by default). */
 export function voiceAdmissionRoutes(services?: Layer.Layer<RouteServices>) {
   return {
-    OPTIONS: socketAdmissionOptions,
     POST: async ({ request }: { request: Request }) =>
       noStore(
         await runRoute("voice.admission", request, admit(request), services),

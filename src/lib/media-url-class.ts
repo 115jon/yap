@@ -1,6 +1,6 @@
 // How a media URL from a payload or a user reads, the same way on the
-// server, the web app and the Expo app. No imports: the server's payload
-// rewriter, platform.ts and the mobile app all use it.
+// server and in the web app. No imports: the server's payload rewriter and
+// platform.ts both use it.
 //
 // Browsers and URL libraries clean a URL before they read it: they drop ASCII
 // tab and newline anywhere and C0 controls or spaces at either end, and read

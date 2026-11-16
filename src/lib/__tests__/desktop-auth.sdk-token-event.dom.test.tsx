@@ -77,12 +77,6 @@ const fetchMock = vi.fn((input: RequestInfo | URL) => {
   return json(null, 404);
 });
 
-function setTauri(on: boolean) {
-  const w = window as { __TAURI_INTERNALS__?: unknown };
-  if (on) w.__TAURI_INTERNALS__ = {};
-  else delete w.__TAURI_INTERNALS__;
-}
-
 /** Records each event with what the SDK's pk key held when it fired. */
 function recordTokenEvents() {
   const events: { token: string | null; pkKey: string | null }[] = [];
@@ -101,15 +95,10 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  setTauri(false);
 });
 
 describe("token event after the Kova SDK's own session write", () => {
-  it.each([
-    ["web", false],
-    ["desktop", true],
-  ])("fires on the %s", async (_runtime, tauri) => {
-    setTauri(tauri);
+  it("fires on the web", async () => {
     const { events, unsubscribe } = recordTokenEvents();
 
     render(<RootShell />);
@@ -122,9 +111,6 @@ describe("token event after the Kova SDK's own session write", () => {
         String(input).endsWith(`/apps/${PK}/session-token`),
       ),
     ).toBe(true);
-    expect(localStorage.getItem("desktop_auth_token")).toBe(
-      tauri ? TOKEN : null,
-    );
     unsubscribe();
   });
 

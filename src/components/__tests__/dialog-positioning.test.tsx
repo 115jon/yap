@@ -2,11 +2,9 @@
 
 import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { CameraSettingsModal } from "../CameraSettingsModal";
-import { DesktopScreenPickerModal } from "../DesktopScreenPickerModal";
 import { ScreenShareModal } from "../ScreenShareModal";
 
 beforeAll(() => {
@@ -69,66 +67,6 @@ describe("dialog positioning regression guard", () => {
     expect(
       screen.getByRole("dialog", { name: "Share your screen" }),
     ).toBeVisible();
-  });
-
-  it("centres dialogs in the space under the desktop title bar", () => {
-    render(
-      <DesktopScreenPickerModal
-        isOpen
-        onClose={() => {}}
-        onStart={() => {}}
-        availableQualities={["720p30"]}
-      />,
-    );
-    const surface = document.querySelector('[data-slot="dialog-content"]');
-    expect(surface?.className).toContain(
-      "top-[calc(50%+var(--app-chrome-top,0px)/2)]",
-    );
-    expect(surface?.className).toContain(
-      "h-[min(640px,calc(100dvh-var(--app-chrome-top,0px)-32px))]",
-    );
-  });
-
-  it("uses the shared responsive dialog for the desktop picker", () => {
-    render(
-      <DesktopScreenPickerModal
-        isOpen
-        onClose={() => {}}
-        onStart={() => {}}
-        availableQualities={["720p30"]}
-      />,
-    );
-    const markup = document.body.innerHTML;
-
-    expect(markup).not.toContain("<dialog");
-    expect(markup).not.toContain("fixed inset-0 z-60");
-    expect(
-      document.querySelector('[data-slot="dialog-content"]'),
-    ).not.toBeNull();
-  });
-
-  it("keeps the desktop picker open while quality chips are used", async () => {
-    const user = userEvent.setup();
-    const onClose = vi.fn();
-    render(
-      <DesktopScreenPickerModal
-        isOpen
-        onClose={onClose}
-        onStart={() => {}}
-        availableQualities={["720p30", "1080p60"]}
-      />,
-    );
-
-    // The quality control is two rows of chips in the dialog itself, so
-    // choosing a preset is an inside press.
-    await user.click(screen.getByRole("radio", { name: "1080p" }));
-    expect(screen.getByRole("radio", { name: "1080p" })).toBeChecked();
-    expect(screen.getByRole("radio", { name: "60 fps" })).toBeChecked();
-
-    expect(onClose).not.toHaveBeenCalled();
-    expect(
-      document.querySelector('[data-slot="dialog-content"][data-state="open"]'),
-    ).not.toBeNull();
   });
 
   it("uses the shared responsive dialog for camera settings", () => {

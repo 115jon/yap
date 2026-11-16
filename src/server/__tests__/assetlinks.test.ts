@@ -7,9 +7,6 @@ import {
   handleAssetLinksRequest,
 } from "../assetlinks";
 
-const RELEASE =
-  "3E:32:29:17:07:BB:C3:1F:09:CD:0C:8D:DD:4A:B8:5C:17:63:E4:C8:85:8B:91:08:57:AB:89:04:54:4F:1E:EF";
-
 function fingerprintsOf(packageName: string): string[] {
   const found = ASSET_LINKS.find(
     (entry) => entry.target.package_name === packageName,
@@ -26,25 +23,13 @@ describe("assetlinks", () => {
     expect(await response.json()).toEqual(ASSET_LINKS);
   });
 
-  it("delegates handle_all_urls for the four packages", () => {
-    expect(ASSET_LINKS).toHaveLength(4);
+  it("delegates handle_all_urls for the Qt app only", () => {
+    expect(ASSET_LINKS).toHaveLength(1);
     for (const entry of ASSET_LINKS) {
       expect(entry.relation).toEqual([
         "delegate_permission/common.handle_all_urls",
       ]);
       expect(entry.target.namespace).toBe("android_app");
-    }
-  });
-
-  it("trusts only the release key for production, plus debug keys for dev and preview", () => {
-    expect(fingerprintsOf("dev.jontitor.ralphmeet")).toEqual([RELEASE]);
-    for (const pkg of [
-      "dev.jontitor.ralphmeet.preview",
-      "dev.jontitor.ralphmeet.dev",
-    ]) {
-      const keys = fingerprintsOf(pkg);
-      expect(keys).toHaveLength(3);
-      expect(keys[0]).toBe(RELEASE);
     }
   });
 

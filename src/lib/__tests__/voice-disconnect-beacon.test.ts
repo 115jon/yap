@@ -3,19 +3,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/desktop-auth", () => ({
-  getDesktopToken: vi.fn(),
   getStoredKovaAuthSessionToken: vi.fn(),
 }));
 
 vi.mock("@/lib/platform", () => ({
   apiUrl: (path: string) => path,
-  isTauri: vi.fn(() => false),
 }));
 
-import {
-  getDesktopToken,
-  getStoredKovaAuthSessionToken,
-} from "@/lib/desktop-auth";
+import { getStoredKovaAuthSessionToken } from "@/lib/desktop-auth";
 import { sendVoiceDisconnectBeacon } from "@/lib/voice-disconnect-beacon";
 
 describe("sendVoiceDisconnectBeacon", () => {
@@ -23,7 +18,6 @@ describe("sendVoiceDisconnectBeacon", () => {
   const originalSendBeacon = navigator.sendBeacon;
 
   beforeEach(() => {
-    vi.mocked(getDesktopToken).mockReturnValue(null);
     vi.mocked(getStoredKovaAuthSessionToken).mockReturnValue(null);
     globalThis.fetch = vi.fn(() =>
       Promise.resolve(new Response(null, { status: 202 })),

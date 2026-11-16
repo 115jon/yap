@@ -17,12 +17,6 @@ vi.mock("@/lib/api-client", () => ({
   apiDelete: vi.fn(() => Promise.resolve({})),
 }));
 
-vi.mock("@/lib/platform", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/platform")>("@/lib/platform");
-  return { ...actual, isDesktop: () => false };
-});
-
 vi.mock("../SettingsAccountTab", () => ({ default: () => null }));
 
 import SettingsModal from "../SettingsModal";

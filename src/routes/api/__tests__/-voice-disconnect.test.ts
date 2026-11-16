@@ -15,10 +15,8 @@ vi.mock("@/lib/api-helpers", () => ({
   apiSuccess: (data: unknown, status = 200) => Response.json(data, { status }),
   buildVoiceChannelRoomSlug: (serverId: string, channelId: string) =>
     `voice-${serverId}-${channelId}`,
-  getCorsHeaders: () => ({}),
   getDB: mocks.getDB,
   getEnv: mocks.getEnv,
-  handleCorsPreflightIfNeeded: () => null,
   requireAuth: mocks.requireAuth,
 }));
 

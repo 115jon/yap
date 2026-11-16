@@ -49,7 +49,6 @@ describe("POST /api/push-tokens", () => {
       "fcm-token",
       "android",
       "development",
-      "native",
       // memoryAuth names the caller's session after the user.
       "session-user-1",
       expect.any(String),
@@ -57,7 +56,7 @@ describe("POST /api/push-tokens", () => {
     ]);
   });
 
-  it("stores NULL push_format when an old client omits it", async () => {
+  it("accepts a client that omits push_format, refusing an unknown one", async () => {
     const db = createMockD1();
     const routes = pushTokenRoutes(
       testServices({ auth: memoryAuth(SESSIONS), db }),
@@ -75,7 +74,6 @@ describe("POST /api/push-tokens", () => {
       "user-1",
       "t",
       "ios",
-      null,
       null,
       "session-user-1",
       expect.any(String),

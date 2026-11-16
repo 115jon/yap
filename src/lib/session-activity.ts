@@ -59,14 +59,11 @@ const MOBILE_OS = new Set(["Android", "iOS"]);
 function detectOs(ua: string): string | null {
   if (/iP(?:hone|od|ad)/i.test(ua) || /\b(?:iOS|iPadOS)\b/i.test(ua))
     return "iOS";
-  if (/Android/i.test(ua) || /^okhttp\//i.test(ua)) return "Android";
+  if (/Android/i.test(ua)) return "Android";
   // Case-sensitive: "Microsoft" contains "cros".
   if (/\bCrOS\b/.test(ua)) return "ChromeOS";
   if (/Windows/i.test(ua)) return "Windows";
   if (/Mac OS X|Macintosh/i.test(ua)) return "macOS";
-  // CFNetwork/Darwin without an iPhone/iPad token is a native iOS client
-  // (React Native's fetch on iOS sends `<App>/<build> CFNetwork/... Darwin/...`).
-  if (/CFNetwork\/.*Darwin\//i.test(ua)) return "iOS";
   if (/Linux|X11/i.test(ua)) return "Linux";
   return null;
 }
@@ -86,9 +83,6 @@ function detectBrowser(ua: string): string | null {
 function detectApp(ua: string): { mobile: boolean } | null {
   if (/^YapMobile\//i.test(ua)) return { mobile: true };
   if (/^YapNative\//i.test(ua)) return { mobile: false };
-  // The Expo app's fetch: okhttp on Android, CFNetwork on iOS.
-  if (/^okhttp\//i.test(ua) || /CFNetwork\/.*Darwin\//i.test(ua))
-    return { mobile: true };
   return null;
 }
 

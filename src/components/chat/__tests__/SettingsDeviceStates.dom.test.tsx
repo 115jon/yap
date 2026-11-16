@@ -8,12 +8,6 @@ vi.mock("@kova/react", () => ({
   useUser: () => ({ isLoaded: true, user: { id: "user-1" } }),
 }));
 
-vi.mock("@/lib/platform", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/platform")>("@/lib/platform");
-  return { ...actual, isDesktop: () => false };
-});
-
 vi.mock("@/lib/camera-backgrounds", async () => {
   const actual = await vi.importActual<
     typeof import("@/lib/camera-backgrounds")

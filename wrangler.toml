@@ -41,7 +41,7 @@ VITE_KOVA_AUTH_PUBLISHABLE_KEY = "pk_live_yl2Z9ssEwlWuOYHVRWozk9WThozu4nFP3QAhCW
 # Kova user ids allowed to award manual badges via POST /api/admin/badges (comma
 # separated). The catalog refresh moved to the admin console (yap-admin).
 COLLECTIBLES_ADMIN_USER_IDS = "DADtHxPYMksiibowh0LmZFu8TWT5DI9b"
-REALTIME_ALLOWED_ORIGINS = "https://yap.115jon.com,http://localhost:5173,http://localhost:1420,http://tauri.localhost,https://tauri.localhost"
+REALTIME_ALLOWED_ORIGINS = "https://yap.115jon.com,http://localhost:5173"
 
 # ── Durable Objects ──────────────────────────────────────────────────────
 
@@ -146,7 +146,7 @@ TURN_TOKEN_ID = "7355d949dedf888e6d89a5298f3ffde7"
 VITE_KOVA_AUTH_PUBLISHABLE_KEY = "pk_live_yl2Z9ssEwlWuOYHVRWozk9WThozu4nFP3QAhCWAsPhE"
 COLLECTIBLES_ADMIN_USER_IDS = "DADtHxPYMksiibowh0LmZFu8TWT5DI9b"
 # The Preview's own origin is always allowed; the production origin is not.
-REALTIME_ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:1420,http://tauri.localhost,https://tauri.localhost"
+REALTIME_ALLOWED_ORIGINS = "http://localhost:5173"
 
 [[previews.durable_objects.bindings]]
 name = "MEETING_ROOM"
@@ -190,7 +190,7 @@ TURN_TOKEN_ID = "7355d949dedf888e6d89a5298f3ffde7"
 # KOVA_AUTH_URL and VITE_KOVA_AUTH_URL are left unset on purpose: both fall back
 # to DEFAULT_KOVA_AUTH_URL in src/lib/site-defaults.ts, the one place to move Kova.
 VITE_KOVA_AUTH_PUBLISHABLE_KEY = "pk_dev__qQlzL6HOzZ6e6pfMjZmEXWrQXaRiYFBykh8sTh2R9Q"
-REALTIME_ALLOWED_ORIGINS = "https://yap.115jon.com,http://localhost:5173,http://localhost:1420,http://tauri.localhost,https://tauri.localhost"
+REALTIME_ALLOWED_ORIGINS = "https://yap.115jon.com,http://localhost:5173"
 
 [[env.mobile-dev.durable_objects.bindings]]
 name = "MEETING_ROOM"
@@ -237,7 +237,7 @@ crons = ["0 */6 * * *", "17 * * * *", "*/10 * * * *"]
 
 [observability]
 # Logs and traces record request URLs without their query strings: media
-# capabilities (`?cap=`) and the Tauri app's legacy `?token=` ride there.
+# capabilities (`?cap=`) and stale web tabs' legacy `?token=` ride there.
 redact_query_string = true
 
 [observability.logs]

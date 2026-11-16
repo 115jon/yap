@@ -7,8 +7,6 @@
 //   ServiceFailure    its status  { error, code }   (apiError)
 //   defect            500  { error, code: "INTERNAL_ERROR" }, logged once
 //
-// All carry the desktop CORS headers for the request's origin.
-//
 // Layers: `liveServices` is described once per isolate (a module constant)
 // and built per request by `Effect.provide`. Every constructor is a
 // `Layer.succeed`/`Layer.sync` over bindings already in memory, so a build is

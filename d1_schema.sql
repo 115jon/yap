@@ -377,7 +377,7 @@ CREATE TABLE IF NOT EXISTS push_tokens (
     token TEXT NOT NULL UNIQUE,          -- FCM registration token
     platform TEXT NOT NULL,              -- 'android' | 'ios'
     app_variant TEXT,                    -- 'development' | 'preview' | 'production'
-    push_format TEXT,                    -- NULL = legacy notification push | 'native' = data-only, app renders
+    push_format TEXT,                    -- always 'native' (data-only, app renders); NULL rows dropped by 047
     session_id TEXT,                     -- Kova session that registered it; NULL = before migration 045
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))

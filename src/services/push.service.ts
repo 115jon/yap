@@ -21,8 +21,6 @@ export interface PushTokenInput {
   token: string;
   platform: "android" | "ios";
   appVariant: string | null;
-  /** NULL = legacy app (system-rendered push); "native" = data-only pushes. */
-  pushFormat: "native" | null;
   /** The Kova session registering it; signing that session out deletes it. */
   sessionId: string | null;
 }
@@ -43,12 +41,12 @@ export async function upsertPushToken(
       `INSERT INTO push_tokens
          (id, user_id, token, platform, app_variant, push_format,
           session_id, created_at, last_seen_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, 'native', ?, ?, ?)
        ON CONFLICT(token) DO UPDATE SET
          user_id = excluded.user_id,
          platform = excluded.platform,
          app_variant = excluded.app_variant,
-         push_format = excluded.push_format,
+         push_format = 'native',
          session_id = excluded.session_id,
          last_seen_at = excluded.last_seen_at`,
     )
@@ -58,7 +56,6 @@ export async function upsertPushToken(
       input.token,
       input.platform,
       input.appVariant,
-      input.pushFormat,
       input.sessionId,
       now,
       now,
@@ -131,12 +128,6 @@ export async function deleteSessionPushTokens(
     .run();
 }
 
-interface DeviceToken {
-  token: string;
-  /** NULL = legacy app; "native" = the app renders data-only pushes. */
-  pushFormat: string | null;
-}
-
 /**
  * Each user's device tokens. Users on Do Not Disturb are left out: they get
  * no message pushes at all.
@@ -144,13 +135,13 @@ interface DeviceToken {
 async function tokensByUser(
   db: D1Database,
   userIds: readonly string[],
-): Promise<Map<string, DeviceToken[]>> {
-  const byUser = new Map<string, DeviceToken[]>();
+): Promise<Map<string, string[]>> {
+  const byUser = new Map<string, string[]>();
   for (let offset = 0; offset < userIds.length; offset += 90) {
     const chunk = userIds.slice(offset, offset + 90);
     const { results } = await db
       .prepare(
-        `SELECT t.user_id, t.token, t.push_format FROM push_tokens t
+        `SELECT t.user_id, t.token FROM push_tokens t
          JOIN users u ON u.id = t.user_id
          WHERE t.user_id IN (${chunk.map(() => "?").join(",")})
            AND COALESCE(u.status, 'online') != 'dnd'`,
@@ -159,13 +150,7 @@ async function tokensByUser(
       .all();
     for (const row of results ?? []) {
       const userId = row.user_id as string;
-      byUser.set(userId, [
-        ...(byUser.get(userId) ?? []),
-        {
-          token: row.token as string,
-          pushFormat: (row.push_format as string | null) ?? null,
-        },
-      ]);
+      byUser.set(userId, [...(byUser.get(userId) ?? []), row.token as string]);
     }
   }
   return byUser;
@@ -182,8 +167,6 @@ async function deleteStaleToken(db: D1Database, token: string): Promise<void> {
 // (`GET /api/notifications/:id/push`, `notificationPushText` below) with
 // its own session.
 
-/** The Android channel the app creates at startup for message pushes. */
-export const MESSAGES_CHANNEL_ID = "messages";
 /** Marks a data-only push the app's native FCM service handles. */
 const NATIVE_FORMAT = "2";
 
@@ -201,7 +184,7 @@ export interface MessagePush {
   sentAt: string;
 }
 
-/** The text a legacy app's system notification shows: the kind, no content. */
+/** The text an older native build draws as-is: the kind, no content. */
 const LEGACY_TEXT: Record<MessagePush["type"], string> = {
   dm: "New direct message",
   mention: "New mention",
@@ -209,49 +192,15 @@ const LEGACY_TEXT: Record<MessagePush["type"], string> = {
   message: "New message",
 };
 
-/** A message FCM renders itself: it always has a `notification` block. */
-export type SystemFcmMessage = FcmMessage &
-  Required<Pick<FcmMessage, "notification">>;
-
-/**
- * The FCM message for a legacy (system-rendered) device: a generic system
- * notification on the `messages` channel, tagged per conversation so a
- * newer message replaces the older one, and data for the app's deep link.
- * That app cannot fetch the text, so it shows the kind of message only.
- */
-export function buildMessagePush(push: MessagePush): SystemFcmMessage {
-  const tag = `channel:${push.channelId}`;
-  const data = {
-    type: push.type,
-    channelId: push.channelId,
-    messageId: push.messageId,
-    notificationId: push.notificationId,
-    // expo-notifications ids a notification it shows in the foreground by
-    // `data.tag`, so those collapse per conversation too.
-    tag,
-  };
-  return {
-    notification: { title: "Yap", body: LEGACY_TEXT[push.type] },
-    data: push.serverId ? { ...data, serverId: push.serverId } : data,
-    android: {
-      priority: "HIGH",
-      notification: {
-        channel_id: MESSAGES_CHANNEL_ID,
-        tag,
-      },
-    },
-  };
-}
-
 /** The string-valued data of a native push; optional keys are added later. */
 interface NativePushData {
   [key: string]: string;
 }
 
 /**
- * The data-only FCM message for a native-format device: no `notification`
- * block, so the app renders it (and can group, reply and clear it) after
- * fetching its text by `notificationId`. Null values are left out.
+ * The data-only FCM message for a device: no `notification` block, so the
+ * app renders it (and can group, reply and clear it) after fetching its
+ * text by `notificationId`. Null values are left out.
  */
 export function buildNativeMessagePush(push: MessagePush): FcmMessage {
   const data: NativePushData = {
@@ -443,8 +392,8 @@ export async function notificationPushText(
 // ─── Fan-out ─────────────────────────────────────────────────────────────────
 
 /**
- * Sends each push to every device its recipient registered, in the format
- * that device asked for, and deletes the tokens FCM calls dead. A null sender
+ * Sends each push to every device its recipient registered and deletes the
+ * tokens FCM calls dead. A null sender
  * (push not configured) does nothing.
  */
 export async function sendMessagePushes(
@@ -458,18 +407,14 @@ export async function sendMessagePushes(
       ...new Set(pushes.map((push) => push.recipientId)),
     ]);
     const sends = pushes.flatMap((push) =>
-      (tokens.get(push.recipientId) ?? []).map(async (device) => {
-        const message =
-          device.pushFormat === "native"
-            ? buildNativeMessagePush(push)
-            : buildMessagePush(push);
-        const result = await sender.send(device.token, message);
+      (tokens.get(push.recipientId) ?? []).map(async (token) => {
+        const result = await sender.send(token, buildNativeMessagePush(push));
         if (result.ok) return;
         if (!result.staleToken) {
           console.warn("push.failed", { status: result.status });
           return;
         }
-        await deleteStaleToken(db, device.token);
+        await deleteStaleToken(db, token);
       }),
     );
     const outcomes = await Promise.allSettled(sends);
@@ -561,7 +506,7 @@ function takeReadPushSlot(key: string, nowMs: number): boolean {
 }
 
 /**
- * Tells the user's native-format devices that `channelId` was read (at
+ * Tells the user's devices that `channelId` was read (at
  * `readAt`, ISO) so they can clear its tray notifications. Never throws.
  */
 export async function sendReadPushes(
@@ -576,10 +521,7 @@ export async function sendReadPushes(
   try {
     if (!takeReadPushSlot(`${userId}:${channelId}`, nowMs)) return;
     const { results } = await db
-      .prepare(
-        `SELECT token FROM push_tokens
-         WHERE user_id = ? AND push_format = 'native'`,
-      )
+      .prepare(`SELECT token FROM push_tokens WHERE user_id = ?`)
       .bind(userId)
       .all();
     const message: FcmMessage = {

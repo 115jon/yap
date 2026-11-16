@@ -388,4 +388,27 @@ describe("voice admission route", () => {
     expect(room).toMatchObject({ ok: true, claims: { media: "issued" } });
     expect(body.media?.participant_id).toBe(room.ok ? room.claims.nonce : "");
   });
+  it("refuses cross-origin and reserved-slug public-demo requests", async () => {
+    const demo = (origin: string, roomSlug: string) =>
+      voiceAdmissionRoutes(testServices({ auth: countingAuth, db, env })).POST({
+        request: new Request("https://meet.test/api/voice/admission", {
+          method: "POST",
+          headers: { origin },
+          body: JSON.stringify({ roomSlug }),
+        }),
+      });
+
+    const crossOrigin = await demo("https://attacker.test", "public-room");
+    const reservedSlug = await demo(
+      "https://meet.test",
+      "voice-server-channel",
+    );
+
+    await expect(crossOrigin.json()).resolves.toMatchObject({
+      code: "DEMO_ORIGIN_NOT_ALLOWED",
+    });
+    await expect(reservedSlug.json()).resolves.toMatchObject({
+      code: "DEMO_ROOM_NOT_ALLOWED",
+    });
+  });
 });

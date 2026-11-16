@@ -24,10 +24,6 @@ import { RoomGateway } from "./voice/gateways/room-gateway";
 import { VoiceGateway } from "./voice/gateways/voice-gateway";
 import { rememberVoiceMoveGrant } from "./voice/voice-move-grants";
 import {
-  NativeScreenShareTransport,
-  type NativeScreenShareOptions,
-} from "./voice/native-screen-share-transport";
-import {
   PartyTracksMediaManager,
   PartyTracksTransport,
   readReceiverFrames,
@@ -102,8 +98,7 @@ interface ConnectArguments {
  * Coordinates Ralph's metadata gateways with its media transports.
  *
  * Browser microphone, camera, screen, and remote media have one owner:
- * PartyTracksMediaManager. Native Rust screen capture is isolated behind
- * NativeScreenShareTransport because it still exchanges SDP with VoiceGW.
+ * PartyTracksMediaManager.
  */
 export class SFUClient extends TypedEventEmitter<SFUEventMap> {
   public readonly roomGW: RoomGateway;
@@ -123,7 +118,6 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
   private readonly createPartyTracksTransport: (
     credentials: PartyTracksTransportCredentials,
   ) => PartyTracksClientTransport;
-  private readonly nativeScreenShare: NativeScreenShareTransport;
   private roomSlug: string;
   private participantId: string | null = null;
   /**
@@ -187,8 +181,6 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
   private partyTracksReadyPromise: Promise<void> = Promise.resolve();
   private partyTracksReadyResolve: (() => void) | null = null;
   private partyTracksReadyReject: ((reason?: unknown) => void) | null = null;
-  private nativeScreenReconnectRequired = false;
-  private nativeScreenResetPromise: Promise<void> = Promise.resolve();
   private remoteSpeakingUntil = new Map<string, number>();
   /**
    * Remote participants whose voice socket said ClientDisconnect: their
@@ -229,13 +221,6 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
 
     this.roomGW = new RoomGateway();
     this.voiceGW = new VoiceGateway();
-    this.nativeScreenShare = new NativeScreenShareTransport({
-      gateway: this.voiceGW,
-      getIceServers: () => this.iceServers,
-      getParticipantId: () => this.participantId,
-      isVoiceReady: () => this.voiceGW.isReady,
-      waitForVoiceReady: () => this.voiceReadyPromise,
-    });
 
     this.vad = new VoiceActivityDetector({
       onSpeakingChange: (isSpeaking, flags) => {
@@ -630,25 +615,6 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
           this.deferredRemoteTracks.set(track.track_name, track);
         }
       }
-
-      if (this.nativeScreenReconnectRequired) {
-        this.nativeScreenReconnectRequired = false;
-        void this.nativeScreenResetPromise
-          .then(() => this.nativeScreenShare.reconnect())
-          .catch((error) => {
-            sfuLog.warn("Native screen share reconnect failed", error);
-            // The transport stopped the pipeline and nothing retries it:
-            // the share owner falls back or ends the share, as for the
-            // backend's own `connection-failed`.
-            if (this.isLeaving) return;
-            this.emit("native-screen-share-ended", {
-              reason: "connection-failed",
-              detail: `reconnect failed: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            });
-          });
-      }
     });
 
     this.voiceGW.on("app-event", (event) => {
@@ -744,7 +710,6 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
     this.voiceGW.on("disconnected", () => {
       this.rejectVoiceReadiness(new Error("WS_CLOSED"));
       this.createVoiceReadinessBarrier();
-      this.resetNativeScreenForReconnect();
     });
   }
 
@@ -797,21 +762,10 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
     this.partyTracksReadyReject = null;
   }
 
-  private resetNativeScreenForReconnect(): void {
-    if (this.isLeaving || !this.nativeScreenShare.active) return;
-    this.nativeScreenReconnectRequired = true;
-    this.nativeScreenResetPromise = this.nativeScreenShare
-      .reset()
-      .catch((error) => {
-        sfuLog.warn("Native screen share reset failed", error);
-      });
-  }
-
   private resetMediaSessionsForParticipantChange(): void {
     if (this.participantId) this.previousParticipantIds.add(this.participantId);
     this.rejectPartyTracksReadiness(new Error("PARTICIPANT_CHANGED"));
     this.createPartyTracksReadinessBarrier();
-    this.resetNativeScreenForReconnect();
     this.disposePartyTracksMedia();
   }
 
@@ -1314,15 +1268,10 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
     this.roomGW.disconnect();
     this.voiceGW.disconnect();
     this.disposePartyTracksMedia();
-    void this.nativeScreenShare.dispose().catch((error) => {
-      sfuLog.warn("Native screen share disposal failed", error);
-    });
     this.vad.stop();
     this.audio.dispose();
     this.remoteSpeakingUntil.clear();
     this.remoteReconnectGrace.dispose();
-    this.nativeScreenReconnectRequired = false;
-    this.nativeScreenResetPromise = Promise.resolve();
     this.participantId = null;
     this.previousParticipantIds.clear();
     this.voiceToken = null;
@@ -1608,32 +1557,6 @@ export class SFUClient extends TypedEventEmitter<SFUEventMap> {
       track.enabled = enabled;
     }
     return true;
-  }
-
-  public publishNativeScreenShare(
-    options: NativeScreenShareOptions,
-  ): Promise<void> {
-    return this.nativeScreenShare.start(options);
-  }
-
-  public stopNativeScreenShare(): Promise<void> {
-    return this.nativeScreenShare.stop();
-  }
-
-  public get isNativeScreenShareActive(): boolean {
-    return this.nativeScreenShare.active;
-  }
-
-  public updateNativeScreenQuality(quality: string): Promise<boolean> {
-    return this.nativeScreenShare.updateQuality(quality);
-  }
-
-  public startPreviewLoopback(): Promise<MediaStream | null> {
-    return this.nativeScreenShare.startPreview();
-  }
-
-  public stopPreviewLoopback(): Promise<void> {
-    return this.nativeScreenShare.stopPreview();
   }
 
   public async updateSenderEncoding(
