@@ -98,9 +98,8 @@ beforeEach(() => {
   mocks.markAuthLogoutIntent.mockClear();
   mocks.endKovaBrowserSession.mockReset();
   mocks.endKovaBrowserSession.mockResolvedValue(undefined);
-  // The launch is a passive effect. One that is still pending when a test
-  // ends flushes during unmount, after the afterEach below, so a call from
-  // the last test can land here; start every test from a clean spy.
+  // The launch is a passive effect, so a test that ends before it ran can
+  // see it fire during unmount. Start every test from a clean spy.
   mocks.launchNativeApp.mockReset();
 });
 
@@ -261,9 +260,14 @@ describe("DeviceActivation", () => {
       status: "approved",
     });
     render(<DeviceActivation initialCode="ABCD-EFGH" />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Approve sign-in" }),
-    );
+    const approve = await screen.findByRole("button", {
+      name: "Approve sign-in",
+    });
+    // act settles the decision and its effects, so a launch cannot arrive
+    // after the not-called check below.
+    await act(async () => {
+      fireEvent.click(approve);
+    });
     await screen.findByRole("heading", {
       name: "You're signed in on Yap Desktop",
     });
@@ -351,9 +355,12 @@ describe("DeviceActivation", () => {
         status: "approved",
       });
       const view = render(<DeviceActivation initialCode="ABCD-EFGH" />);
-      fireEvent.click(
-        await screen.findByRole("button", { name: "Approve sign-in" }),
-      );
+      const approve = await screen.findByRole("button", {
+        name: "Approve sign-in",
+      });
+      await act(async () => {
+        fireEvent.click(approve);
+      });
       await screen.findByText("You can close this tab and go back to the app.");
       expect(mocks.launchNativeApp).not.toHaveBeenCalled();
       expect(screen.queryByRole("link", { name: "Open Yap" })).toBeNull();
@@ -368,7 +375,10 @@ describe("DeviceActivation", () => {
     });
     mocks.denyDeviceRequest.mockResolvedValue({ ok: true, status: "denied" });
     render(<DeviceActivation initialCode="ABCD-EFGH" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Deny" }));
+    const deny = await screen.findByRole("button", { name: "Deny" });
+    await act(async () => {
+      fireEvent.click(deny);
+    });
     await screen.findByRole("heading", { name: "Sign-in denied" });
     expect(mocks.launchNativeApp).not.toHaveBeenCalled();
   });
