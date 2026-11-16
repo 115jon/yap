@@ -166,7 +166,7 @@ Rectangle {
                         tone: "muted"
                         tip: qsTr("Undo (Ctrl Z)")
                         Accessible.name: qsTr("Undo")
-                        enabled: panel.st.canUndo ?? false
+                        enabled: panel.core.canUndo
                         opacity: enabled ? 1 : 0.45
                         onClicked: Board.undo()
                     }
@@ -178,7 +178,7 @@ Rectangle {
                         tip: qsTr("Redo (Ctrl Shift Z)")
                         Accessible.name: qsTr("Redo")
                         transform: Scale { origin.x: 16; xScale: -1 }
-                        enabled: panel.st.canRedo ?? false
+                        enabled: panel.core.canRedo
                         opacity: enabled ? 1 : 0.45
                         onClicked: Board.redo()
                     }
@@ -197,11 +197,11 @@ Rectangle {
                     Row {
                         anchors.verticalCenter: parent.verticalCenter
                         Repeater {
-                            model: [{ id: "me", label: qsTr("Me") }, { id: "friend", label: qsTr("Friend") }, { id: "anyone", label: qsTr("Anyone") }]
+                            model: panel.core.audiences
                             delegate: Rectangle {
                                 id: seg
                                 required property var modelData
-                                readonly property bool on: (panel.st.preview ?? "me") === modelData.id
+                                readonly property bool on: panel.core.preview === modelData.id
                                 width: segText.implicitWidth + 20
                                 height: 28
                                 color: on ? Theme.primaryFill : segHover.hovered ? Theme.tint2 : Theme.tint1
@@ -230,12 +230,7 @@ Rectangle {
                         size: "sm"
                         variant: "ghost"
                         text: qsTr("Discard")
-                        onClicked: {
-                            if (panel.st.dirty ?? false)
-                                panel.core.confirmDiscard = true
-                            else
-                                Board.edit(false)
-                        }
+                        onClicked: panel.core.requestDiscard()
                     }
                     KitButton {
                         anchors.verticalCenter: parent.verticalCenter
@@ -243,7 +238,7 @@ Rectangle {
                         variant: "primary"
                         iconName: "check"
                         text: qsTr("Done")
-                        loading: panel.st.saving ?? false
+                        loading: panel.core.saving
                         onClicked: Board.done()
                     }
                 }
@@ -252,11 +247,11 @@ Rectangle {
 
         // Discard confirm, the conflict and save notices.
         Rectangle {
-            visible: panel.editing && (panel.confirmDiscard || (panel.st.conflict ?? false) || (panel.st.saveError ?? "").length > 0 || (panel.st.message ?? "").length > 0)
+            visible: panel.core.noticeShown(true)
             width: parent.width
             height: notice.implicitHeight + 24
             radius: Theme.radius
-            color: (panel.st.saveError ?? "").length > 0 ? Theme.dangerTint : Theme.ply2
+            color: panel.core.saveError.length > 0 ? Theme.dangerTint : Theme.ply2
             border.width: 1
             border.color: Theme.lineStrong
             Column {
@@ -269,42 +264,27 @@ Rectangle {
                     width: parent.width
                     textFormat: Text.PlainText
                     wrapMode: Text.Wrap
-                    color: (panel.st.saveError ?? "").length > 0 ? Theme.dangerInk : Theme.ink1
+                    color: panel.core.saveError.length > 0 ? Theme.dangerInk : Theme.ink1
                     font: Theme.type.description
-                    text: panel.confirmDiscard ? qsTr("Discard your changes? The board goes back to how it was.")
-                        : (panel.st.conflict ?? false) ? qsTr("Your board changed somewhere else since you started editing. Keep your version, or use the one that's saved?")
-                        : (panel.st.saveError ?? "").length > 0 ? panel.st.saveError
-                        : panel.st.message ?? ""
+                    text: panel.core.noticeText(true)
                     Accessible.role: Accessible.AlertMessage
                     Accessible.name: text
                 }
                 Row {
                     spacing: 8
-                    visible: panel.confirmDiscard || (panel.st.conflict ?? false) || (panel.st.saveError ?? "").length > 0
+                    visible: panel.core.noticeAsks(true)
                     KitButton {
                         size: "sm"
                         variant: "secondary"
-                        text: panel.confirmDiscard ? qsTr("Keep editing") : (panel.st.conflict ?? false) ? qsTr("Use theirs") : qsTr("Try again")
-                        onClicked: {
-                            if (panel.confirmDiscard)
-                                panel.core.keepEditing()
-                            else if (panel.st.conflict ?? false)
-                                Board.useTheirs()
-                            else
-                                Board.done()
-                        }
+                        text: panel.core.noticeFirstLabel(true)
+                        onClicked: panel.core.noticeFirst(true)
                     }
                     KitButton {
-                        visible: panel.confirmDiscard || (panel.st.conflict ?? false)
+                        visible: panel.core.noticeHasSecond(true)
                         size: "sm"
                         variant: panel.confirmDiscard ? "destructive" : "primary"
-                        text: panel.confirmDiscard ? qsTr("Discard") : qsTr("Keep mine")
-                        onClicked: {
-                            if (panel.confirmDiscard)
-                                panel.core.discardNow()
-                            else
-                                Board.keepMine()
-                        }
+                        text: panel.core.noticeSecondLabel(true)
+                        onClicked: panel.core.noticeSecond(true)
                     }
                 }
             }
@@ -330,7 +310,7 @@ Rectangle {
                 Text {
                     textFormat: Text.PlainText
                     anchors.verticalCenter: parent.verticalCenter
-                    text: panel.st.preview === "friend" ? qsTr("Previewing as a friend") : qsTr("Previewing as someone you don't know")
+                    text: panel.core.previewNote
                     color: Theme.ink2
                     font: Theme.type.description
                 }
@@ -574,7 +554,7 @@ Rectangle {
             height: panel.narrow ? 151 : 168
             radius: Theme.radius
             color: addHover.hovered || picker.active ? Theme.tint1 : "transparent"
-            readonly property bool full: (panel.st.count ?? 0) >= (panel.st.max ?? 12)
+            readonly property bool full: panel.core.full
             Accessible.role: Accessible.Button
             Accessible.name: full ? qsTr("Board is full") : qsTr("Add a widget")
             activeFocusOnTab: true

@@ -21,7 +21,8 @@ import Yap.Ui
 //
 // Their board (Yap.Ui BoardCore and BoardRack, the desktop's widgets) sits
 // under the profile on the desktop column's ply-3: Board · Activity ·
-// Wishlist, read-only. Editing the board stays on the desktop and web.
+// Wishlist. On your own, Edit board opens the board editor
+// (BoardEditPage) over the profile.
 //
 // The actions follow the relationship (Yap.Ui ProfileFriendCore): Message
 // or Accept across the page, then Add friend, Cancel request, Decline or
@@ -99,6 +100,19 @@ Rectangle {
         name: root.loaded ? Profile.name : ""
         onRelationChanged: if (relation !== "friend") root.confirmRemove = false
     }
+    // Your own board's editor, over this page.
+    function editBoard() {
+        if (!board.shown || !board.isOwner)
+            return
+        Native.haptic(Native.Tick)
+        // The page starts the editor (Board.edit) as it opens.
+        Router.open("BoardEditPage", {
+            ownerName: Profile.name,
+            ownerAvatar: Profile.avatar,
+            ownerInitials: Profile.initials
+        }, { key: root.userId })
+    }
+
     function ask(action) {
         // A new step starts clean (not with the last attempt's failure).
         Friends.clear(userId)
@@ -646,6 +660,38 @@ Rectangle {
                             }
                         }
                         TabRule { row: boardTabs }
+                        // Edit board at the tabs' end: the labelled key where
+                        // it fits beside them, else the bare key.
+                        Item {
+                            id: editBoardSlot
+                            readonly property bool can: board.shown && board.isOwner && board.tab === "board" && !board.loading && board.error.length === 0
+                            readonly property real room: parent.width - boardTabs.x - boardTabs.width - boardBand.gutter - root.rightInset - 8
+                            visible: can
+                            anchors.right: parent.right
+                            anchors.rightMargin: boardBand.gutter - 4 + root.rightInset
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: editBoardWide.implicitWidth <= room ? editBoardWide.implicitWidth : 40
+                            height: 40
+                            KitButton {
+                                id: editBoardWide
+                                visible: implicitWidth <= editBoardSlot.room
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                size: "sm"
+                                variant: "secondary"
+                                ground: Theme.ply3
+                                iconName: "edit"
+                                text: qsTr("Edit board")
+                                onClicked: root.editBoard()
+                            }
+                            IconKey {
+                                visible: !editBoardWide.visible
+                                anchors.fill: parent
+                                iconName: "edit"
+                                tip: qsTr("Edit board")
+                                onClicked: root.editBoard()
+                            }
+                        }
                         Rectangle {
                             anchors.bottom: parent.bottom
                             width: parent.width
@@ -708,7 +754,7 @@ Rectangle {
                             width: parent.width
                             textFormat: Text.PlainText
                             text: board.isOwner
-                                ? qsTr("Your board is empty. Add what you're playing, your mood, photos or a countdown from Yap on your computer or the web.")
+                                ? qsTr("Your board is empty. Add what you're playing, your mood, photos or a countdown with Edit board. Everyone who opens your profile sees it.")
                                 : qsTr("%1 hasn't added anything to their board yet.").arg(Profile.name)
                             wrapMode: Text.Wrap
                             color: Theme.ink3
