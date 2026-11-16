@@ -337,7 +337,8 @@ Item {
                 name: "mic"
                 variant: "off"
                 size: Theme.iconXs
-                color: Theme.mutedState
+                // White over media, as the web tile does (TileParts.tsx).
+                color: root.overMedia ? "white" : Theme.mutedState
             }
             Icon {
                 anchors.verticalCenter: parent.verticalCenter
@@ -345,7 +346,8 @@ Item {
                 name: "deafen"
                 variant: "off"
                 size: Theme.iconXs
-                color: Theme.mutedState
+                // White over media, as the web tile does (TileParts.tsx).
+                color: root.overMedia ? "white" : Theme.mutedState
             }            // The quality readout: rounded-xs px-1 num-xs on white/15.
             Rectangle {
                 id: quality
