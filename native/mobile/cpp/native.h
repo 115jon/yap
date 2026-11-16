@@ -100,6 +100,12 @@ class Native : public QObject
   Q_PROPERTY(bool cameraCapture READ cameraCapture WRITE setCameraCapture NOTIFY cameraCaptureChanged)
   // The capture uses (or starts with) the front camera; flipCamera switches.
   Q_PROPERTY(bool cameraFront READ cameraFront NOTIFY cameraFrontChanged)
+  // Settings > Voice & video's mic test: the microphone opened on its own
+  // (outside a call; the permission granted) for a level meter, and that
+  // level on the meter's 0..100 scale (dB + 100). A mic that cannot open
+  // turns it off again, with micTestFailed.
+  Q_PROPERTY(bool micTest READ micTest WRITE setMicTest NOTIFY micTestChanged)
+  Q_PROPERTY(qreal micTestLevel READ micTestLevel NOTIFY micTestLevelChanged)
   // Our screen share is live (ShareLink.qml binds it to Voice.sharing):
   // the device's heat and network are read meanwhile, as for the camera.
   Q_PROPERTY(bool screenCapture READ screenCapture WRITE setScreenCapture NOTIFY screenCaptureChanged)
@@ -226,6 +232,9 @@ public:
   Q_INVOKABLE void openAppSettings() const;
   // Routes the running call (an id from audioRoutes).
   Q_INVOKABLE void setAudioRoute(const QString& id) const;
+  // The route each call starts on while it is there (Settings > Voice &
+  // video; `default`: automatic, a headset first).
+  Q_INVOKABLE void setPreferredAudioRoute(const QString& id) const;
   // What the call notification shows: the channel, and the mic and deafen
   // state its Mute action starts from.
   Q_INVOKABLE void setCallState(const QString& channel, bool muted, bool deafened) const;
@@ -241,6 +250,12 @@ public:
   void setThermalStatus(int status);
   // Front to back and back again, while the capture runs.
   Q_INVOKABLE void flipCamera();
+  // The camera the next capture starts with (Settings > Voice & video); a
+  // running capture switches to it.
+  Q_INVOKABLE void setCameraFacing(bool front);
+  bool micTest() const { return m_micTest; }
+  void setMicTest(bool on);
+  qreal micTestLevel() const { return m_micTestLevel; }
   // The camera permission is granted already.
   Q_INVOKABLE bool cameraAllowed() const;
   // Asks for the camera (the system dialog while it can still show); the
@@ -288,6 +303,8 @@ public:
   void onShareRequest(const QString& text, int files, int dropped);
   void onShareCopied(const QStringList& paths, int failed);
   void onAudioRoutes(const QByteArray& json);
+  // The mic test's RMS (0..1) of 20 ms; below 0: the mic did not open.
+  void onMicLevel(double rms);
   void onRing(const QByteArray& json);
   void onRingEnded(const QString& callId);
   void onAnswered();
@@ -323,6 +340,9 @@ signals:
   // copyShare's copies; `failed` items could not be read.
   void shareCopied(const QStringList& paths, int failed);
   void audioRoutesChanged();
+  void micTestChanged();
+  void micTestLevelChanged();
+  void micTestFailed();
   void microphoneAnswered(bool granted);
   void incomingCallChanged();
   void callAnswered();
@@ -394,6 +414,10 @@ private:
   bool m_askingMicrophone = false;
   bool m_cameraCapture = false;
   bool m_cameraFront = true;
+  bool m_micTest = false;
+  qreal m_micTestLevel = 0;
+  // The test's RMS on the 0..100 scale, smoothed as the web's MicTestWidget.
+  double m_micTestRms = 0;
   bool m_askingCamera = false;
   bool m_screenCapture = false;
   bool m_askingScreen = false;

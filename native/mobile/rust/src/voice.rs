@@ -15,11 +15,16 @@
 //! ([`voice_settings_json`], [`set_voice_switch`], [`set_voice_profile`]):
 //! noise suppression, echo cancellation and gain control run where
 //! libwebrtc puts them (the phone's own effects where it has them, its
-//! software APM where not; `engine/webrtc.rs`).
+//! software APM where not; `engine/webrtc.rs`). The Voice & video page's
+//! other settings live in the same file under the same keys: gain control,
+//! the speaking threshold, the output route and camera the shell applies as
+//! a call starts, and the camera's data saver ([`set_voice_value`]); the
+//! call's mic level is kept for the page's meter ([`mic_level`]).
 //! The soundboard and UI sounds play on the app's speaker (sound.rs), as
 //! call audio while a call runs.
 
 use std::ffi::c_void;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -29,7 +34,7 @@ use yap_cache::voice::{self as saved_voice, InputProfile, PeerSettings, VoiceSet
 use yap_core::{Api, Command, VoiceCommand, VoiceEvents, VoiceTarget, VoiceUpdate};
 use yap_ui::client;
 use yap_voice::call::{self, CallAudio, Host};
-use yap_voice::{peer_gain, CameraEncoding, Playback, Processing, VideoIntent};
+use yap_voice::{peer_gain, CameraEncoding, Playback, Processing, Sensitivity, VideoIntent};
 
 use crate::screen::PhoneScreen;
 
@@ -62,6 +67,10 @@ impl Host for Phone {
 
     fn camera_encodings(&self) -> Option<watch::Receiver<Vec<CameraEncoding>>> {
         Some(crate::camera::subscribe())
+    }
+
+    fn mic_level(&self, level: Option<f64>) {
+        LEVEL.store(level.unwrap_or(f64::NAN).to_bits(), Ordering::Relaxed);
     }
 
     /// Our share's still behind everyone else's Watch, as the desktop
@@ -159,12 +168,21 @@ pub fn signed_in(api: &Api, user_id: &str) {
 /// the file has it).
 static PEERS: Mutex<Option<(String, VoiceSettings)>> = Mutex::new(None);
 
-/// What calls take from the settings: each person's volume and mute, and
-/// the mic's processing as the desktop resolves it (high fidelity turns it
-/// all off; gain control is on otherwise). No RNNoise on the phone, so
-/// WebRTC's noise suppression is never handed to it. The rest stays at the
-/// call's defaults.
+/// What calls take from the settings: each person's volume and mute, the
+/// mic's processing as the desktop resolves it (high fidelity turns it all
+/// off; gain control follows its switch otherwise) and the speaking
+/// threshold. No RNNoise on the phone, so WebRTC's noise suppression is
+/// never handed to it. The rest stays at the call's defaults. The camera's
+/// data saver goes to camera.rs.
 fn hear(settings: &VoiceSettings) {
+    let mut processing = Processing::from_settings(
+        settings.noise_suppression,
+        settings.echo_cancellation,
+        settings.stream_high_fidelity,
+        false,
+    );
+    processing.auto_gain_control &= settings.auto_gain_control;
+    crate::camera::set_data_saver(settings.camera_quality == DATA_SAVER);
     call::set_call_audio(CallAudio {
         playback: Playback {
             peers: settings
@@ -174,14 +192,28 @@ fn hear(settings: &VoiceSettings) {
                 .collect(),
             ..Playback::default()
         },
-        processing: Processing::from_settings(
-            settings.noise_suppression,
-            settings.echo_cancellation,
-            settings.stream_high_fidelity,
-            false,
-        ),
+        processing,
+        sensitivity: Sensitivity {
+            auto: settings.auto_sensitivity,
+            db: settings.sensitivity,
+        },
         ..CallAudio::default()
     });
+}
+
+/// The camera quality the phone's "Data saver" keeps (the web's lowest
+/// profile, the nearest to the phone's low layer); any other is Standard.
+const DATA_SAVER: &str = "480p30";
+
+/// The call's mic level as `f64` bits (the meter's 0..100); NaN while no
+/// call reads it.
+static LEVEL: AtomicU64 = AtomicU64::new(f64::NAN.to_bits());
+
+/// The running call's mic level on the meter's 0..100 scale, `None`
+/// outside a call (or before the mic is published).
+pub fn mic_level() -> Option<f64> {
+    let level = f64::from_bits(LEVEL.load(Ordering::Relaxed));
+    (!level.is_nan()).then_some(level)
 }
 
 /// The processing switches as the phone's Voice settings read them, under
@@ -208,6 +240,12 @@ pub fn voice_settings_json() -> String {
         "highFidelity": s.stream_high_fidelity,
         "noiseReduction": "none",
         "noiseReductionSupported": false,
+        "autoGainControl": s.auto_gain_control,
+        "autoSensitivity": s.auto_sensitivity,
+        "sensitivity": s.sensitivity,
+        "outputDeviceId": s.output_device_id,
+        "videoDeviceId": s.video_device_id,
+        "dataSaver": s.camera_quality == DATA_SAVER,
     })
     .to_string()
 }
@@ -233,16 +271,18 @@ fn edit_voice(f: impl FnOnce(&mut VoiceSettings)) -> String {
 }
 
 /// One processing switch by the desktop's `Audio.setSwitch` key:
-/// `noiseSuppression`, `echoCancellation` or `highFidelity` (the web's
-/// `streamHighFidelity` too), with the switches it turns off alongside as
-/// on the desktop and the web (high fidelity turns noise suppression and
-/// echo cancellation off; either of those turns high fidelity off). Any
+/// `noiseSuppression`, `echoCancellation`, `autoSensitivity` or
+/// `highFidelity` (the web's `streamHighFidelity` too), or the phone's
+/// `autoGainControl`, with the switches it turns off alongside as on the
+/// desktop and the web (high fidelity turns noise suppression and echo
+/// cancellation off; either of those, or gain control, turns high fidelity
+/// off). Any
 /// other key (RNNoise, spatial audio: not on the phone) changes nothing.
 /// Like the desktop's, it does not check the profile: the desktop's page
 /// offers the switches only under `custom`, and so should the phone's.
 pub fn set_voice_switch(key: &str, on: bool) -> String {
     let web = match key {
-        "noiseSuppression" | "echoCancellation" => key,
+        "noiseSuppression" | "echoCancellation" | "autoGainControl" | "autoSensitivity" => key,
         "highFidelity" | "streamHighFidelity" => "streamHighFidelity",
         _ => {
             eprintln!("[voice] no {key} switch on the phone");
@@ -267,6 +307,40 @@ pub fn set_voice_profile(profile: &str) -> String {
         _ => InputProfile::Standard,
     };
     edit_voice(|s| s.set_profile(profile))
+}
+
+/// The Voice & video page's other settings, returning the settings as
+/// [`voice_settings_json`] reads them: `sensitivity` (the manual speaking
+/// threshold, -100..=0 dB), `outputDeviceId` (`default`, `speaker` or
+/// `earpiece`: where a call starts playing; the shell routes it),
+/// `videoDeviceId` (`default`, the front camera, or `back`: the camera a
+/// call starts on) and `dataSaver` (`1` or `0`: the camera's low layer
+/// always). Anything else changes nothing.
+pub fn set_voice_value(key: &str, value: &str) -> String {
+    match key {
+        "sensitivity" => match value.parse::<f64>() {
+            Ok(db) if db.is_finite() => edit_voice(|s| s.sensitivity = db.clamp(-100.0, 0.0)),
+            _ => voice_settings_json(),
+        },
+        "outputDeviceId" if ["default", "speaker", "earpiece"].contains(&value) => {
+            edit_voice(|s| s.output_device_id = value.to_owned())
+        }
+        "videoDeviceId" if ["default", "back"].contains(&value) => {
+            edit_voice(|s| s.video_device_id = value.to_owned())
+        }
+        "dataSaver" => edit_voice(|s| {
+            s.camera_quality = if value == "1" {
+                DATA_SAVER
+            } else {
+                saved_voice::DEFAULT_CAMERA_QUALITY
+            }
+            .into();
+        }),
+        _ => {
+            eprintln!("[voice] no {key} setting on the phone");
+            voice_settings_json()
+        }
+    }
 }
 
 /// Someone's volume (0..=400) and our local mute for them; the defaults

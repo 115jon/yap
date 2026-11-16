@@ -160,7 +160,8 @@ pub trait Platform: Send + Sync + 'static {
     }
 
     /// Sets one processing switch by the desktop's `Audio.setSwitch` key
-    /// (`noiseSuppression`, `echoCancellation`, `highFidelity`), with the
+    /// (`noiseSuppression`, `echoCancellation`, `highFidelity`,
+    /// `autoSensitivity`; the phone's `autoGainControl` too), with the
     /// switches it turns off alongside; saved and heard in the call at once.
     /// Returns the settings as [`Self::voice_settings_json`] reads them.
     fn set_voice_switch(&self, key: &str, on: bool) -> Option<String> {
@@ -173,6 +174,21 @@ pub trait Platform: Send + Sync + 'static {
     /// [`Self::voice_settings_json`] reads them.
     fn set_voice_profile(&self, profile: &str) -> Option<String> {
         let _ = profile;
+        None
+    }
+
+    /// Saves one of the phone's other voice settings (the speaking
+    /// threshold, the output route, the camera, the data saver; the keys
+    /// are the platform's); returns the settings as
+    /// [`Self::voice_settings_json`] reads them.
+    fn set_voice_value(&self, key: &str, value: &str) -> Option<String> {
+        let _ = (key, value);
+        None
+    }
+
+    /// The running call's mic level on the meter's 0..100 scale
+    /// (`Settings.callMicLevel`); `None` outside a call.
+    fn call_mic_level(&self) -> Option<f64> {
         None
     }
 

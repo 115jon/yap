@@ -255,6 +255,18 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "setVoiceProfile"]
         fn set_voice_profile(self: &Settings, profile: &QString) -> QString;
+
+        /// Saves one of the phone's other voice settings (`sensitivity`,
+        /// `outputDeviceId`, `videoDeviceId`, `dataSaver`); returns what
+        /// `voiceSettings` reads.
+        #[qinvokable]
+        #[cxx_name = "setVoiceValue"]
+        fn set_voice_value(self: &Settings, key: &QString, value: &QString) -> QString;
+
+        /// The running call's mic level, 0 to 100; -1 outside a call.
+        #[qinvokable]
+        #[cxx_name = "callMicLevel"]
+        fn call_mic_level(self: &Settings) -> f64;
     }
 
     impl cxx_qt::Initialize for Settings {}
@@ -756,6 +768,16 @@ impl qobject::Settings {
         q(&crate::platform::platform()
             .set_voice_profile(&profile.to_string())
             .unwrap_or_default())
+    }
+
+    pub fn set_voice_value(&self, key: &QString, value: &QString) -> QString {
+        q(&crate::platform::platform()
+            .set_voice_value(&key.to_string(), &value.to_string())
+            .unwrap_or_default())
+    }
+
+    pub fn call_mic_level(&self) -> f64 {
+        crate::platform::platform().call_mic_level().unwrap_or(-1.0)
     }
 
     pub fn load_shares(&self) {

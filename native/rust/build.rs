@@ -18,7 +18,6 @@ const QML: &[&str] = &[
     "qml/components/InlineAudio.qml",
     "qml/components/KeyButton.qml",
     "qml/components/KeyCap.qml",
-    "qml/components/LevelMeter.qml",
     "qml/components/MenuChoice.qml",
     "qml/components/MenuLabel.qml",
     "qml/components/MenuRule.qml",
