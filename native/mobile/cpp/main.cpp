@@ -14,6 +14,7 @@
 #include <QtCore/QJniEnvironment>
 #include <QtCore/QJniObject>
 #include <QtCore/qcoreapplication_platform.h>
+#include <sys/system_properties.h>
 #endif
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
@@ -87,6 +88,16 @@ int main(int argc, char* argv[])
   QElapsedTimer startup;
   startup.start();
   QGuiApplication app(argc, argv);
+#ifdef Q_OS_ANDROID
+  // The core's test switch for the announcement banner
+  // (yap_core::faults, YAP_TEST_ANNOUNCEMENT): a phone has no environment,
+  // so `adb shell setprop debug.yap.test_announcement warning` stands in.
+  {
+    char tone[PROP_VALUE_MAX] = {};
+    if (__system_property_get("debug.yap.test_announcement", tone) > 0)
+      qputenv("YAP_TEST_ANNOUNCEMENT", QByteArray(tone));
+  }
+#endif
   app.setOrganizationName(QStringLiteral("Yap"));
   app.setApplicationName(QStringLiteral("Yap Qt prototype"));
 

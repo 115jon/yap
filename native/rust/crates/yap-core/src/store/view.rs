@@ -1200,6 +1200,8 @@ pub enum ViewUpdate {
     Phase(Phase),
     /// Delete account and the restore screen.
     Deletion(super::deletion::DeletionView),
+    /// The site announcement to draw, or none.
+    Announcement(Option<crate::site_config::Announcement>),
     DeviceCode {
         user_code: String,
         url: String,

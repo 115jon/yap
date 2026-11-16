@@ -83,7 +83,11 @@ impl State {
             return;
         }
         if let Some(token) = token {
-            self.http_for(fx, ApiRequest::UnregisterPush { token }, HttpReason::SignOut);
+            self.http_for(
+                fx,
+                ApiRequest::UnregisterPush { token },
+                HttpReason::SignOut,
+            );
         }
     }
 
@@ -93,6 +97,9 @@ impl State {
         }
         self.suspended = suspended;
         self.suspend_generation += 1;
+        if !suspended {
+            self.site_on_screen();
+        }
         if suspended {
             fx.push(Effect::Later {
                 delay: SUSPEND_GRACE,

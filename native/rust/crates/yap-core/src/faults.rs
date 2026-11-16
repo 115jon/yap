@@ -30,6 +30,11 @@
 //!   admission client). `ice`: the media connection never comes up (it
 //!   reports failed, so it is rebuilt and finally given up; yap-voice reads
 //!   the same variable in its driver).
+//! - `YAP_TEST_ANNOUNCEMENT=info|warning|critical`: `GET /api/site-config`
+//!   is answered locally with a test announcement of that tone
+//!   ([`crate::site_config::test_config`]), so the banner shows without
+//!   publishing one to everyone. The phone reads it from the system
+//!   property `debug.yap.test_announcement` (no environment there).
 
 use std::sync::OnceLock;
 
@@ -79,6 +84,8 @@ pub struct Switches {
     pub unreachable: bool,
     pub statuses: Vec<StatusRule>,
     pub voice: Option<VoiceFail>,
+    /// `YAP_TEST_ANNOUNCEMENT`'s tone.
+    pub announcement: Option<String>,
 }
 
 /// `1`, `true`, `yes` or `on` (any case) turn a flag on.
@@ -126,6 +133,12 @@ pub fn parse_voice_fail(value: &str) -> Option<VoiceFail> {
     }
 }
 
+/// `YAP_TEST_ANNOUNCEMENT`'s tone, if it names one.
+pub fn parse_announcement_tone(value: &str) -> Option<String> {
+    let tone = value.trim().to_ascii_lowercase();
+    matches!(tone.as_str(), "info" | "warning" | "critical").then_some(tone)
+}
+
 impl Switches {
     fn from_env() -> Self {
         let var = |name: &str| std::env::var(name).unwrap_or_default();
@@ -134,6 +147,7 @@ impl Switches {
             unreachable: parse_flag(&var("YAP_TEST_UNREACHABLE")),
             statuses: parse_status_rules(&var("YAP_TEST_HTTP_STATUS")),
             voice: parse_voice_fail(&var("YAP_TEST_VOICE_FAIL")),
+            announcement: parse_announcement_tone(&var("YAP_TEST_ANNOUNCEMENT")),
         };
         if switches != Self::default() {
             eprintln!("[test] fault switches on: {switches:?}");
@@ -209,6 +223,14 @@ pub fn voice_fail() -> Option<VoiceFail> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_announcement_switch_should_name_a_tone_or_nothing() {
+        assert_eq!(parse_announcement_tone(" Warning "), Some("warning".into()));
+        assert_eq!(parse_announcement_tone("critical"), Some("critical".into()));
+        assert_eq!(parse_announcement_tone(""), None);
+        assert_eq!(parse_announcement_tone("loud"), None);
+    }
 
     const BASE: &str = "https://yap.test";
 
