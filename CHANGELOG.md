@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.4.1](https://github.com/115jon/yap/compare/v4.4.0...v4.4.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **ui:** darken the light danger ink to pass WCAG AA ([#354](https://github.com/115jon/yap/issues/354)) ([a899511](https://github.com/115jon/yap/commit/a899511c41221b55ee41928ff20f2b36b770477a))
+* **web:** 🐛 keep share my activity after the account loads ([#360](https://github.com/115jon/yap/issues/360)) ([8eb2fd7](https://github.com/115jon/yap/commit/8eb2fd7a71cd244d7e47482f98bc4376927c526a))
+
 ## [4.4.0](https://github.com/115jon/yap/compare/v4.3.2...v4.4.0) (2026-11-15)
 
 
