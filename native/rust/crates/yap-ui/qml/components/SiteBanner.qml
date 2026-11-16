@@ -53,8 +53,17 @@ Rectangle {
         color: root.critical ? Theme.dangerTint : Theme.warningTint
     }
 
+    // Presses on the strip stay on it: on the phone the chat's rows scroll
+    // behind it, and a tap here must not reach the row underneath.
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+        preventStealing: true
+    }
+
     Timer {
-        running: root.expiring
+        // Only while it shows on screen with an end time to watch.
+        running: root.expiring && root.visible && Qt.application.state === Qt.ApplicationActive
         repeat: true
         triggeredOnStart: true
         interval: 15000
@@ -103,14 +112,18 @@ Rectangle {
             if (!a)
                 return ""
             const words = root.escaped(a.text)
+            // The href is a fixed token: StyledText reads attribute values
+            // raw (no entities, cut at a quote), so the URL itself is
+            // taken from the announcement when the link is activated.
             return a.linkUrl.length > 0
-                ? words + " <a href=\"" + root.escaped(a.linkUrl) + "\">" + root.escaped(a.linkLabel) + "</a>"
+                ? words + " <a href=\"announcement\">" + root.escaped(a.linkLabel) + "</a>"
                 : words
         }
         // Only http(s) links reach here (the core drops anything else).
-        onLinkActivated: link => {
-            if (/^https?:\/\//i.test(link))
-                root.linkRequested(link)
+        onLinkActivated: () => {
+            const url = root.announcement ? root.announcement.linkUrl : ""
+            if (/^https?:\/\//i.test(url))
+                root.linkRequested(url)
         }
         HoverHandler {
             enabled: Theme.hoverUi
