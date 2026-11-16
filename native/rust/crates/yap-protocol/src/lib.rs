@@ -2,9 +2,16 @@
 //! the frame envelope, typed `d` payloads and the REST DTOs the native client
 //! uses. Serde only; no I/O, no async runtime, no Qt.
 //!
-//! `packages/protocol` is the source of truth. Two things keep this crate
-//! honest: the `opcode_parity` test reads `opcodes.ts`, and the fixtures in
-//! `packages/protocol/fixtures` are decoded by `tests/fixtures.rs`.
+//! `packages/protocol` is the source of truth. Three things keep this crate
+//! honest: the `opcode_parity` test reads `opcodes.ts`, the fixtures in
+//! `packages/protocol/fixtures` are decoded by `tests/fixtures.rs`, and
+//! with the `ts` feature these types are written as TypeScript
+//! (`packages/protocol/src/generated`, `pnpm protocol:generate`) that the
+//! web typechecks against its own (`src/lib/__tests__/wire-types.conformance.ts`).
+//!
+//! The TypeScript says what native accepts: an `Option` or `#[serde(default)]`
+//! field is optional there. Types native sends say what it sends instead:
+//! a field skipped when `None` is `x?: T`, never `null`.
 
 pub mod collectibles;
 pub mod frame;

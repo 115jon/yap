@@ -9,10 +9,12 @@ use crate::opcode::GatewayOp;
 /// A decoded text frame. `op` stays a plain number so a frame with an opcode
 /// this build does not know still decodes (clients ignore such frames); use
 /// [`Frame::gateway_op`] to classify it. `d` is `null` when absent.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "frame.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Frame {
     pub op: i64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Value>", optional))]
     pub d: Value,
 }
 

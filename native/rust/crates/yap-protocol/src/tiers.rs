@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// `TIERS`. No row in `user_entitlements` means free.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "tiers.ts"))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Tier {
@@ -42,6 +43,7 @@ impl Tier {
 }
 
 /// `ENTITLEMENT_SOURCES`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "tiers.ts"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EntitlementSource {
@@ -51,6 +53,7 @@ pub enum EntitlementSource {
 }
 
 /// A user's plan. Billing ids never leave the server.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "tiers.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entitlement {
     pub tier: Tier,
@@ -94,11 +97,13 @@ impl Entitlement {
 }
 
 /// One award (`user_badges` row, or `loud` while the tier is Loud).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "tiers.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserBadge {
     pub id: String,
     /// RFC 3339, or empty when the server sent none.
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub awarded_at: String,
 }
 

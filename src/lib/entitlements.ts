@@ -19,6 +19,8 @@
  *   the rest    the client only, for now (profile styling)
  */
 
+import type { Entitlement } from "@ralph/protocol/generated/tiers";
+
 export const TIERS = ["free", "loud", "founder"] as const;
 export type Tier = (typeof TIERS)[number];
 
@@ -38,16 +40,12 @@ export type Perk = (typeof PERKS)[number];
 
 /**
  * A user's plan as the API sends it (users/me and profiles). No row in
- * `user_entitlements` means free. Billing ids never leave the server.
+ * `user_entitlements` means free (`source` absent). Billing ids never leave
+ * the server. Generated from the native client's `yap_protocol::tiers`;
+ * `TIERS` and `ENTITLEMENT_SOURCES` are checked against it in
+ * __tests__/wire-types.conformance.ts.
  */
-export interface Entitlement {
-  tier: Tier;
-  /** Absent for free (no row). */
-  source?: EntitlementSource | null;
-  started_at?: string | null;
-  /** Null for founders and admin grants: they do not run out. */
-  expires_at?: string | null;
-}
+export type { Entitlement };
 
 export const FREE_ENTITLEMENT: Entitlement = Object.freeze({
   tier: "free",

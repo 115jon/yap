@@ -208,6 +208,7 @@ fn clamp01(value: f64) -> f64 {
 // ── Soundboard ────────────────────────────────────────────────────────────
 
 /// Join or leave: an automatic clip (`auto-soundboard.ts`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "voice-app.ts"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AutomaticEvent {
@@ -258,10 +259,12 @@ pub struct SoundboardPlay {
 }
 
 /// One server sound as `soundboard.catalog-updated` carries it.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "voice-app.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct CatalogSound {
     pub id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_url: Option<String>,
@@ -275,18 +278,23 @@ pub struct CatalogSound {
 
 /// A queued track (`ListenTogetherTrack`). Music has `videoId` and
 /// `durationMs`; radio has `streamUrl`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "voice-app.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LtTrack {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub kind: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub provider: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub video_id: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artist: Option<String>,
@@ -297,10 +305,12 @@ pub struct LtTrack {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artwork_url: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub canonical_url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_url: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub source_label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_url: Option<String>,
@@ -324,12 +334,15 @@ impl LtTrack {
 }
 
 /// Who queued an entry.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "voice-app.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LtRequester {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub user_id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub display_name: String,
     #[serde(default)]
     pub avatar_url: Option<String>,
@@ -338,16 +351,21 @@ pub struct LtRequester {
 }
 
 /// One queue entry.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "voice-app.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LtEntry {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub entry_id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub requested_at: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<LtTrack>", optional))]
     pub track: LtTrack,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<LtRequester>", optional))]
     pub requester: LtRequester,
     #[serde(default)]
     pub import_batch_id: Option<String>,
@@ -356,32 +374,41 @@ pub struct LtEntry {
 }
 
 /// The room's Listen Together state (`ListenTogetherStateSnapshot`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "voice-app.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LtSnapshot {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub room_slug: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<i64>", optional))]
     pub revision: i64,
     #[serde(default = "default_true")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub paused: bool,
     #[serde(default)]
     pub current_entry_id: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub anchor_position_ms: f64,
     #[serde(default)]
     pub anchor_updated_at: Option<f64>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub last_updated_at: f64,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<LtEntry>>", optional))]
     pub queue: Vec<LtEntry>,
     #[serde(default)]
     pub current_entry: Option<LtEntry>,
     /// Finished entries, newest first (the room keeps
     /// [`RECENTLY_PLAYED_LIMIT`]).
     #[serde(default, deserialize_with = "recently_played")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<LtHistory>>", optional))]
     pub recently_played: Vec<LtHistory>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub position_ms: f64,
     #[serde(default)]
     pub duration_ms: Option<f64>,
@@ -392,11 +419,13 @@ fn default_true() -> bool {
 }
 
 /// One finished entry (`ListenTogetherRecentlyPlayedEntry`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "voice-app.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LtHistory {
     pub history_id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<f64>", optional))]
     pub played_at: f64,
     pub entry: LtEntry,
 }
@@ -500,18 +529,24 @@ pub enum LtEvent {
 // ── Activities and Wordle ─────────────────────────────────────────────────
 
 /// `wordle.progress`'s `progress`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "voice-app.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WordleProgress {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub user_id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<String>>", optional))]
     pub guesses: Vec<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<u32>", optional))]
     pub streak: u32,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub finished: bool,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub missed: bool,
 }
 
@@ -846,6 +881,7 @@ impl EnqueueMode {
 }
 
 /// A queue entry as an enqueue sends it (`ListenTogetherQueueEntrySeed`).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "voice-app.ts"))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LtSeed {

@@ -17,6 +17,7 @@ use crate::rest::IceServer;
 // Both gateways
 
 /// Hello (op 8): first frame after connect.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Hello {
     pub heartbeat_interval: Option<u64>,
@@ -24,6 +25,7 @@ pub struct Hello {
 }
 
 /// Error (op 18).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct GatewayError {
     pub code: i64,
@@ -47,30 +49,43 @@ impl GatewayError {
 /// `clerk_user_id`, the room socket sends `username` and friends. Only `name`
 /// is required. Do not set `standby` on a room socket that must get the voice
 /// join grant.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Identify {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub clerk_user_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub username: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub display_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub avatar_url: Option<String>,
     /// A string or an avatar display object; the room stores what it gets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "ts",
+        ts(optional, type = "string | { [key in string]: unknown }")
+    )]
     pub avatar_display: Option<Value>,
     /// Unknown values fall back to `"web"` on the server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub platform: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub supports_voice_state_deltas: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub standby: Option<bool>,
 }
 
 /// Resume (op 7).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Resume {
     pub session_id: String,
@@ -78,21 +93,25 @@ pub struct Resume {
 }
 
 /// Ready (op 2) on the global (chat) gateway: only the session id is read.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ChatReady {
     pub participant_id: Option<String>,
 }
 
 /// Dispatch (op 19): `event` routes `data`; `seq` is the replay cursor.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Dispatch {
     pub event: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Value>", optional))]
     pub data: Value,
     pub seq: Option<u64>,
 }
 
 /// `MESSAGE_DELETE` dispatch data.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct MessageDeleteEvent {
     pub id: String,
@@ -102,6 +121,7 @@ pub struct MessageDeleteEvent {
 /// `MESSAGE_UNPIN` dispatch data (message.service.ts `unpinMessage`:
 /// `{id, channel_id, is_pinned: false}`). `MESSAGE_PIN` carries the whole
 /// message instead (pins.ts).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct MessageUnpinEvent {
     pub id: String,
@@ -109,6 +129,7 @@ pub struct MessageUnpinEvent {
 }
 
 /// `REACTION_ADD` / `REACTION_REMOVE` dispatch data (message.service.ts).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ReactionEvent {
     pub message_id: String,
@@ -118,6 +139,7 @@ pub struct ReactionEvent {
 }
 
 /// `TYPING_START` dispatch data.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct TypingStartEvent {
     pub channel_id: String,
@@ -125,15 +147,18 @@ pub struct TypingStartEvent {
 }
 
 /// `NOTIFICATIONS_READ` dispatch data: these ids, or every one.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct NotificationsRead {
     #[serde(default)]
     pub ids: Option<Vec<String>>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
     pub all: bool,
 }
 
 /// Subscribe (op 27) or unsubscribe (op 28) to a channel.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChannelRef {
     pub channel_id: String,
@@ -141,6 +166,7 @@ pub struct ChannelRef {
 
 /// PresenceUpdate (op 26), client to server: the user's chosen status
 /// (`online`, `idle`, `dnd`, or `offline` for invisible).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PresenceStatus {
     pub status: String,
@@ -155,10 +181,12 @@ fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
 
 /// `PRESENCE_UPDATE` dispatch data. `custom_status` comes only with the
 /// REST status change: absent leaves the known one, `null` clears it.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PresenceUpdateEvent {
     pub user_id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub status: String,
     #[serde(default, deserialize_with = "present")]
     pub custom_status: Option<Option<String>>,
@@ -173,6 +201,7 @@ pub struct PresenceUpdateEvent {
 }
 
 /// One connected user in a [`PresenceList`].
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PresenceEntry {
     pub user_id: String,
@@ -189,23 +218,28 @@ pub struct PresenceEntry {
 
 /// `PRESENCE_LIST` dispatch data (after every channel subscribe): everyone
 /// connected. Older servers send only `user_ids`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct PresenceList {
     pub users: Option<Vec<PresenceEntry>>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<String>>", optional))]
     pub user_ids: Vec<String>,
 }
 
 /// `GUILD_MEMBER_ADD` dispatch data.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct GuildMemberAdd {
     pub server_id: String,
     pub user: crate::rest::User,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<crate::rest::Role>>", optional))]
     pub roles: Vec<crate::rest::Role>,
 }
 
 /// `GUILD_MEMBER_REMOVE` dispatch data.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct GuildMemberRemove {
     pub server_id: String,
@@ -214,12 +248,14 @@ pub struct GuildMemberRemove {
 
 /// `RELATIONSHIP_REMOVE` dispatch data (social.service.ts
 /// `removeRelationship`, `blockUser`): the other person is gone from the list.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct RelationshipRemove {
     pub user_id: String,
 }
 
 /// `GUILD_MEMBER_UPDATE` dispatch data: the member's roles now.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct GuildMemberUpdate {
     pub server_id: String,
@@ -230,6 +266,7 @@ pub struct GuildMemberUpdate {
 /// `CHANNEL_UPDATE` dispatch data: the channel as stored (without the
 /// viewer's `permissions`), or only the server (and sometimes the channel
 /// id) when the tree or an override changed and the list must be fetched.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ChannelUpdateEvent {
     pub server_id: Option<String>,
@@ -238,6 +275,7 @@ pub struct ChannelUpdateEvent {
 }
 
 /// `CHANNEL_DELETE` dispatch data.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ChannelDeleteEvent {
     pub id: String,
@@ -245,12 +283,14 @@ pub struct ChannelDeleteEvent {
 }
 
 /// `GUILD_DELETE` dispatch data.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct GuildDelete {
     pub id: String,
 }
 
 /// `USER_PROFILE_UPDATE` dispatch data: the fields present changed.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct UserProfileUpdate {
     pub user_id: String,
@@ -343,28 +383,35 @@ impl UserProfileUpdate {
 }
 
 /// ServerSubscribe (op 35).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ServerSubscribe {
     pub server_id: String,
 }
 
 /// VoiceChannelJoin (op 33).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VoiceChannelJoin {
     pub channel_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub self_mute: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub started_at: Option<Value>,
     /// A voice move grant: stands in for CONNECT on the channel it names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub move_grant: Option<String>,
 }
 
 /// VoiceChannelLeave (op 34). Without a channel it applies to the current one.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VoiceChannelLeave {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub channel_id: Option<String>,
 }
 
@@ -372,9 +419,11 @@ pub struct VoiceChannelLeave {
 /// (`VOICE_CHANNEL_STATES`, `VOICE_CHANNEL_STATE_UPDATE`). With
 /// `supports_voice_state_deltas` an update leaves the profile fields out;
 /// keep them from the last full member with the same `user_id`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct VoiceChannelMember {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub user_id: String,
     pub name: Option<String>,
     pub username: Option<String>,
@@ -403,20 +452,28 @@ pub struct VoiceChannelMember {
 /// `VOICE_CHANNEL_STATES` dispatch data: every visible voice channel that
 /// has someone in it, sent after a subscribe, and when each call started
 /// (ms, for the sidebar's clock).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct VoiceChannelStates {
     #[serde(default)]
+    #[cfg_attr(
+        feature = "ts",
+        ts(as = "Option<BTreeMap<String, Vec<VoiceChannelMember>>>", optional)
+    )]
     pub voice_states: BTreeMap<String, Vec<VoiceChannelMember>>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<BTreeMap<String, Value>>", optional))]
     pub voice_started_at: BTreeMap<String, Value>,
 }
 
 /// `VOICE_CHANNEL_STATE_UPDATE` dispatch data: one channel's whole roster
 /// (empty when the last person left).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct VoiceChannelStateUpdate {
     pub channel_id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<VoiceChannelMember>>", optional))]
     pub members: Vec<VoiceChannelMember>,
     #[serde(default)]
     pub started_at: Option<Value>,
@@ -426,6 +483,7 @@ pub struct VoiceChannelStateUpdate {
 
 /// A room participant. Join and leave carry the full state; an update may be
 /// a delta without the profile fields, so only `id` is required.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct VoiceState {
     pub id: String,
@@ -442,6 +500,7 @@ pub struct VoiceState {
 
 /// What a [`VoiceStateUpdate`] did to the participant. Anything this build
 /// does not know is [`VoiceAction::Unknown`] and should be treated as an update.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VoiceAction {
@@ -453,6 +512,7 @@ pub enum VoiceAction {
 }
 
 /// VoiceStateUpdate (op 15), server to client.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct VoiceStateUpdate {
     pub participant: VoiceState,
@@ -460,33 +520,42 @@ pub struct VoiceStateUpdate {
 }
 
 /// VoiceStateUpdate (op 15), client to server: the sender's own flags.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ClientVoiceState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub self_mute: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub self_deaf: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub self_video: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub self_stream: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub self_stream_audio: Option<bool>,
 }
 
 /// VoiceStateUpdate (op 15) on the global gateway: our live share's still
 /// for the sidebar roster (chat-gateway.ts `sendVoiceStateUpdate({
 /// stream_preview_url })`); `None` sends `null`, which clears it.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StreamPreviewUpdate {
     pub stream_preview_url: Option<String>,
 }
 
 /// MediaReady (op 41): media credentials before the full Ready.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct MediaReady {
     pub participant_id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<IceServer>>", optional))]
     pub ice_servers: Vec<IceServer>,
     pub voice_token: String,
 }
@@ -494,14 +563,17 @@ pub struct MediaReady {
 /// Ready (op 2) on a room socket. On a room ticket whose admission minted
 /// the credentials (`media: "issued"`) it carries no `voice_token` and no
 /// `ice_servers`; an Identify on a `held` ticket carries both.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct RoomReady {
     pub participant_id: String,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<IceServer>>", optional))]
     pub ice_servers: Vec<IceServer>,
     pub voice_token: Option<String>,
     /// The roster, excluding the receiver.
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<VoiceState>>", optional))]
     pub participants: Vec<VoiceState>,
     pub heartbeat_interval: Option<u64>,
     pub spatial_audio_state: Option<Value>,
@@ -510,6 +582,7 @@ pub struct RoomReady {
 /// Resumed (op 9) on a room socket. The reply to a credentials refresh
 /// (op 40) carries a fresh `voice_token` and `ice_servers`; the reply to a
 /// Resume (op 7) on an admission ticket carries neither (keep the held ones).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Resumed {
     pub voice_token: Option<String>,
@@ -520,15 +593,18 @@ pub struct Resumed {
 // Voice socket
 
 /// VoiceIdentify (op 100).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VoiceIdentify {
     pub participant_id: String,
     pub voice_token: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub supports_listen_together_snapshot_events: Option<bool>,
 }
 
 /// Kind of a published track. Anything else decodes as [`TrackKind::Unknown`].
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TrackKind {
@@ -541,70 +617,86 @@ pub enum TrackKind {
 /// A published track as the voice room describes it (Video, op 12, and
 /// VoiceReady `tracks`). Skip tracks without `sfu_track_name`: they are
 /// legacy or native screen tracks and cannot be pulled.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrackInfo {
     /// Absent on a broadcast track; use the outer `participant_id` then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub participant_id: Option<String>,
     /// Yap's alias, e.g. `cam-audio-<participant id>`.
     pub track_name: String,
     /// The SFU's track name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub sfu_track_name: Option<String>,
     /// The PartyTracks session capability.
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub mid: Option<String>,
     pub kind: TrackKind,
 }
 
 /// Video (op 12): tracks announced or changed.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Video {
     /// Set by the server on the broadcast to listeners.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub participant_id: Option<String>,
     pub tracks: Vec<TrackInfo>,
 }
 
 /// StopTracks (op 13). Clients send only `track_names`; the server's
 /// broadcast adds `participant_id` and `tracks`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StopTracks {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub participant_id: Option<String>,
     #[serde(default)]
     pub track_names: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<TrackInfo>>", optional))]
     pub tracks: Vec<TrackInfo>,
 }
 
 /// ClientDisconnect (op 11). Clients send `{}`; on the voice socket the
 /// server sends the departing `participant_id`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ClientDisconnect {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub participant_id: Option<String>,
 }
 
 /// Speaking (op 5). Clients send `speaking` only; the server relays it with
 /// the speaker's `participant_id`. Bit 0 is the microphone.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Speaking {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub participant_id: Option<String>,
     pub speaking: i64,
 }
 
 /// VoiceReady (op 101).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct VoiceReady {
     pub participant_id: String,
     /// Every live track except the receiver's own.
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<TrackInfo>>", optional))]
     pub tracks: Vec<TrackInfo>,
     /// Speaking flags by participant id.
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<BTreeMap<String, i64>>", optional))]
     pub speaking: BTreeMap<String, i64>,
     pub join_wait_ms: Option<u64>,
 }
@@ -612,6 +704,7 @@ pub struct VoiceReady {
 // DM calls (chat gateway ops 36-39, `chat-gateway.ts` CALL_*)
 
 /// CallInitiate (op 36): ring the other recipient of a DM.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallInitiate {
     pub target_user_id: String,
@@ -619,44 +712,55 @@ pub struct CallInitiate {
 }
 
 /// CallAccept (37), CallDecline (38) and CallEnd (39).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallRef {
     pub call_id: String,
 }
 
 /// `CALL_RING`: someone calls us.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct CallRing {
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub call_id: String,
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub caller_id: String,
     pub caller_name: Option<String>,
     pub caller_username: Option<String>,
     pub caller_display_name: Option<String>,
     pub caller_avatar: Option<String>,
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub channel_id: String,
 }
 
 /// `CALL_RINGING`: our call rings on their side.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct CallRinging {
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub call_id: String,
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub callee_id: String,
     pub callee_name: Option<String>,
     pub callee_username: Option<String>,
     pub callee_display_name: Option<String>,
     pub callee_avatar: Option<String>,
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub channel_id: String,
 }
 
 /// `CALL_RING_STOP`: the ring is over (`accepted`, `timeout`, `declined`,
 /// `cancelled`, `busy`, `unavailable`, `invalid`, `expired`, `abandoned`,
 /// ...). `call_id` is null for a call that never rang.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct CallRingStop {
     pub call_id: Option<String>,
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub reason: String,
     /// The sentence for a ring the callee's "who can DM you" setting
     /// refused (`not_accepting`: "Alex isn't accepting calls from you.").
@@ -664,10 +768,13 @@ pub struct CallRingStop {
 }
 
 /// VoiceMove (op 42, room socket): a moderator moved this session.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct VoiceMove {
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub channel_id: String,
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub server_id: String,
     pub channel_name: Option<String>,
     pub mover_name: Option<String>,
@@ -678,6 +785,7 @@ pub struct VoiceMove {
 }
 
 /// `POST /api/voice/move` (voice-move-client.ts).
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts"))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct VoiceMoveRequest {
     pub server_id: String,
@@ -688,6 +796,7 @@ pub struct VoiceMoveRequest {
 
 /// TrackUnavailable (op 109, voice socket): our pulls of this track keep
 /// failing with `not_found_track_error`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts"))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TrackUnavailable {
     pub participant_id: String,
@@ -697,9 +806,11 @@ pub struct TrackUnavailable {
 }
 
 /// RepublishRequest (op 110, voice socket): push this publication again.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "payload.ts", optional_fields = nullable))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct RepublishRequest {
+    #[cfg_attr(feature = "ts", ts(as = "Option<String>", optional))]
     pub track_name: String,
     pub sfu_track_name: Option<String>,
     pub session_id: Option<String>,
