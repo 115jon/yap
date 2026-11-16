@@ -143,6 +143,8 @@ SettingsFrame {
 
     // The link the actions sheet and the revoke confirm act on.
     property var picked: null
+    // The link this page last asked to revoke: only its failure shows.
+    property string revokedHere: ""
     function openActions(share) {
         root.picked = share
         actions.title = share.author
@@ -190,6 +192,8 @@ SettingsFrame {
                     }
                 }
                 SheetRow {
+                    // One revoke at a time (the core drops a second).
+                    visible: root.shares.revoking.length === 0
                     iconName: "trash"
                     danger: true
                     text: qsTr("Revoke link")
@@ -209,7 +213,10 @@ SettingsFrame {
             confirmText: qsTr("Revoke link")
             danger: true
             onConfirmed: {
+                if (root.shares.revoking.length > 0)
+                    return
                 Native.haptic(Native.Confirm)
+                root.revokedHere = root.picked.id
                 root.shares.revoke(root.picked.id)
             }
         }
@@ -222,7 +229,7 @@ SettingsFrame {
         required property var modelData
         required property int index
         readonly property bool busy: root.shares.busy(modelData.id)
-        readonly property string error: root.shares.errorFor(modelData.id)
+        readonly property string error: root.revokedHere === modelData.id ? root.shares.errorFor(modelData.id) : ""
 
         width: parent ? parent.width : 0
         height: info.implicitHeight + 24

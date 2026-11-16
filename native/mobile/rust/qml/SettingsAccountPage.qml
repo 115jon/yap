@@ -21,7 +21,12 @@ SettingsFrame {
     title: qsTr("Account")
 
     readonly property AccountCore account: AccountCore {
-        onUsernameDone: usernameSheet.close()
+        onUsernameDone: {
+            usernameSheet.close()
+            // Closed while the save was out: it landed, so the editor ends.
+            if (root.account.usernameEditing)
+                root.account.endUsername()
+        }
     }
     Component.onCompleted: account.load()
 
@@ -110,16 +115,17 @@ SettingsFrame {
 
         function begin() {
             root.account.beginUsername()
-            nameField.text = Settings.username
+            usernameField.text = Settings.username
             open()
-            nameField.forceActiveFocus()
-            nameField.cursorPosition = nameField.length
+            usernameField.forceActiveFocus()
+            usernameField.cursorPosition = usernameField.length
         }
         function save() {
             Qt.inputMethod.commit()
-            root.account.saveUsername(nameField.text)
+            root.account.saveUsername(usernameField.text)
         }
-        onClosed: if (root.account.usernameEditing) root.account.endUsername()
+        // A save on its way keeps the editor until it lands (usernameDone).
+        onClosed: if (root.account.usernameEditing && !root.account.usernameSaving) root.account.endUsername()
 
         Column {
             id: nameColumn
@@ -136,7 +142,7 @@ SettingsFrame {
                 font: Theme.type.description
             }
             MobileField {
-                id: nameField
+                id: usernameField
                 width: parent.width
                 leftPadding: 30
                 maximumLength: 32
