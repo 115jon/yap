@@ -30,7 +30,7 @@ tokio = { workspace = true, features = ["net"] }
 url = "2.5.8"
 # A path dependency, not the workspace one: that keeps its default
 # (native-tls, desktop) features, and the phone builds this on rustls.
-yap-core = { path = "../yap-core", default-features = false, optional = true }
+yap-core = { path = "../yap-core", default-features = false, features = ["runtime"], optional = true }
 yap-protocol.workspace = true
 yap-speaker.workspace = true
 

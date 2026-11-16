@@ -8,7 +8,7 @@
 # must match a tool (ts-rs, wasm-bindgen) are pinned exactly instead.
 [workspace]
 resolver = "2"
-members = ["protocol-ts"]
+members = ["protocol-ts", "yap-core-wasm"]
 
 [workspace.package]
 edition = "2021"
