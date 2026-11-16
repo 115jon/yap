@@ -203,6 +203,8 @@ public:
   // gallery's Pictures/Yap. The outcome arrives as imageSaved.
   Q_INVOKABLE QString saveTarget(const QString& name) const;
   Q_INVOKABLE void saveToGallery(const QString& path, const QString& mime) const;
+  // Any file the same way, into Downloads/Yap; the outcome is imageSaved too.
+  Q_INVOKABLE void saveToDownloads(const QString& path, const QString& mime) const;
   // Turns notifications on: the permission dialog while it can still show,
   // else the app's notification settings.
   Q_INVOKABLE void requestNotifications();
@@ -328,7 +330,7 @@ signals:
   void mediaPicked(const QStringList& paths, int failed);
   // Files from a paste or the keyboard, copied in; `failed` could not be read.
   void contentReceived(const QStringList& paths, int failed);
-  // saveToGallery's outcome for `path`: 0 saved, 1 failed, 2 the storage
+  // saveToGallery's (or saveToDownloads') outcome for `path`: 0 saved, 1 failed, 2 the storage
   // permission was asked for (API 28; the save can be tried again), 3 it
   // is refused for good, so the app's settings page was opened.
   void imageSaved(const QString& path, int result);

@@ -523,6 +523,18 @@ void Native::saveToGallery(const QString& path, const QString& mime) const
 #endif
 }
 
+void Native::saveToDownloads(const QString& path, const QString& mime) const
+{
+#ifdef Q_OS_ANDROID
+  QJniObject::callStaticMethod<void>(kShim, "saveToDownloads", "(Ljava/lang/String;Ljava/lang/String;)V",
+                                     QJniObject::fromString(path).object<jstring>(),
+                                     QJniObject::fromString(mime).object<jstring>());
+#else
+  Q_UNUSED(path);
+  Q_UNUSED(mime);
+#endif
+}
+
 void Native::onImageSaved(const QString& path, int result)
 {
   emit imageSaved(path, result);
