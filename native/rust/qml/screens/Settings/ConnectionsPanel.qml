@@ -103,7 +103,7 @@ Column {
                 }
             }
             SwitchSetting {
-                visible: provider.modelData.linked
+                visible: provider.modelData.linked && SettingsNav.matches(rowId)
                 rowId: provider.modelData.provider + "-show-on-profile"
                 checked: provider.modelData.showOnProfile
                 disabled: root.model.busyWith("show", provider.modelData.provider)
