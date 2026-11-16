@@ -92,6 +92,7 @@ const QML: &[&str] = &[
     "qml/AdminMembersPage.qml",
     "qml/AdminMemberPage.qml",
     "qml/AdminInvitesPage.qml",
+    "qml/AdminAuditPage.qml",
     "qml/AdminBansPage.qml",
     "qml/EmojiGlyph.qml",
     "qml/MessageActions.qml",

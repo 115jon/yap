@@ -28,7 +28,7 @@ pub mod qobject {
         /// The web app's origin (channel links).
         #[qproperty(QString, web_origin, cxx_name = "webOrigin")]
         /// The open settings as JSON: `{server, roles, invites, bans, audit,
-        /// channel, overrides, members, textChannels, categories, acts,
+        /// auditPaging, channel, overrides, members, textChannels, categories, acts,
         /// createdInvite, createdInviteLink, createdRole}`; each list is
         /// `{state, error, items}`.
         #[qproperty(QString, state)]
@@ -61,7 +61,8 @@ pub mod qobject {
         #[cxx_name = "closeServer"]
         fn close_server(self: &Admin);
 
-        /// `roles`, `invites`, `bans` or `audit` for a server.
+        /// `roles`, `invites`, `bans` or `audit` for a server; `audit-more`
+        /// the audit log's next older page.
         #[qinvokable]
         fn load(self: &Admin, server_id: &QString, list: &QString);
 
@@ -380,6 +381,7 @@ impl qobject::Admin {
             "invites" => AdminList::Invites,
             "bans" => AdminList::Bans,
             "audit" => AdminList::Audit,
+            "audit-more" => AdminList::AuditMore,
             _ => return,
         };
         send(AdminCommand::Load {

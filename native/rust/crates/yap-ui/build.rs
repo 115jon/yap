@@ -17,6 +17,7 @@ fn main() {
         QmlFile::from("qml/ShellState.qml").singleton(true),
         QmlFile::from("qml/ComposerDrafts.qml").singleton(true),
         QmlFile::from("qml/components/AccountMenuRow.qml"),
+        QmlFile::from("qml/components/AuditCore.qml"),
         QmlFile::from("qml/components/Avatar.qml"),
         QmlFile::from("qml/components/AvatarCropState.qml"),
         QmlFile::from("qml/components/CallHealth.qml"),
