@@ -44,7 +44,7 @@ QtObject {
         saves.finished(key, ok, text)
     }
 
-    property Connections chat: Connections {
+    property Connections core: Connections {
         target: Chat
         function onSaved(path, open) {
             if (path in saves.byPath)
@@ -56,7 +56,7 @@ QtObject {
                 saves.end(path, false, text)
         }
     }
-    property Connections native: Connections {
+    property Connections platform: Connections {
         target: Native
         function onImageSaved(path, result) {
             if (!(path in saves.byPath))
