@@ -52,6 +52,7 @@ fn main() {
         QmlFile::from("qml/components/InboxModel.qml"),
         QmlFile::from("qml/components/InviteLandingState.qml"),
         QmlFile::from("qml/components/InviteMaker.qml"),
+        QmlFile::from("qml/components/JoinLeaveCore.qml"),
         QmlFile::from("qml/components/KitButton.qml"),
         QmlFile::from("qml/components/LazyPopup.qml"),
         QmlFile::from("qml/components/Led.qml"),
