@@ -139,8 +139,6 @@ Rectangle {
         contentHeight: body.height
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        flickDeceleration: Native.flingDeceleration
-        maximumFlickVelocity: Native.maxFlingVelocity
         // The sign-out question opens under the page's last key: the page
         // follows it down once, or its two keys sat under the gesture bar.
         property bool revealEnd: false

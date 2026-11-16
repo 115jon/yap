@@ -46,8 +46,6 @@ AdminPage {
                 contentHeight: addColumn.implicitHeight
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                flickDeceleration: Native.flingDeceleration
-                maximumFlickVelocity: Native.maxFlingVelocity
                 Column {
                     id: addColumn
                     x: 16

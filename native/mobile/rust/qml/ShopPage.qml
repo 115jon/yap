@@ -319,8 +319,6 @@ Rectangle {
                     spacing: 8
                     clip: false
                     boundsBehavior: Flickable.StopAtBounds
-                    maximumFlickVelocity: Native.maxFlingVelocity
-                    flickDeceleration: Native.flingDeceleration
                     snapMode: ListView.SnapToItem
                     model: slot.modelData.cards
                     delegate: ShopCard {
@@ -340,8 +338,6 @@ Rectangle {
                     spacing: 8
                     clip: false
                     boundsBehavior: Flickable.StopAtBounds
-                    maximumFlickVelocity: Native.maxFlingVelocity
-                    flickDeceleration: Native.flingDeceleration
                     snapMode: ListView.SnapToItem
                     model: slot.modelData.cards
                     delegate: CollectionCard {

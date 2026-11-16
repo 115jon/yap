@@ -20,7 +20,9 @@ import Yap.Ui
 //   Taller content rests at 60 % and a pull up takes it to full height
 //   (under the status bar); `startFull` opens it there.
 // - A drag down closes it (a fling does from anywhere), a tap on the scrim
-//   closes it, and so does Back. The predictive back gesture moves it
+//   closes it (a drag that sets off there does nothing), and so does Back.
+//   The grip's touch reaches above the ply's edge, where a finger aiming
+//   at the handle often lands. The predictive back gesture moves it
 //   before it commits (Native's back layers).
 // - `flickable`: a list or Flickable inside that scrolls the content. It
 //   scrolls only at the sheet's top detent, and a pull down from its top
@@ -145,6 +147,8 @@ FocusScope {
     readonly property real shown: Math.max(0, extent - pull)
 
     readonly property bool dragging: drag.active || gripDrag.active
+    // How far above the ply's edge the grip takes a touch.
+    readonly property real gripAbove: 14
     // A drag's speed, from its last steps: `at` grows as the sheet goes
     // down. A finger that stopped before lifting did not fling.
     property real trackAt: 0
@@ -245,11 +249,17 @@ FocusScope {
         color: Theme.scrim
         opacity: Math.min(1, sheet.shown / Math.max(1, sheet.rest)) * (1 - sheet.back * 0.4)
     }
-    // Nothing under the sheet takes a touch; a tap off it closes it.
+    // Nothing under the sheet takes a touch; a tap off it closes it. A
+    // drag that set off there is not a tap: it ends with the sheet up.
     MouseArea {
         anchors.fill: parent
         preventStealing: true
-        onClicked: sheet.close()
+        property point from
+        onPressed: mouse => from = Qt.point(mouse.x, mouse.y)
+        onClicked: mouse => {
+            if (Math.hypot(mouse.x - from.x, mouse.y - from.y) <= Qt.styleHints.startDragDistance)
+                sheet.close()
+        }
     }
 
     // ---------- The ply ----------
@@ -283,9 +293,14 @@ FocusScope {
             onActiveChanged: active ? sheet.dragBegan(centroid.scenePosition.y - centroid.scenePressPosition.y) : sheet.dragEnded()
             onActiveTranslationChanged: if (active) sheet.dragMoved(activeTranslation.y)
         }
+        // The grip: the handle and the title, and a strip above the ply's
+        // edge (Material's 48 dp handle target, centred on the handle).
         Item {
+            y: -sheet.gripAbove
             width: parent.width
-            height: sheet.chrome
+            height: sheet.chrome + sheet.gripAbove
+            // Its touches are the sheet's, not the scrim's.
+            MouseArea { anchors.fill: parent }
             DragHandler {
                 id: gripDrag
                 target: null
