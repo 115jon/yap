@@ -896,6 +896,34 @@ Window {
         anchors.bottomMargin: Native.clippedBottom
     }
 
+    // Someone in a voice channel, from a long press on their row in the
+    // drawer (MemberRow): Profile, and for a moderator "Move to".
+    VoicePeerSheet {
+        id: voicePeerSheet
+        anchors.fill: parent
+        anchors.bottomMargin: Native.clippedBottom
+        onProfileRequested: userId => window.openProfile(userId)
+    }
+
+    // A voice channel's status and vibe, from its status line in the
+    // drawer, the call page or the channel's menu.
+    VoiceStatusSheet {
+        id: voiceStatusSheet
+        anchors.fill: parent
+        anchors.bottomMargin: Native.clippedBottom
+    }
+
+    Connections {
+        target: ShellState
+        function onPeerMenuRequested(userId, name, anchor, at, channelId) {
+            Native.haptic(Native.LongPress)
+            voicePeerSheet.show(userId, name, channelId)
+        }
+        function onVoiceStatusRequested(channelId, name, media, text) {
+            voiceStatusSheet.openFor(channelId, name, media, text)
+        }
+    }
+
     // The microphone was refused: say what it is for, and where to allow it
     // (after a second refusal Android no longer shows its dialog).
     ConfirmSheet {
