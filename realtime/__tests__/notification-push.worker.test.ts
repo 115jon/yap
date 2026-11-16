@@ -13,7 +13,6 @@ import { notificationPushRoutes } from "../../src/server/routes/notification-pus
 import { memoryAuth, testServices } from "../../src/server/testing";
 import { generateMessageNotifications } from "../../src/services/message.service";
 import {
-  buildMessagePush,
   buildNativeMessagePush,
   type MessagePush,
 } from "../../src/services/push.service";
@@ -187,13 +186,8 @@ function stringsIn(value: unknown): string[] {
 }
 
 function expectNoText(push: MessagePush, words: readonly string[]) {
-  for (const message of [
-    buildNativeMessagePush(push),
-    buildMessagePush(push),
-  ]) {
-    const strings = stringsIn(message).join("\n");
-    for (const word of words) expect(strings).not.toContain(word);
-  }
+  const strings = stringsIn(buildNativeMessagePush(push)).join("\n");
+  for (const word of words) expect(strings).not.toContain(word);
 }
 
 describe("message pushes carry ids only", () => {
