@@ -109,6 +109,9 @@ const issueTicket = Effect.fn("voice.socket_ticket")(function* (
         ...(admission.serverId ? { serverId: admission.serverId } : {}),
         ...(admission.channelId ? { channelId: admission.channelId } : {}),
         subject: admission.subject,
+        ...(admission.authSession
+          ? { authSession: admission.authSession }
+          : {}),
       },
       config.ticketSecret,
     ),
