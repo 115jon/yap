@@ -857,6 +857,8 @@ export function createChatActions(
           media_content_filter: string;
           /** "Who can DM you"; absent from servers that predate it. */
           dm_permission?: string;
+          /** "Share my activity"; absent from servers that predate it. */
+          share_activity?: boolean;
           updated_at?: string | null;
           created_at?: string | null;
           bio?: string | null;
@@ -908,6 +910,7 @@ export function createChatActions(
             profile.media_content_filter,
           ),
           dm_permission: dmPermissionOf(profile.dm_permission),
+          share_activity: profile.share_activity ?? current?.share_activity,
           updated_at: profile.updated_at ?? current?.updated_at,
           created_at: profile.created_at ?? current?.created_at,
           // users/me sends null for a cleared field: clear it, don't keep
