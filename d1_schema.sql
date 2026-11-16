@@ -529,6 +529,17 @@ CREATE TABLE IF NOT EXISTS connection_link_states (
     created_at TEXT NOT NULL
 );
 
+-- A native app's verified link, waiting for that app to claim it
+-- (migration 050).
+CREATE TABLE IF NOT EXISTS connection_link_results (
+    code_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    account TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 -- Read states per user
 CREATE INDEX IF NOT EXISTS idx_read_states_user_id ON read_states(user_id);
 
@@ -553,6 +564,7 @@ CREATE INDEX IF NOT EXISTS idx_user_entitlements_stripe_customer
 CREATE INDEX IF NOT EXISTS idx_user_badges_badge ON user_badges(badge_id);
 CREATE INDEX IF NOT EXISTS idx_user_stats_voice ON user_stats(voice_seconds);
 CREATE INDEX IF NOT EXISTS idx_connection_link_states_expires ON connection_link_states(expires_at);
+CREATE INDEX IF NOT EXISTS idx_connection_link_results_expires ON connection_link_results(expires_at);
 
 -- ── Audit Log ────────────────────────────────────────────────────────────
 

@@ -44,6 +44,12 @@ const StartRoute = (
 const CallbackRoute = (
   await loadRoute("../../src/routes/api/connections/$provider/callback")
 ).Route;
+const BeginRoute = (
+  await loadRoute("../../src/routes/api/connections/$provider/begin")
+).Route;
+const CompleteRoute = (
+  await loadRoute("../../src/routes/api/connections/$provider/complete")
+).Route;
 const ProfileRoute = (await loadRoute("../../src/routes/api/users/$id/profile"))
   .Route;
 
@@ -736,6 +742,302 @@ describe("GET /api/connections/steam/callback", () => {
       binding: started.binding,
     });
     expect(other).toEqual({ ok: false, reason: "invalid" });
+  });
+});
+
+/** POST start as a native app: the begin URL, and no cookie. */
+async function startApp(token: string, app: string) {
+  const response = await handler(
+    StartRoute,
+    "POST",
+  )({
+    request: req("POST", "/api/connections/steam/start", token, { app }),
+    params: { provider: "steam" },
+  });
+  expect(response.status).toBe(200);
+  expect(response.headers.get("set-cookie")).toBeNull();
+  const { url } = (await response.json()) as { url: string };
+  return new URL(url);
+}
+
+/** GET begin in the system browser: where it sends it, and its cookies. */
+async function begin(url: URL, ip = randomIp()) {
+  const response = await handler(
+    BeginRoute,
+    "GET",
+  )({
+    request: new Request(url, { headers: { "cf-connecting-ip": ip } }),
+    params: { provider: "steam" },
+  });
+  const cookies = response.headers.getSetCookie();
+  return {
+    response,
+    location: response.headers.get("location") ?? "",
+    cookies,
+    cookie: /^__Host-yap_link_steam=([^;]+)/.exec(cookies[0] ?? "")?.[1] ?? "",
+    returnTo: () =>
+      new URL(response.headers.get("location")!).searchParams.get(
+        "openid.return_to",
+      )!,
+  };
+}
+
+/** The callback as the browser that began a native link sends it. */
+async function appCallback(url: URL, cookie: string | null) {
+  const response = await handler(
+    CallbackRoute,
+    "GET",
+  )({
+    request: new Request(url, {
+      headers: {
+        ...(cookie ? { cookie: `__Host-yap_link_steam=${cookie}` } : {}),
+        "cf-connecting-ip": randomIp(),
+      },
+    }),
+    params: { provider: "steam" },
+  });
+  expect(response.status).toBe(303);
+  return {
+    location: response.headers.get("location") ?? "",
+    cookies: response.headers.getSetCookie(),
+  };
+}
+
+/** POST complete as `token`. */
+async function complete(token: string, code: string) {
+  return handler(
+    CompleteRoute,
+    "POST",
+  )({
+    request: req("POST", "/api/connections/steam/complete", token, { code }),
+    params: { provider: "steam" },
+  });
+}
+
+/** A native link begun, signed in at Steam as `id64`: the app link. */
+async function appLink(token: string, app: string, id64: string) {
+  steam.profiles.set(
+    id64,
+    profileXml(
+      id64,
+      "Native Player",
+      "https://avatars.steamstatic.com/a_full.jpg",
+    ),
+  );
+  const begun = await begin(await startApp(token, app));
+  return appCallback(assertion(begun.returnTo(), id64), begun.cookie);
+}
+
+function codeOf(location: string): string {
+  return new URL(location).searchParams.get("code") ?? "";
+}
+
+describe("a link a native app starts", () => {
+  it("answers a one-time begin URL on the Yap host, without a cookie", async () => {
+    const me = await newUser();
+    const url = await startApp(me.token, "windows");
+    expect(`${url.origin}${url.pathname}`).toBe(
+      "https://yap.115jon.com/api/connections/steam/begin",
+    );
+    expect(url.searchParams.get("state")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(url.searchParams.get("binding")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(url.searchParams.get("app")).toBe("windows");
+  });
+
+  it("refuses an unknown app and a malformed body", async () => {
+    const me = await newUser();
+    const bad = await handler(
+      StartRoute,
+      "POST",
+    )({
+      request: req("POST", "/api/connections/steam/start", me.token, {
+        app: "ios",
+      }),
+      params: { provider: "steam" },
+    });
+    expect(bad.status).toBe(400);
+    const malformed = await handler(
+      StartRoute,
+      "POST",
+    )({
+      request: new Request(`${BASE}/api/connections/steam/start`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${me.token}`,
+          "content-type": "application/json",
+        },
+        body: "{",
+      }),
+      params: { provider: "steam" },
+    });
+    expect(malformed.status).toBe(400);
+  });
+
+  it("begins in the browser: a fresh binding cookie, then Steam", async () => {
+    const me = await newUser();
+    const url = await startApp(me.token, "android");
+    const begun = await begin(url);
+    expect(begun.response.status).toBe(303);
+    const steamUrl = new URL(begun.location);
+    expect(`${steamUrl.origin}${steamUrl.pathname}`).toBe(
+      STEAM_OPENID_ENDPOINT,
+    );
+    expect(begun.returnTo()).toBe(
+      `https://yap.115jon.com/api/connections/steam/callback?app=android&state=${url.searchParams.get("state")}`,
+    );
+    expect(begun.cookies).toHaveLength(1);
+    const [cookie] = begun.cookies;
+    expect(cookie).toMatch(/^__Host-yap_link_steam=[A-Za-z0-9_-]{43};/);
+    expect(cookie).toMatch(/HttpOnly/);
+    expect(cookie).toMatch(/Secure/);
+    expect(cookie).toMatch(/SameSite=Lax/);
+    expect(cookie).toMatch(/Path=\/;/);
+    expect(cookie).not.toMatch(/Domain=/i);
+    expect(begun.cookie).not.toBe(url.searchParams.get("binding"));
+  });
+
+  it("works once, and a failed begin leaves the browser's cookies alone", async () => {
+    const me = await newUser();
+    const url = await startApp(me.token, "windows");
+    await begin(url);
+    const again = await begin(url);
+    expect(again.response.status).toBe(303);
+    expect(again.location).toBe(
+      "yap-native://connection?provider=steam&status=expired",
+    );
+    expect(again.cookies).toEqual([]);
+  });
+
+  it("refuses a forged binding, a malformed state, another provider and no app", async () => {
+    const me = await newUser();
+    const url = await startApp(me.token, "android");
+    const forged = new URL(url);
+    forged.searchParams.set("binding", "A".repeat(43));
+    expect((await begin(forged)).location).toBe(
+      "yap://connection?provider=steam&status=expired",
+    );
+    const malformed = new URL(url);
+    malformed.searchParams.set("state", "nope");
+    expect((await begin(malformed)).location).toBe(
+      "yap://connection?provider=steam&status=invalid",
+    );
+    const unknown = await handler(
+      BeginRoute,
+      "GET",
+    )({
+      request: new Request(url.href.replace("/steam/", "/myspace/")),
+      params: { provider: "myspace" },
+    });
+    expect(unknown.status).toBe(404);
+    const noApp = new URL(url);
+    noApp.searchParams.delete("app");
+    expect((await begin(noApp)).response.status).toBe(400);
+    // The real one still works.
+    expect((await begin(url)).location).toContain("steamcommunity.com");
+  });
+
+  it("refuses an expired state", async () => {
+    const me = await newUser();
+    const url = await startApp(me.token, "windows");
+    await run(
+      `UPDATE connection_link_states SET expires_at = ? WHERE user_id = ?`,
+      Date.now() - 1,
+      me.id,
+    );
+    expect((await begin(url)).location).toBe(
+      "yap-native://connection?provider=steam&status=expired",
+    );
+  });
+
+  it("links nothing at the callback: the app claims a one-time code", async () => {
+    const me = await newUser();
+    const done = await appLink(me.token, "windows", steamId64());
+    expect(done.location).toMatch(
+      /^yap-native:\/\/connection\?provider=steam&code=[A-Za-z0-9_-]{43}$/,
+    );
+    expect(done.cookies.join("\n")).toMatch(/__Host-yap_link_steam=;/);
+    expect(await rows(me.id)).toHaveLength(0);
+
+    const claimed = await complete(me.token, codeOf(done.location));
+    expect(claimed.status).toBe(200);
+    expect(await claimed.json()).toEqual({
+      provider: "steam",
+      status: "linked",
+    });
+    expect(await rows(me.id)).toHaveLength(1);
+
+    const again = await complete(me.token, codeOf(done.location));
+    expect(again.status).toBe(410);
+  });
+
+  it("refuses a claim by another account, and burns the code", async () => {
+    // The attacker's own begin URL, opened and signed in by the victim.
+    const attacker = await newUser("attacker");
+    const victim = await newUser("victim");
+    const done = await appLink(attacker.token, "android", steamId64());
+    const code = codeOf(done.location);
+    const stolen = await complete(victim.token, code);
+    expect(stolen.status).toBe(403);
+    expect(((await stolen.json()) as { code: string }).code).toBe(
+      "OTHER_ACCOUNT",
+    );
+    expect(await rows(attacker.id)).toHaveLength(0);
+    expect(await rows(victim.id)).toHaveLength(0);
+    expect((await complete(attacker.token, code)).status).toBe(410);
+  });
+
+  it("answers taken when the account is someone else's", async () => {
+    const first = await newUser();
+    const second = await newUser();
+    const id64 = steamId64();
+    const a = await appLink(first.token, "windows", id64);
+    await complete(first.token, codeOf(a.location));
+    const b = await appLink(second.token, "windows", id64);
+    const response = await complete(second.token, codeOf(b.location));
+    expect(await response.json()).toEqual({
+      provider: "steam",
+      status: "taken",
+    });
+  });
+
+  it("needs a session and a code to claim", async () => {
+    const response = await handler(
+      CompleteRoute,
+      "POST",
+    )({
+      request: req("POST", "/api/connections/steam/complete", null, {
+        code: "x",
+      }),
+      params: { provider: "steam" },
+    });
+    expect(response.status).toBe(401);
+    const me = await newUser();
+    expect((await complete(me.token, "short")).status).toBe(410);
+  });
+
+  it("refuses the callback with the begin URL's own binding", async () => {
+    const me = await newUser();
+    const url = await startApp(me.token, "android");
+    const begun = await begin(url);
+    const done = await appCallback(
+      assertion(begun.returnTo(), steamId64()),
+      url.searchParams.get("binding")!,
+    );
+    expect(done.location).toBe(
+      "yap://connection?provider=steam&status=expired",
+    );
+    expect(await rows(me.id)).toHaveLength(0);
+  });
+
+  it("limits begins per IP", async () => {
+    const me = await newUser();
+    const url = await startApp(me.token, "windows");
+    const ip = randomIp();
+    let last = "";
+    for (let i = 0; i < 21; i += 1) last = (await begin(url, ip)).location;
+    expect(last).toBe(
+      "yap-native://connection?provider=steam&status=rate_limited",
+    );
   });
 });
 

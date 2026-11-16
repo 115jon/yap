@@ -112,6 +112,46 @@ export function isConnectionResultStatus(
   );
 }
 
+/**
+ * The native apps that can start a link: the Windows app (native/) and the
+ * Android app (native/mobile). Their session is not a browser cookie, so
+ * the link runs in the system browser (Custom Tabs on Android) and the
+ * callback hands the outcome back by the app's own link.
+ */
+export const CONNECTION_APPS = ["windows", "android"] as const;
+
+export type ConnectionApp = (typeof CONNECTION_APPS)[number];
+
+export function isConnectionApp(value: unknown): value is ConnectionApp {
+  return (
+    typeof value === "string" &&
+    (CONNECTION_APPS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * The app link a native link ends with: `yap-native://connection?…` for
+ * the Windows app (the web never makes `yap://` links there, which the
+ * Tauri app may still own), `yap://connection?…` for the Android app.
+ * A verified account comes back as a one-time `code`, which links nothing
+ * until the app that started the link claims it with its own session
+ * (POST /api/connections/:provider/complete); anything else as `status`.
+ * Never an account or a token.
+ */
+export function connectionAppLink(
+  app: ConnectionApp,
+  provider: ConnectionProvider,
+  outcome: { status: ConnectionResultStatus } | { code: string },
+): string {
+  const scheme = app === "windows" ? "yap-native" : "yap";
+  const query = new URLSearchParams(
+    "code" in outcome
+      ? { provider, code: outcome.code }
+      : { provider, status: outcome.status },
+  );
+  return `${scheme}://connection?${query.toString()}`;
+}
+
 /** The query keys the callback's redirect carries. */
 export const CONNECTION_RESULT_PARAM = "connection";
 export const CONNECTION_STATUS_PARAM = "connection_status";
