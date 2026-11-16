@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 
 use cxx_qt_lib::{QDateTime, QTimeZone};
 use tokio::sync::mpsc::UnboundedSender;
+use yap_core::store::site::SiteCommand;
 use yap_core::LocalOffset;
 
 pub use yap_core::{Command, Sink};
@@ -48,9 +49,19 @@ pub fn start(sink: Sink) -> bool {
         LOCAL,
     );
     let _ = tx.send(Command::Start);
+    if let Some(id) = dismissed_announcement() {
+        let _ = tx.send(Command::Site(SiteCommand::Dismissed(id)));
+    }
     let started = COMMANDS.set(tx.clone()).is_ok();
     platform.started(&tx);
     started
+}
+
+/// The site announcement dismissed on this device in an earlier run.
+fn dismissed_announcement() -> Option<String> {
+    let dir = yap_cache::settings::app_dir()?;
+    let file = yap_cache::settings::load_app_file(&dir, yap_core::site_config::DISMISSED_FILE)?;
+    yap_core::site_config::parse_dismissed(&file)
 }
 
 /// The core's way out, once per process (later calls return at once): a

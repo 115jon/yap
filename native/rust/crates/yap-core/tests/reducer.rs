@@ -2392,6 +2392,7 @@ fn cached_boot_should_revalidate_everything_in_one_batch() {
             ApiRequest::Dms,
             ApiRequest::Friends(yap_core::store::FriendsRequest::List),
             ApiRequest::Notify(yap_core::store::notify::NotifyRequest::List),
+            ApiRequest::SiteConfig,
         ]
     );
 }

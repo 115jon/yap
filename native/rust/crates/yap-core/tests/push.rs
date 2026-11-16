@@ -4,11 +4,11 @@
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
-use yap_core::ApiError;
 use yap_core::store::{
-    reduce, ApiRequest, ApiResponse, Command, Effect, GatewayEvent, HttpReason, Input, RequestId, State,
-    ViewUpdate, SUSPEND_GRACE,
+    reduce, ApiRequest, ApiResponse, Command, Effect, GatewayEvent, HttpReason, Input, RequestId,
+    State, ViewUpdate, SUSPEND_GRACE,
 };
+use yap_core::ApiError;
 
 const BASE: &str = "https://api.fixture.invalid";
 const FCM: &str = "fcm_token_fixture";
@@ -44,7 +44,8 @@ fn push_requests(fx: &[Effect]) -> Vec<(ApiRequest, HttpReason)> {
     fx.iter()
         .filter_map(|e| match e {
             Effect::Http {
-                request: request @ (ApiRequest::RegisterPush { .. } | ApiRequest::UnregisterPush { .. }),
+                request:
+                    request @ (ApiRequest::RegisterPush { .. } | ApiRequest::UnregisterPush { .. }),
                 reason,
                 ..
             } => Some((request.clone(), *reason)),
@@ -122,16 +123,25 @@ fn a_token_given_while_booting_should_register_once_me_answers() {
     let fx = client.command(register(FCM));
     assert!(push_requests(&fx).is_empty(), "not before me: {fx:#?}");
     let fx = client.me(me);
-    assert_eq!(push_requests(&fx), vec![(registered(FCM), HttpReason::Other)]);
+    assert_eq!(
+        push_requests(&fx),
+        vec![(registered(FCM), HttpReason::Other)]
+    );
 }
 
 #[test]
 fn a_token_given_when_signed_in_should_register_at_once_and_only_once() {
     let mut client = Client::signed_in();
     let fx = client.command(register(FCM));
-    assert_eq!(push_requests(&fx), vec![(registered(FCM), HttpReason::Other)]);
+    assert_eq!(
+        push_requests(&fx),
+        vec![(registered(FCM), HttpReason::Other)]
+    );
     let fx = client.command(register(FCM));
-    assert!(push_requests(&fx).is_empty(), "the same token again: {fx:#?}");
+    assert!(
+        push_requests(&fx).is_empty(),
+        "the same token again: {fx:#?}"
+    );
 }
 
 #[test]
@@ -184,7 +194,15 @@ fn sign_out_should_unregister_before_it_revokes_and_register_the_next_account() 
     );
     let unregister = fx
         .iter()
-        .position(|e| matches!(e, Effect::Http { request: ApiRequest::UnregisterPush { .. }, .. }))
+        .position(|e| {
+            matches!(
+                e,
+                Effect::Http {
+                    request: ApiRequest::UnregisterPush { .. },
+                    ..
+                }
+            )
+        })
         .expect("an unregister");
     let revoke = fx
         .iter()
@@ -201,7 +219,10 @@ fn sign_out_should_unregister_before_it_revokes_and_register_the_next_account() 
     let fx = client.command(Command::UseToken("tok_next".into()));
     let me = request_for(&fx, &ApiRequest::Me);
     let fx = client.me(me);
-    assert_eq!(push_requests(&fx), vec![(registered(FCM), HttpReason::Other)]);
+    assert_eq!(
+        push_requests(&fx),
+        vec![(registered(FCM), HttpReason::Other)]
+    );
 }
 
 #[test]
@@ -243,7 +264,11 @@ fn the_background_should_close_the_gateway_after_the_grace_and_the_front_reconne
     assert_eq!(delay, SUSPEND_GRACE);
 
     let fx = client.input(grace);
-    assert_eq!(count(&fx, |e| matches!(e, Effect::GatewayDisconnect)), 1, "{fx:#?}");
+    assert_eq!(
+        count(&fx, |e| matches!(e, Effect::GatewayDisconnect)),
+        1,
+        "{fx:#?}"
+    );
     assert!(fx.contains(&Effect::View(ViewUpdate::Connected(false))));
 
     let before = client.state.session().expect("session").id;
@@ -268,9 +293,16 @@ fn back_in_front_within_the_grace_should_keep_the_gateway() {
     client.gateway(GatewayEvent::Ready);
     let (_, grace) = later(&client.command(Command::Suspend(true))).expect("a grace timer");
     let fx = client.command(Command::Suspend(false));
-    assert_eq!(count(&fx, |e| matches!(e, Effect::GatewayConnect { .. })), 0);
+    assert_eq!(
+        count(&fx, |e| matches!(e, Effect::GatewayConnect { .. })),
+        0
+    );
     let fx = client.input(grace);
-    assert_eq!(count(&fx, |e| matches!(e, Effect::GatewayDisconnect)), 0, "{fx:#?}");
+    assert_eq!(
+        count(&fx, |e| matches!(e, Effect::GatewayDisconnect)),
+        0,
+        "{fx:#?}"
+    );
 }
 
 #[test]
@@ -295,7 +327,10 @@ fn back_in_front_with_the_link_down_should_reconnect_at_once() {
         })
         .collect();
     assert_eq!(connects.len(), 1, "{fx:#?}");
-    assert_ne!(connects[0], before, "a fresh connection, its backoff from the start");
+    assert_ne!(
+        connects[0], before,
+        "a fresh connection, its backoff from the start"
+    );
     assert!(fx.contains(&Effect::View(ViewUpdate::Link {
         attempt: 0,
         offline: true,
@@ -311,7 +346,10 @@ fn back_in_front_with_the_link_down_should_reconnect_at_once() {
     assert!(fx.is_empty(), "{fx:#?}");
     // And the grace that was running no longer closes anything.
     assert_eq!(
-        count(&client.input(grace), |e| matches!(e, Effect::GatewayDisconnect)),
+        count(&client.input(grace), |e| matches!(
+            e,
+            Effect::GatewayDisconnect
+        )),
         0
     );
     let fx = client.gateway(GatewayEvent::Ready);
@@ -323,7 +361,10 @@ fn back_in_front_while_still_connecting_the_first_time_should_not_restart() {
     let mut client = Client::signed_in();
     client.command(Command::Suspend(true));
     let fx = client.command(Command::Suspend(false));
-    assert_eq!(count(&fx, |e| matches!(e, Effect::GatewayConnect { .. })), 0);
+    assert_eq!(
+        count(&fx, |e| matches!(e, Effect::GatewayConnect { .. })),
+        0
+    );
 }
 
 #[test]
@@ -334,11 +375,17 @@ fn an_older_grace_should_not_close_the_gateway() {
     client.command(Command::Suspend(false));
     let (_, second) = later(&client.command(Command::Suspend(true))).expect("a grace timer");
     assert_eq!(
-        count(&client.input(first), |e| matches!(e, Effect::GatewayDisconnect)),
+        count(&client.input(first), |e| matches!(
+            e,
+            Effect::GatewayDisconnect
+        )),
         0
     );
     assert_eq!(
-        count(&client.input(second), |e| matches!(e, Effect::GatewayDisconnect)),
+        count(&client.input(second), |e| matches!(
+            e,
+            Effect::GatewayDisconnect
+        )),
         1
     );
 }
@@ -356,7 +403,10 @@ fn a_late_event_of_the_closed_socket_should_not_stop_the_resume() {
         event: GatewayEvent::Ready,
     });
     let fx = client.command(Command::Suspend(false));
-    assert_eq!(count(&fx, |e| matches!(e, Effect::GatewayConnect { .. })), 1);
+    assert_eq!(
+        count(&fx, |e| matches!(e, Effect::GatewayConnect { .. })),
+        1
+    );
 }
 
 #[test]
@@ -380,7 +430,10 @@ fn a_sign_out_in_the_background_should_not_reconnect_on_resume() {
     client.input(grace);
     client.command(Command::SignOut);
     let fx = client.command(Command::Suspend(false));
-    assert_eq!(count(&fx, |e| matches!(e, Effect::GatewayConnect { .. })), 0);
+    assert_eq!(
+        count(&fx, |e| matches!(e, Effect::GatewayConnect { .. })),
+        0
+    );
 }
 
 #[test]
@@ -393,7 +446,10 @@ fn a_failed_registration_should_try_again_at_the_next_ready() {
         result: Err(ApiError::Network("offline".into())),
     });
     let fx = client.gateway(GatewayEvent::Ready);
-    assert_eq!(push_requests(&fx), vec![(registered(FCM), HttpReason::Other)]);
+    assert_eq!(
+        push_requests(&fx),
+        vec![(registered(FCM), HttpReason::Other)]
+    );
     // Answered this time: no more tries.
     let id = request_for(&fx, &registered(FCM));
     client.input(Input::Http {
@@ -415,7 +471,10 @@ fn a_grace_while_booting_should_ask_again_later() {
     client.me(me);
     client.gateway(GatewayEvent::Ready);
     assert_eq!(
-        count(&client.input(again), |e| matches!(e, Effect::GatewayDisconnect)),
+        count(&client.input(again), |e| matches!(
+            e,
+            Effect::GatewayDisconnect
+        )),
         1
     );
 }
@@ -439,7 +498,11 @@ fn a_dm_opened_before_the_dm_list_is_in_should_open_when_it_answers() {
         channel_id: DM.into(),
         server_id: None,
     });
-    assert_ne!(client.state.active_channel(), Some(DM), "not before the list");
+    assert_ne!(
+        client.state.active_channel(),
+        Some(DM),
+        "not before the list"
+    );
     let result = ApiRequest::Dms.decode(dms());
     client.input(Input::Http { id: list, result });
     assert_eq!(client.state.active_channel(), Some(DM));

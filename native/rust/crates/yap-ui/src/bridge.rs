@@ -65,6 +65,10 @@ pub mod qobject {
         /// checking, date, purging, restoring, restoreError, deleting,
         /// deleteError}`.
         #[qproperty(QString, deletion)]
+        /// The site announcement banner, as JSON
+        /// (`yap_core::site_config::Announcement`): `{id, text, tone,
+        /// linkUrl, linkLabel, expiresAt}`; empty when none shows.
+        #[qproperty(QString, announcement)]
         type Session = super::SessionRust;
 
         /// Starts the core (once).
@@ -103,6 +107,12 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "restoreAccount"]
         fn restore_account(self: &Session);
+
+        /// The banner's dismiss key: this announcement stays hidden on
+        /// this device (a critical one has no key).
+        #[qinvokable]
+        #[cxx_name = "dismissAnnouncement"]
+        fn dismiss_announcement(self: &Session);
 
         /// `typed` confirms our username: any case, an optional `@`.
         #[qinvokable]
@@ -817,6 +827,7 @@ use yap_core::notification_levels::{MuteChoice, NotificationLevel, NotificationT
 use yap_core::store::deletion::DeletionCommand;
 use yap_core::store::favorites::FavoritesCommand;
 use yap_core::store::notify::NotifyCommand;
+use yap_core::store::site::SiteCommand;
 use yap_core::store::time::{format_rfc3339, local_date};
 use yap_core::{Phase, ViewUpdate};
 
@@ -863,6 +874,7 @@ pub struct SessionRust {
     me_name_style: QString,
     me_display: QString,
     deletion: QString,
+    announcement: QString,
 }
 
 impl Drop for SessionRust {
@@ -1038,6 +1050,10 @@ impl qobject::Session {
 
     pub fn restore_account(&self) {
         client::command(Command::Deletion(DeletionCommand::Restore));
+    }
+
+    pub fn dismiss_announcement(&self) {
+        client::command(Command::Site(SiteCommand::Dismiss));
     }
 
     pub fn confirms_username(&self, typed: &QString) -> bool {

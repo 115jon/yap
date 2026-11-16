@@ -1,0 +1,135 @@
+import QtQuick
+import Yap.Ui
+
+// The site announcement strip (SiteAnnouncementBar.tsx), wired to
+// Session.announcement (GET /api/site-config, kept fresh by the core): an
+// LED for the tone (unlit for info, idle amber for a warning, red when
+// critical), the tone's word in silkscreen (the LED alone on a narrow
+// window, as the web's `max-sm`), the text with its optional link
+// inline, and a dismiss key a critical one does not get. Dismissal is per
+// announcement and per device (Session.dismissAnnouncement). It hides
+// once its end time passes, between the core's refreshes.
+Rectangle {
+    id: root
+
+    // Clear of a phone's side cut-outs in landscape.
+    property real leftInset: 0
+    property real rightInset: 0
+
+    // The announcement's link (http(s) only): each app opens it its own
+    // way, outside the app as the web's target=_blank does.
+    signal linkRequested(string url)
+
+    readonly property var announcement: {
+        if (Session.announcement.length === 0)
+            return null
+        try {
+            return JSON.parse(Session.announcement)
+        } catch (error) {
+            return null
+        }
+    }
+    readonly property bool expiring: announcement !== null && announcement.expiresAt.length > 0
+    // Ticks only while there is an end time to watch.
+    property double now: Date.now()
+    readonly property bool shown: announcement !== null
+        && (!expiring || Date.parse(announcement.expiresAt) > now)
+    readonly property string tone: announcement ? announcement.tone : "info"
+    readonly property bool critical: tone === "critical"
+    readonly property string word: critical ? qsTr("Important")
+        : tone === "warning" ? qsTr("Heads up") : qsTr("Notice")
+    readonly property bool narrow: width < 640
+
+    implicitHeight: shown ? Math.max(36, body.implicitHeight + 12) : 0
+    visible: shown
+    color: critical ? Theme.dangerTint : tone === "warning" ? Theme.warningTint : Theme.ply2
+    clip: true
+
+    Timer {
+        running: root.expiring
+        repeat: true
+        triggeredOnStart: true
+        interval: 15000
+        onTriggered: root.now = Date.now()
+    }
+
+    function escaped(text) {
+        return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+    }
+
+    Row {
+        id: label
+        x: 12 + root.leftInset
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 8
+        Led {
+            anchors.verticalCenter: parent.verticalCenter
+            lit: root.tone !== "info"
+            color: root.critical ? Theme.dangerInk : Theme.idle
+        }
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.narrow
+            textFormat: Text.PlainText
+            text: root.word
+            color: Theme.ink2
+            font: Theme.type.silk
+        }
+    }
+
+    Text {
+        id: body
+        anchors.left: label.right
+        anchors.leftMargin: 12
+        anchors.right: dismiss.visible ? dismiss.left : parent.right
+        anchors.rightMargin: dismiss.visible ? 8 : 12 + root.rightInset
+        anchors.verticalCenter: parent.verticalCenter
+        wrapMode: Text.Wrap
+        textFormat: Text.StyledText
+        linkColor: Theme.accentInk
+        color: Theme.ink1
+        font: Theme.type.description
+        text: {
+            const a = root.announcement
+            if (!a)
+                return ""
+            const words = root.escaped(a.text)
+            return a.linkUrl.length > 0
+                ? words + " <a href=\"" + root.escaped(a.linkUrl) + "\">" + root.escaped(a.linkLabel) + "</a>"
+                : words
+        }
+        // Only http(s) links reach here (the core drops anything else).
+        onLinkActivated: link => {
+            if (/^https?:\/\//i.test(link))
+                root.linkRequested(link)
+        }
+        HoverHandler {
+            enabled: Theme.hoverUi
+            cursorShape: body.hoveredLink.length > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
+        }
+    }
+
+    IconKey {
+        id: dismiss
+        anchors.right: parent.right
+        anchors.rightMargin: 8 + root.rightInset
+        anchors.verticalCenter: parent.verticalCenter
+        visible: !root.critical
+        size: 24
+        iconName: "close"
+        tone: "muted"
+        tip: qsTr("Dismiss")
+        onClicked: Session.dismissAnnouncement()
+    }
+
+    Rectangle {
+        anchors.bottom: parent.bottom
+        width: parent.width
+        height: 1
+        color: Theme.line
+    }
+
+    Accessible.role: root.critical ? Accessible.AlertMessage : Accessible.StaticText
+    Accessible.name: root.announcement ? root.word + ". " + root.announcement.text : ""
+}

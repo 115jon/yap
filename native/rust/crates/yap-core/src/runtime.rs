@@ -560,6 +560,16 @@ impl Runner {
                     let _ = inbox.send(Input::Http { id, result });
                     return;
                 }
+                if let (crate::store::ApiRequest::SiteConfig, Some(tone)) =
+                    (&request, crate::faults::switches().announcement.as_deref())
+                {
+                    let body = crate::site_config::test_config(tone);
+                    let _ = inbox.send(Input::Http {
+                        id,
+                        result: request.decode(body),
+                    });
+                    return;
+                }
                 let busy = MAX_HTTP_IN_FLIGHT - self.http_slots.available_permits();
                 if reason == HttpReason::Prefetch && busy > PREFETCH_BUSY_ABOVE {
                     if trace_http() {
