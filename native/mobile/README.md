@@ -835,7 +835,7 @@ desktop's objects with phone list layouts:
   search field matches a setting's name or a few keywords and opens its
   page. Back and Android's back step out one page at a time. The pages:
   _Profile_, _Account_ (username, Sign out, Delete account), _Privacy &
-  safety_, _Devices_, _Yap Loud_, _Soundboard_, _Appearance_ (theme and
+  safety_, _Devices_, _Yap Loud_, _Voice & video_ (below), _Soundboard_, _Appearance_ (theme and
   text size), _Notifications_ and _About_.
   _Status_ (Profile): Online, Idle, Do not disturb, Invisible and the custom status
   line (`Session.setStatus`). _Appearance_: the core's seven themes as
@@ -1042,8 +1042,19 @@ without libwebrtc. What is the phone's own:
   `Settings.voiceSettings()`, `Settings.setVoiceSwitch(key, on)` and
   `Settings.setVoiceProfile(profile)` (keys `noiseSuppression`,
   `echoCancellation`, `highFidelity`; profiles `standard`, `studio`,
-  `custom`), applied to the call at once. The phone has no page for the
-  output volume or sensitivity yet. The soundboard's clips and
+  `custom`; the phone adds `autoGainControl` and `autoSensitivity`),
+  applied to the call at once. Settings > Voice & video
+  (`SettingsVoicePage`) shows them, enabled under Custom only as on the
+  desktop, with the rest of the page's settings from
+  `Settings.setVoiceValue(key, value)` in the same file: `sensitivity`
+  (the speaking threshold, over a level meter: the call's mic level while
+  a call runs, `Settings.callMicLevel()`, else a mic test that opens the
+  mic on its own, `Native.micTest`, `MicTest.java`), `outputDeviceId`
+  (`default`, `speaker`, `earpiece`: Main.qml routes each call there as
+  it starts; the mic follows the route), `videoDeviceId` (`default`, the
+  front camera, or `back`: the camera a call starts on,
+  `Native.setCameraFacing`) and `dataSaver` (the camera's 360p layer
+  always, `camera.rs`). The soundboard's clips and
   Listen Together's stream play through `yap-audio` on the app's speaker
   (`yap-speaker`, AAudio) as call audio. Video: remote cameras and shares,
   the phone's own camera and its screen share (MediaProjection after

@@ -465,6 +465,33 @@ Window {
         }
     }
 
+    // Settings > Voice & video: each call starts on the chosen output (the
+    // shim routes it as the call's audio starts) and camera. Read once
+    // signed in (the page passes changes on itself), and the camera again
+    // as each call's audio starts (a flip in the last call stays there).
+    function voicePrefs() {
+        try {
+            return JSON.parse(Settings.voiceSettings() || "{}")
+        } catch (e) {
+            return {}
+        }
+    }
+    onReadyChanged: if (ready) {
+        const voice = voicePrefs()
+        Native.setPreferredAudioRoute(voice.outputDeviceId ?? "default")
+        Native.setCameraFacing(voice.videoDeviceId !== "back")
+    }
+    property bool callStarted: false
+    Connections {
+        target: Native
+        function onAudioRoutesChanged() {
+            const started = Native.audioRoutes.length > 0
+            if (started && !window.callStarted)
+                Native.setCameraFacing(window.voicePrefs().videoDeviceId !== "back")
+            window.callStarted = started
+        }
+    }
+
     // DM calls. The open DM's call and the one ringing us, as Yap.Ui's
     // model reads the core's (the desktop's call area reads the same).
     DmCallModel { id: dmCall }

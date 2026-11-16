@@ -36,6 +36,7 @@ const QML: &[&str] = &[
     "qml/SettingsDevicesPage.qml",
     "qml/SettingsPlanPage.qml",
     "qml/SettingsSoundboardPage.qml",
+    "qml/SettingsVoicePage.qml",
     "qml/SettingsAppearancePage.qml",
     "qml/SettingsNotificationsPage.qml",
     "qml/SettingsAboutPage.qml",
