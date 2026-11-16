@@ -349,7 +349,9 @@ pub enum AppsCommand {
     },
     /// The picker's volume slider (0..=1).
     SendVolume(f64),
-    /// Upload a sound to the call's server.
+    /// Upload a sound to the call's server, or (settings) to `server_id`
+    /// through one of its channels, and then (settings) choose it as a join
+    /// or leave sound for a scope.
     Upload {
         path: String,
         file_name: String,
@@ -358,6 +360,9 @@ pub enum AppsCommand {
         sound_name: String,
         emoji: String,
         volume: f64,
+        /// Empty: the call's server.
+        server_id: String,
+        then_pick: Option<(Trigger, String)>,
     },
     /// Delete a sound of the call's server, or a local custom sound
     /// (`local:<id>`).
@@ -415,6 +420,9 @@ pub enum AppsCommand {
         trigger: Trigger,
         scope: String,
     },
+    /// Settings: hear a chooser entry (`default:<id>` or
+    /// `server:<server>:<id>`) before choosing it.
+    PreviewPick(String),
     /// The activities dialog: start one for the call.
     StartActivity {
         activity: String,
@@ -819,6 +827,8 @@ pub(crate) enum AppsOp {
     Upload {
         server_id: String,
         sound: ServerSound,
+        /// Settings: the join or leave sound (and its scope) it becomes.
+        then_pick: Option<(Trigger, String)>,
     },
     Instants(String),
     Favorites,
@@ -1292,6 +1302,9 @@ pub struct TriggerRow {
     pub has_sound: bool,
     /// The scope uses the All servers setting.
     pub inherited: bool,
+    /// The sound as a chooser entry (`default:<id>` or
+    /// `server:<server>:<id>`), empty without one.
+    pub pick: String,
 }
 
 /// A queue row.
@@ -1409,6 +1422,9 @@ pub struct AppsView {
     pub sound_error: String,
     /// Settings: catalogs for the trigger chooser, by server.
     pub catalogs: BTreeMap<String, Vec<SoundTile>>,
+    /// Settings: the servers we may upload a sound to from the chooser
+    /// (the soundboard rights, and a channel of theirs to send it through).
+    pub upload_servers: Vec<String>,
     pub joins: BTreeMap<String, TriggerRow>,
     pub leaves: BTreeMap<String, TriggerRow>,
     /// The activity we are in (`wordle`), or empty.

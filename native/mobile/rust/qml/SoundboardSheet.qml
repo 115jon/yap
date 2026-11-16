@@ -63,6 +63,8 @@ Item {
         root.notice = ""
         search.clear()
         flick.contentY = 0
+        // A settings upload's error is not the call's.
+        core.clearError()
         core.load()
         const saved = Apps.soundboardVolume()
         root.boardVolume = saved < 0 ? 100 : saved
@@ -125,9 +127,9 @@ Item {
         root.formMode = mode
         root.editing = sound
         root.path = file ?? ""
-        nameField.text = sound ? sound.name : file.split("/").pop().replace(/\.[^.]+$/, "")
-        emojiField.text = sound ? sound.emoji : ""
-        formVolume.value = sound ? Math.round((sound.volume ?? 1) * 100) : 100
+        form.reset(sound ? sound.name : file.split("/").pop().replace(/\.[^.]+$/, ""),
+                   sound ? sound.emoji : "",
+                   sound ? Math.round((sound.volume ?? 1) * 100) : 100)
         root.view = "form"
         formFlick.contentY = 0
     }
@@ -139,14 +141,13 @@ Item {
         root.editing = null
         root.view = "soundboard"
     }
-    function saveForm() {
+    function saveForm(name, emoji, volume) {
         Native.haptic(Native.Confirm)
         Qt.inputMethod.hide()
-        const volume = formVolume.value / 100
         if (root.formMode === "edit") {
-            Apps.editSound(root.editing.id, nameField.text, emojiField.text, volume)
+            Apps.editSound(root.editing.id, name, emoji, volume)
         } else {
-            Apps.upload(root.path, nameField.text, emojiField.text, volume)
+            Apps.upload(root.path, name, emoji, volume)
             // The core reads the file as it uploads: the copy goes after.
             root.sentPath = root.path
         }
@@ -898,139 +899,23 @@ Item {
             anchors.top: errorStrip.bottom
             anchors.bottom: parent.bottom
             width: parent.width
-            contentHeight: formBody.height + 16
+            contentHeight: form.height + 16
             clip: true
 
-            Column {
-                id: formBody
+            SoundForm {
+                id: form
                 x: 16
                 y: 4
                 width: formFlick.width - 32
-                spacing: 12
-
-                readonly property string tooBig: root.formMode === "upload" && root.path.length > 0
-                    ? Limits.check("sound", root.path) : ""
-                TooBigCard {
-                    visible: formBody.tooBig.length > 0
-                    width: parent.width
-                    info: formBody.tooBig.length > 0 ? JSON.parse(formBody.tooBig) : ({})
-                    onAction: which => {
-                        root.closeForm()
-                        if (which === "choose" || which === "pick")
-                            root.startUpload()
-                    }
-                }
-                Text {
-                    visible: root.formMode === "upload" && formBody.tooBig.length === 0
-                    width: parent.width
-                    textFormat: Text.PlainText
-                    elide: Text.ElideMiddle
-                    text: root.path.split("/").pop()
-                    color: Theme.ink2
-                    font: Theme.type.caption
-                }
-                Column {
-                    visible: formBody.tooBig.length === 0
-                    width: parent.width
-                    spacing: 12
-                    MobileField {
-                        id: nameField
-                        width: parent.width
-                        maximumLength: 64
-                        placeholderText: qsTr("Sound name")
-                        Accessible.name: qsTr("Sound name")
-                        EnterKey.type: Qt.EnterKeyNext
-                        onAccepted: emojiField.forceActiveFocus()
-                    }
-                    MobileField {
-                        id: emojiField
-                        width: parent.width
-                        maximumLength: 16
-                        placeholderText: qsTr("Emoji (optional)")
-                        Accessible.name: qsTr("Emoji (optional)")
-                        onAccepted: Qt.inputMethod.hide()
-                    }
-                    Item {
-                        width: parent.width
-                        height: 48
-                        Text {
-                            id: formVolumeLabel
-                            anchors.verticalCenter: parent.verticalCenter
-                            textFormat: Text.PlainText
-                            text: qsTr("Volume")
-                            color: Theme.ink2
-                            font: Theme.type.captionStrong
-                        }
-                        T.Slider {
-                            id: formVolume
-                            anchors.left: formVolumeLabel.right
-                            anchors.leftMargin: 16
-                            anchors.right: formVolumeNum.left
-                            anchors.rightMargin: 8
-                            anchors.verticalCenter: parent.verticalCenter
-                            height: 48
-                            from: 0
-                            to: 100
-                            stepSize: 1
-                            snapMode: T.Slider.SnapAlways
-                            value: 100
-                            Accessible.role: Accessible.Slider
-                            Accessible.name: qsTr("Sound volume")
-                            Accessible.description: Math.round(value) + "%"
-                            background: Rectangle {
-                                x: formVolume.leftPadding
-                                y: (formVolume.height - height) / 2
-                                width: formVolume.availableWidth
-                                height: 6
-                                radius: 1
-                                color: Theme.tint3
-                                Rectangle {
-                                    width: formVolume.visualPosition * parent.width
-                                    height: parent.height
-                                    radius: 1
-                                    color: Theme.accentInk
-                                }
-                            }
-                            handle: Rectangle {
-                                x: formVolume.leftPadding + formVolume.visualPosition * (formVolume.availableWidth - width)
-                                y: (formVolume.height - height) / 2
-                                width: 14
-                                height: 30
-                                radius: Theme.radius
-                                color: Theme.ink1
-                            }
-                        }
-                        Text {
-                            id: formVolumeNum
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 32
-                            horizontalAlignment: Text.AlignRight
-                            textFormat: Text.PlainText
-                            text: Math.round(formVolume.value)
-                            color: Theme.ink2
-                            font: Theme.type.num
-                        }
-                    }
-                    KitButton {
-                        width: parent.width
-                        size: "lg"
-                        variant: "primary"
-                        ground: Theme.ply3
-                        text: root.formMode === "edit" ? qsTr("Save") : qsTr("Upload")
-                        enabled: nameField.displayText.trim().length > 0 && !core.uploading
-                        onClicked: root.saveForm()
-                    }
-                }
-                KitButton {
-                    width: parent.width
-                    size: "lg"
-                    variant: "secondary"
-                    text: qsTr("Cancel")
-                    onClicked: {
-                        Native.haptic(Native.Tick)
-                        root.closeForm()
-                    }
+                mode: root.formMode
+                path: root.path
+                busy: core.uploading
+                onSubmitted: (name, emoji, volume) => root.saveForm(name, emoji, volume)
+                onCancelled: root.closeForm()
+                onTooBigAction: which => {
+                    root.closeForm()
+                    if (which === "choose" || which === "pick")
+                        root.startUpload()
                 }
             }
         }
