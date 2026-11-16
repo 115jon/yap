@@ -17,6 +17,7 @@ SettingsFrame {
     readonly property var pages: ({
         SettingsProfilePage: { icon: "profile", title: qsTr("Profile") },
         SettingsAccountPage: { icon: "account", title: qsTr("Account") },
+        ConnectionsPage: { icon: "connections", title: qsTr("Connections") },
         SettingsPrivacyPage: { icon: "privacy", title: qsTr("Privacy & safety") },
         SettingsDevicesPage: { icon: "sessions", title: qsTr("Devices") },
         SettingsPlanPage: { icon: "sparkle", title: qsTr("Yap Loud") },
@@ -35,6 +36,8 @@ SettingsFrame {
         { page: "SettingsAccountPage", label: qsTr("Username"), words: "handle sign in" },
         { page: "SettingsAccountPage", label: qsTr("Sign out"), words: "log out logout" },
         { page: "SettingsAccountPage", label: qsTr("Delete account"), words: "remove close account" },
+        { page: "ConnectionsPage", label: qsTr("Steam"), words: "connections link linked accounts deadlock" },
+        { page: "ConnectionsPage", label: qsTr("Show on profile"), words: "connections steam linked accounts" },
         { page: "SettingsPrivacyPage", label: qsTr("Share my activity"), words: "playing game activity status" },
         { page: "SettingsPrivacyPage", label: qsTr("Who can DM you"), words: "direct messages dm calls block" },
         { page: "SettingsPrivacyPage", label: qsTr("Media filter"), words: "gif sticker safe search nsfw sensitive" },
@@ -255,6 +258,10 @@ SettingsFrame {
         HubRow {
             page: "SettingsAccountPage"
             hint: qsTr("Sign out, delete account")
+        }
+        HubRow {
+            page: "ConnectionsPage"
+            hint: qsTr("Linked accounts, such as Steam")
         }
         HubRow {
             page: "SettingsPrivacyPage"
