@@ -37,6 +37,8 @@ export default defineConfig({
     "public/mediapipe/**",
     "packages/*/dist/**",
     "src/routeTree.gen.ts",
+    // wasm-bindgen's glue for yap-core-wasm (scripts/build-core-wasm.mjs).
+    "src/lib/yap-core-wasm/pkg/**",
     // Third-party minified yt-dlp solver payloads are consumed as opaque
     // runtime assets; linting them creates hundreds of non-actionable
     // diagnostics that cannot be repaired locally.

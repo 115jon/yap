@@ -23,11 +23,11 @@ import {
   type SearchFetcher,
 } from "@/components/chat/search/useMessageSearch";
 import {
-  extractSearchTerms,
   parseSearchParams,
   type MessageSearchResponse,
   type SearchResultMessage,
 } from "@/lib/message-search";
+import { extractSearchTerms } from "@/lib/yap-core-wasm";
 import type { ChatMember } from "@/lib/chat-reducer";
 import type { Server, User } from "@/lib/types";
 import { useChatStore } from "@/stores/chat-store";

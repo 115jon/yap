@@ -78,6 +78,9 @@ jobs:
               - 'native/rust/crates/yap-cache/**'
               - 'packages/rust/**'
               - 'packages/protocol/src/generated/**'
+              - 'src/lib/yap-core-wasm/**'
+              - 'scripts/build-core-wasm.mjs'
+              - '.github/actions/setup-core-wasm/**'
               - '.github/workflows/ci.yml'
 
   rust-shared:
@@ -109,6 +112,16 @@ jobs:
             echo "::error::packages/protocol/src/generated is stale: run pnpm protocol:generate and commit the result."
             exit 1
           }
+
+      # The committed wasm-bindgen glue (src/lib/yap-core-wasm/pkg) must be
+      # what the crate builds to.
+      - name: Check yap-core-wasm's glue
+        uses: ./.github/actions/setup-core-wasm
+        with:
+          check: "true"
+
+      - name: Test yap-core-wasm against the search text fixtures
+        run: cargo test --manifest-path packages/rust/Cargo.toml -p yap-core-wasm
 
       - name: Clippy
         run: cargo clippy --manifest-path packages/rust/Cargo.toml --all-targets -- -D warnings
@@ -170,6 +183,9 @@ jobs:
       - name: Setup pnpm workspace
         uses: ./.github/actions/setup-pnpm
 
+      - name: Build yap-core-wasm
+        uses: ./.github/actions/setup-core-wasm
+
       - name: Run unit tests
         # The range-probe suite contacts YouTube and is an explicit live probe,
         # not a deterministic unit test. Keep it opt-in so CI is repeatable.
@@ -187,6 +203,9 @@ jobs:
 
       - name: Setup pnpm workspace
         uses: ./.github/actions/setup-pnpm
+
+      - name: Build yap-core-wasm
+        uses: ./.github/actions/setup-core-wasm
 
       - name: Configure deterministic Worker test secrets
         shell: bash
@@ -212,6 +231,9 @@ jobs:
 
       - name: Setup pnpm workspace
         uses: ./.github/actions/setup-pnpm
+
+      - name: Build yap-core-wasm
+        uses: ./.github/actions/setup-core-wasm
 
       - name: Build production output
         run: pnpm run build

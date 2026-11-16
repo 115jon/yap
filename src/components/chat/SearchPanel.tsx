@@ -23,7 +23,6 @@ import { getChannelIcon } from "@/lib/channel-icon";
 import {
   addFilter,
   commitTypedTokens,
-  extractSearchTerms,
   filterId,
   filterValueLabel,
   getAutocompleteContext,
@@ -35,6 +34,7 @@ import {
   type SearchResultMessage,
   type SearchSort,
 } from "@/lib/message-search";
+import { extractSearchTerms } from "@/lib/yap-core-wasm";
 import { getRoleNameColor } from "@/lib/role-color";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/stores/chat-store";

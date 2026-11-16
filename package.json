@@ -12,6 +12,7 @@
     "perf": "pnpm run build && lhci autorun",
     "perf:budgets": "pnpm run build && node scripts/check-bundle-budgets.mjs",
     "games:catalog": "node scripts/build-game-catalog.mjs",
+    "core-wasm:build": "node scripts/build-core-wasm.mjs",
     "protocol:generate": "cargo run --quiet --manifest-path packages/rust/Cargo.toml -p protocol-ts -- packages/protocol/src/generated && oxfmt packages/protocol/src/generated",
     "doctor": "react-doctor --project ralph-meet --blocking none -y",
     "doctor:verbose": "react-doctor --project ralph-meet --blocking none --verbose -y",

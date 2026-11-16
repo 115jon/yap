@@ -1,0 +1,1913 @@
+{
+  "about": "Search text rules (yap_core::search): what the web's TypeScript returned when it was replaced by the wasm build, except entries with a note, where the TypeScript mis-sliced text whose lowercase is longer (İ). `content` indexes `contents`. Checked by packages/rust/yap-core-wasm/tests/search_text.rs and src/lib/yap-core-wasm/__tests__/search-text.test.ts.",
+  "contents": [
+    "",
+    "hello",
+    "Token tokens TOK",
+    "İstanbul is İSTANBUL",
+    "straße and STRASSE",
+    "😀 smile 😀😀 smile",
+    "nbsp here and there",
+    "lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum the needle is here dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor ",
+    "😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 needle xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word needleaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx﻿﻿﻿",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "start needle filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler ",
+    "İİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİ needle b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b "
+  ],
+  "terms": [
+    {
+      "text": "",
+      "terms": []
+    },
+    {
+      "text": " ",
+      "terms": []
+    },
+    {
+      "text": "a",
+      "terms": []
+    },
+    {
+      "text": "ab",
+      "terms": ["ab"]
+    },
+    {
+      "text": "token \"design system\" a Token",
+      "terms": ["token", "design system"]
+    },
+    {
+      "text": "\"\" x \"\" \"unclosed",
+      "terms": ["unclosed"]
+    },
+    {
+      "text": "\"a\"",
+      "terms": ["a"]
+    },
+    {
+      "text": "\"\"quoted\"\"",
+      "terms": ["quoted"]
+    },
+    {
+      "text": "\" padded phrase﻿\" x",
+      "terms": ["padded phrase"]
+    },
+    {
+      "text": "Ünïcödé ÜNÏCÖDÉ",
+      "terms": ["Ünïcödé"]
+    },
+    {
+      "text": "İstanbul istanbul",
+      "terms": ["İstanbul", "istanbul"]
+    },
+    {
+      "text": "straße STRASSE",
+      "terms": ["straße", "STRASSE"]
+    },
+    {
+      "text": "emoji 😀😀 👍🏽 🏳️‍🌈",
+      "terms": ["emoji", "😀😀", "👍🏽", "🏳️‍🌈"]
+    },
+    {
+      "text": "tab\tsep\nnewline nbsp em﻿bom",
+      "terms": ["tab", "sep", "newline", "nbsp", "em", "bom"]
+    },
+    {
+      "text": "neljoined",
+      "terms": ["neljoined"]
+    },
+    {
+      "text": "one two three four five six seven eight nine ten",
+      "terms": ["one", "two", "three", "four", "five", "six", "seven", "eight"]
+    },
+    {
+      "text": "dup DUP Dup dUp",
+      "terms": ["dup"]
+    },
+    {
+      "text": "ΣΊΣΥΦΟΣ σίσυφος",
+      "terms": ["ΣΊΣΥΦΟΣ"]
+    }
+  ],
+  "highlight": [
+    {
+      "content": 0,
+      "terms": [],
+      "segments": []
+    },
+    {
+      "content": 0,
+      "terms": [""],
+      "segments": []
+    },
+    {
+      "content": 0,
+      "terms": ["zzz"],
+      "segments": []
+    },
+    {
+      "content": 0,
+      "terms": ["tok", "token"],
+      "segments": []
+    },
+    {
+      "content": 0,
+      "terms": ["needle"],
+      "segments": []
+    },
+    {
+      "content": 0,
+      "terms": ["smile", "😀"],
+      "segments": []
+    },
+    {
+      "content": 0,
+      "terms": ["istanbul"],
+      "segments": []
+    },
+    {
+      "content": 0,
+      "terms": ["straße", "strasse"],
+      "segments": []
+    },
+    {
+      "content": 0,
+      "terms": ["here", "there", "nbsp"],
+      "segments": []
+    },
+    {
+      "content": 0,
+      "terms": ["a", "aa"],
+      "segments": []
+    },
+    {
+      "content": 1,
+      "terms": [],
+      "segments": [
+        {
+          "text": "hello",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 1,
+      "terms": [""],
+      "segments": [
+        {
+          "text": "hello",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 1,
+      "terms": ["zzz"],
+      "segments": [
+        {
+          "text": "hello",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 1,
+      "terms": ["tok", "token"],
+      "segments": [
+        {
+          "text": "hello",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 1,
+      "terms": ["needle"],
+      "segments": [
+        {
+          "text": "hello",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 1,
+      "terms": ["smile", "😀"],
+      "segments": [
+        {
+          "text": "hello",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 1,
+      "terms": ["istanbul"],
+      "segments": [
+        {
+          "text": "hello",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 1,
+      "terms": ["straße", "strasse"],
+      "segments": [
+        {
+          "text": "hello",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 1,
+      "terms": ["here", "there", "nbsp"],
+      "segments": [
+        {
+          "text": "hello",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 1,
+      "terms": ["a", "aa"],
+      "segments": [
+        {
+          "text": "hello",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 2,
+      "terms": [],
+      "segments": [
+        {
+          "text": "Token tokens TOK",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 2,
+      "terms": [""],
+      "segments": [
+        {
+          "text": "Token tokens TOK",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 2,
+      "terms": ["zzz"],
+      "segments": [
+        {
+          "text": "Token tokens TOK",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 2,
+      "terms": ["tok", "token"],
+      "segments": [
+        {
+          "text": "Token",
+          "match": true
+        },
+        {
+          "text": " ",
+          "match": false
+        },
+        {
+          "text": "token",
+          "match": true
+        },
+        {
+          "text": "s ",
+          "match": false
+        },
+        {
+          "text": "TOK",
+          "match": true
+        }
+      ]
+    },
+    {
+      "content": 2,
+      "terms": ["needle"],
+      "segments": [
+        {
+          "text": "Token tokens TOK",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 2,
+      "terms": ["smile", "😀"],
+      "segments": [
+        {
+          "text": "Token tokens TOK",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 2,
+      "terms": ["istanbul"],
+      "segments": [
+        {
+          "text": "Token tokens TOK",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 2,
+      "terms": ["straße", "strasse"],
+      "segments": [
+        {
+          "text": "Token tokens TOK",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 2,
+      "terms": ["here", "there", "nbsp"],
+      "segments": [
+        {
+          "text": "Token tokens TOK",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 2,
+      "terms": ["a", "aa"],
+      "segments": [
+        {
+          "text": "Token tokens TOK",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 3,
+      "terms": [],
+      "segments": [
+        {
+          "text": "İstanbul is İSTANBUL",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 3,
+      "terms": [""],
+      "segments": [
+        {
+          "text": "İstanbul is İSTANBUL",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 3,
+      "terms": ["zzz"],
+      "segments": [
+        {
+          "text": "İstanbul is İSTANBUL",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 3,
+      "terms": ["tok", "token"],
+      "segments": [
+        {
+          "text": "İstanbul is İSTANBUL",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 3,
+      "terms": ["needle"],
+      "segments": [
+        {
+          "text": "İstanbul is İSTANBUL",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 3,
+      "terms": ["smile", "😀"],
+      "segments": [
+        {
+          "text": "İstanbul is İSTANBUL",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 3,
+      "terms": ["istanbul"],
+      "segments": [
+        {
+          "text": "İstanbul is İSTANBUL",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 3,
+      "terms": ["straße", "strasse"],
+      "segments": [
+        {
+          "text": "İstanbul is İSTANBUL",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 3,
+      "terms": ["here", "there", "nbsp"],
+      "segments": [
+        {
+          "text": "İstanbul is İSTANBUL",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 3,
+      "terms": ["a", "aa"],
+      "segments": [
+        {
+          "text": "İst",
+          "match": false
+        },
+        {
+          "text": "a",
+          "match": true
+        },
+        {
+          "text": "nbul is İST",
+          "match": false
+        },
+        {
+          "text": "A",
+          "match": true
+        },
+        {
+          "text": "NBUL",
+          "match": false
+        }
+      ],
+      "note": "ts-mis-sliced-after-lowercase"
+    },
+    {
+      "content": 4,
+      "terms": [],
+      "segments": [
+        {
+          "text": "straße and STRASSE",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 4,
+      "terms": [""],
+      "segments": [
+        {
+          "text": "straße and STRASSE",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 4,
+      "terms": ["zzz"],
+      "segments": [
+        {
+          "text": "straße and STRASSE",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 4,
+      "terms": ["tok", "token"],
+      "segments": [
+        {
+          "text": "straße and STRASSE",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 4,
+      "terms": ["needle"],
+      "segments": [
+        {
+          "text": "straße and STRASSE",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 4,
+      "terms": ["smile", "😀"],
+      "segments": [
+        {
+          "text": "straße and STRASSE",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 4,
+      "terms": ["istanbul"],
+      "segments": [
+        {
+          "text": "straße and STRASSE",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 4,
+      "terms": ["straße", "strasse"],
+      "segments": [
+        {
+          "text": "straße",
+          "match": true
+        },
+        {
+          "text": " and ",
+          "match": false
+        },
+        {
+          "text": "STRASSE",
+          "match": true
+        }
+      ]
+    },
+    {
+      "content": 4,
+      "terms": ["here", "there", "nbsp"],
+      "segments": [
+        {
+          "text": "straße and STRASSE",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 4,
+      "terms": ["a", "aa"],
+      "segments": [
+        {
+          "text": "str",
+          "match": false
+        },
+        {
+          "text": "a",
+          "match": true
+        },
+        {
+          "text": "ße ",
+          "match": false
+        },
+        {
+          "text": "a",
+          "match": true
+        },
+        {
+          "text": "nd STR",
+          "match": false
+        },
+        {
+          "text": "A",
+          "match": true
+        },
+        {
+          "text": "SSE",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 5,
+      "terms": [],
+      "segments": [
+        {
+          "text": "😀 smile 😀😀 smile",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 5,
+      "terms": [""],
+      "segments": [
+        {
+          "text": "😀 smile 😀😀 smile",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 5,
+      "terms": ["zzz"],
+      "segments": [
+        {
+          "text": "😀 smile 😀😀 smile",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 5,
+      "terms": ["tok", "token"],
+      "segments": [
+        {
+          "text": "😀 smile 😀😀 smile",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 5,
+      "terms": ["needle"],
+      "segments": [
+        {
+          "text": "😀 smile 😀😀 smile",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 5,
+      "terms": ["smile", "😀"],
+      "segments": [
+        {
+          "text": "😀",
+          "match": true
+        },
+        {
+          "text": " ",
+          "match": false
+        },
+        {
+          "text": "smile",
+          "match": true
+        },
+        {
+          "text": " ",
+          "match": false
+        },
+        {
+          "text": "😀😀",
+          "match": true
+        },
+        {
+          "text": " ",
+          "match": false
+        },
+        {
+          "text": "smile",
+          "match": true
+        }
+      ]
+    },
+    {
+      "content": 5,
+      "terms": ["istanbul"],
+      "segments": [
+        {
+          "text": "😀 smile 😀😀 smile",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 5,
+      "terms": ["straße", "strasse"],
+      "segments": [
+        {
+          "text": "😀 smile 😀😀 smile",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 5,
+      "terms": ["here", "there", "nbsp"],
+      "segments": [
+        {
+          "text": "😀 smile 😀😀 smile",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 5,
+      "terms": ["a", "aa"],
+      "segments": [
+        {
+          "text": "😀 smile 😀😀 smile",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 6,
+      "terms": [],
+      "segments": [
+        {
+          "text": "nbsp here and there",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 6,
+      "terms": [""],
+      "segments": [
+        {
+          "text": "nbsp here and there",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 6,
+      "terms": ["zzz"],
+      "segments": [
+        {
+          "text": "nbsp here and there",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 6,
+      "terms": ["tok", "token"],
+      "segments": [
+        {
+          "text": "nbsp here and there",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 6,
+      "terms": ["needle"],
+      "segments": [
+        {
+          "text": "nbsp here and there",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 6,
+      "terms": ["smile", "😀"],
+      "segments": [
+        {
+          "text": "nbsp here and there",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 6,
+      "terms": ["istanbul"],
+      "segments": [
+        {
+          "text": "nbsp here and there",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 6,
+      "terms": ["straße", "strasse"],
+      "segments": [
+        {
+          "text": "nbsp here and there",
+          "match": false
+        }
+      ]
+    },
+    {
+      "content": 6,
+      "terms": ["here", "there", "nbsp"],
+      "segments": [
+        {
+          "text": "nbsp",
+          "match": true
+        },
+        {
+          "text": " ",
+          "match": false
+        },
+        {
+          "text": "here",
+          "match": true
+        },
+        {
+          "text": " and ",
+          "match": false
+        },
+        {
+          "text": "there",
+          "match": true
+        }
+      ]
+    },
+    {
+      "content": 6,
+      "terms": ["a", "aa"],
+      "segments": [
+        {
+          "text": "nbsp here ",
+          "match": false
+        },
+        {
+          "text": "a",
+          "match": true
+        },
+        {
+          "text": "nd there",
+          "match": false
+        }
+      ]
+    }
+  ],
+  "excerpt": [
+    {
+      "content": 0,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": ""
+    },
+    {
+      "content": 0,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": ""
+    },
+    {
+      "content": 0,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": ""
+    },
+    {
+      "content": 0,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": ""
+    },
+    {
+      "content": 0,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": ""
+    },
+    {
+      "content": 0,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": ""
+    },
+    {
+      "content": 0,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": ""
+    },
+    {
+      "content": 0,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": ""
+    },
+    {
+      "content": 0,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": ""
+    },
+    {
+      "content": 0,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": ""
+    },
+    {
+      "content": 1,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "hello"
+    },
+    {
+      "content": 1,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "hello"
+    },
+    {
+      "content": 1,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "hello"
+    },
+    {
+      "content": 1,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "hello"
+    },
+    {
+      "content": 1,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "hello"
+    },
+    {
+      "content": 1,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "hello"
+    },
+    {
+      "content": 1,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "hello"
+    },
+    {
+      "content": 1,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "hello"
+    },
+    {
+      "content": 1,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "hello"
+    },
+    {
+      "content": 1,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "hello"
+    },
+    {
+      "content": 2,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "Token tokens TOK"
+    },
+    {
+      "content": 2,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "Token tokens TOK"
+    },
+    {
+      "content": 2,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "Token tokens TOK"
+    },
+    {
+      "content": 2,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "Token tokens TOK"
+    },
+    {
+      "content": 2,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "Token tokens TOK"
+    },
+    {
+      "content": 2,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "Token tokens TOK"
+    },
+    {
+      "content": 2,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "Token tokens TOK"
+    },
+    {
+      "content": 2,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "Token tokens TOK"
+    },
+    {
+      "content": 2,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "Token tokens TOK"
+    },
+    {
+      "content": 2,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "Token tokens TOK"
+    },
+    {
+      "content": 3,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "İstanbul is İSTANBUL"
+    },
+    {
+      "content": 3,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "İstanbul is İSTANBUL"
+    },
+    {
+      "content": 3,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "İstanbul is İSTANBUL"
+    },
+    {
+      "content": 3,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "İstanbul is İSTANBUL"
+    },
+    {
+      "content": 3,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "İstanbul is İSTANBUL"
+    },
+    {
+      "content": 3,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "İstanbul is İSTANBUL"
+    },
+    {
+      "content": 3,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "İstanbul is İSTANBUL"
+    },
+    {
+      "content": 3,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "İstanbul is İSTANBUL"
+    },
+    {
+      "content": 3,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "İstanbul is İSTANBUL"
+    },
+    {
+      "content": 3,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "İstanbul is İSTANBUL"
+    },
+    {
+      "content": 4,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "straße and STRASSE"
+    },
+    {
+      "content": 4,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "straße and STRASSE"
+    },
+    {
+      "content": 4,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "straße and STRASSE"
+    },
+    {
+      "content": 4,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "straße and STRASSE"
+    },
+    {
+      "content": 4,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "straße and STRASSE"
+    },
+    {
+      "content": 4,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "straße and STRASSE"
+    },
+    {
+      "content": 4,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "straße and STRASSE"
+    },
+    {
+      "content": 4,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "straße and STRASSE"
+    },
+    {
+      "content": 4,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "straße and STRASSE"
+    },
+    {
+      "content": 4,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "straße and STRASSE"
+    },
+    {
+      "content": 5,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "😀 smile 😀😀 smile"
+    },
+    {
+      "content": 5,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "😀 smile 😀😀 smile"
+    },
+    {
+      "content": 5,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "😀 smile 😀😀 smile"
+    },
+    {
+      "content": 5,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "😀 smile 😀😀 smile"
+    },
+    {
+      "content": 5,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "😀 smile 😀😀 smile"
+    },
+    {
+      "content": 5,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "😀 smile 😀😀 smile"
+    },
+    {
+      "content": 5,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "😀 smile 😀😀 smile"
+    },
+    {
+      "content": 5,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "😀 smile 😀😀 smile"
+    },
+    {
+      "content": 5,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "😀 smile 😀😀 smile"
+    },
+    {
+      "content": 5,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "😀 smile 😀😀 smile"
+    },
+    {
+      "content": 6,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "nbsp here and there"
+    },
+    {
+      "content": 6,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "nbsp here and there"
+    },
+    {
+      "content": 6,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "nbsp here and there"
+    },
+    {
+      "content": 6,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "nbsp here and there"
+    },
+    {
+      "content": 6,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "nbsp here and there"
+    },
+    {
+      "content": 6,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "nbsp here and there"
+    },
+    {
+      "content": 6,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "nbsp here and there"
+    },
+    {
+      "content": 6,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "nbsp here and there"
+    },
+    {
+      "content": 6,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "nbsp here and there"
+    },
+    {
+      "content": 6,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "nbsp here and there"
+    },
+    {
+      "content": 7,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ip…"
+    },
+    {
+      "content": 7,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ip…"
+    },
+    {
+      "content": 7,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ip…"
+    },
+    {
+      "content": 7,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ip…"
+    },
+    {
+      "content": 7,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "…lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum the needle is here dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor"
+    },
+    {
+      "content": 7,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "…lorem ipsum lorem ipsum lorem ipsum the needle is here dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor dolor"
+    },
+    {
+      "content": 7,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ip…"
+    },
+    {
+      "content": 7,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ip…"
+    },
+    {
+      "content": 7,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ip…"
+    },
+    {
+      "content": 7,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ip…"
+    },
+    {
+      "content": 8,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀…"
+    },
+    {
+      "content": 8,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀…"
+    },
+    {
+      "content": 8,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀…"
+    },
+    {
+      "content": 8,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀…"
+    },
+    {
+      "content": 8,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "…😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 needle xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 8,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "…😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 needle xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 8,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀…"
+    },
+    {
+      "content": 8,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀…"
+    },
+    {
+      "content": 8,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀…"
+    },
+    {
+      "content": 8,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀…"
+    },
+    {
+      "content": 9,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word needleaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    },
+    {
+      "content": 9,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word needleaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    },
+    {
+      "content": 9,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word needleaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    },
+    {
+      "content": 9,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word needleaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    },
+    {
+      "content": 9,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word needleaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    },
+    {
+      "content": 9,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "…word word word word word word word word needleaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    },
+    {
+      "content": 9,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word needleaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    },
+    {
+      "content": 9,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word needleaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    },
+    {
+      "content": 9,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word needleaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    },
+    {
+      "content": 9,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word needleaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    },
+    {
+      "content": 10,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 10,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 10,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 10,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 10,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 10,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 10,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 10,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 10,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 10,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 11,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 11,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 11,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 11,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 11,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 11,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 11,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 11,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 11,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 11,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 12,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 12,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 12,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 12,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 12,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 12,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 12,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 12,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 12,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 12,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+    },
+    {
+      "content": 13,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "start needle filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler…"
+    },
+    {
+      "content": 13,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "start needle filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler fille…"
+    },
+    {
+      "content": 13,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "start needle filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler…"
+    },
+    {
+      "content": 13,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "start needle filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler fille…"
+    },
+    {
+      "content": 13,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "start needle filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler…"
+    },
+    {
+      "content": 13,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "start needle filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler fille…"
+    },
+    {
+      "content": 13,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "start needle filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler…"
+    },
+    {
+      "content": 13,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "start needle filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler fille…"
+    },
+    {
+      "content": 13,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "start needle filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler…"
+    },
+    {
+      "content": 13,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "start needle filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler fille…"
+    },
+    {
+      "content": 14,
+      "terms": [],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "İİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİ needle b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b…"
+    },
+    {
+      "content": 14,
+      "terms": [],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "İİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİ needle b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b…"
+    },
+    {
+      "content": 14,
+      "terms": ["zzz"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "İİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİ needle b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b…"
+    },
+    {
+      "content": 14,
+      "terms": ["zzz"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "İİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİ needle b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b…"
+    },
+    {
+      "content": 14,
+      "terms": ["needle"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "İİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİ needle b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b…",
+      "note": "ts-mis-sliced-after-lowercase"
+    },
+    {
+      "content": 14,
+      "terms": ["needle"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "İİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİ needle b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b…",
+      "note": "ts-mis-sliced-after-lowercase"
+    },
+    {
+      "content": 14,
+      "terms": ["smile", "😀"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "İİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİ needle b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b…"
+    },
+    {
+      "content": 14,
+      "terms": ["smile", "😀"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "İİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİ needle b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b…"
+    },
+    {
+      "content": 14,
+      "terms": ["tok"],
+      "max": 320,
+      "lead": 60,
+      "excerpt": "İİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİ needle b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b…"
+    },
+    {
+      "content": 14,
+      "terms": ["tok"],
+      "max": 200,
+      "lead": 40,
+      "excerpt": "İİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİİ needle b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b…"
+    }
+  ]
+}

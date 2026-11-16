@@ -119,3 +119,6 @@ showcase/
 .lighthouseci/
 /packages/rust/target/
 /packages/rust/Cargo.lock
+# Built by pnpm core-wasm:build; the JS glue next to it is committed.
+/src/lib/yap-core-wasm/pkg/*.wasm
+/src/lib/yap-core-wasm/pkg/*.wasm.d.ts

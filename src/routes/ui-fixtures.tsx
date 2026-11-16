@@ -44,7 +44,13 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import { lazy, Suspense, useSyncExternalStore } from "react";
 
 const Fixtures = import.meta.env.DEV
-  ? lazy(() => import("@/components/dev/UiFixtures"))
+  ? lazy(() =>
+      // The search surfaces need yap-core-wasm loaded before they render.
+      Promise.all([
+        import("@/components/dev/UiFixtures"),
+        import("@/lib/yap-core-wasm/load").then((m) => m.loadYapCore()),
+      ]).then(([fixtures]) => fixtures),
+    )
   : null;
 
 export const Route = createFileRoute("/ui-fixtures")({

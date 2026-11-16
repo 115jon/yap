@@ -47,7 +47,6 @@ const SEARCH_PAGE_SIZE = 25;
 const SEARCH_MAX_LIMIT = 50;
 const SEARCH_MIN_TEXT = 2;
 const SEARCH_MAX_TEXT = 200;
-const SEARCH_MAX_TERMS = 8;
 const SEARCH_MAX_IDS = 10;
 
 /** Wire-level query, identical on client and server. */
@@ -255,103 +254,9 @@ export function dateFiltersToRange(filters: readonly SearchFilter[]): {
   };
 }
 
-// ─── Text terms and highlighting ────────────────────────────────────────────
-
-/**
- * Splits free text into match terms. "Quoted phrases" stay whole; bare words
- * split on whitespace. Single characters are dropped unless quoted.
- */
-export function extractSearchTerms(text: string): string[] {
-  const terms: string[] = [];
-  const re = /"([^"]+)"|(\S+)/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(text)) !== null) {
-    const phrase = match[1]?.trim();
-    const word = match[2]?.replace(/^"+|"+$/g, "");
-    if (phrase) terms.push(phrase);
-    else if (word && word.length >= 2) terms.push(word);
-  }
-  const seen = new Set<string>();
-  return terms
-    .filter((t) => {
-      const k = t.toLowerCase();
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    })
-    .slice(0, SEARCH_MAX_TERMS);
-}
-
-export interface HighlightSegment {
-  text: string;
-  match: boolean;
-}
-
-/** Case-insensitive, overlap-safe highlight of every term occurrence. */
-export function highlightSegments(
-  content: string,
-  terms: readonly string[],
-): HighlightSegment[] {
-  if (!content) return [];
-  const lower = content.toLowerCase();
-  const ranges: Array<[number, number]> = [];
-  for (const term of terms) {
-    const t = term.toLowerCase();
-    if (!t) continue;
-    let from = 0;
-    while (from <= lower.length) {
-      const idx = lower.indexOf(t, from);
-      if (idx === -1) break;
-      ranges.push([idx, idx + t.length]);
-      from = idx + t.length;
-    }
-  }
-  if (ranges.length === 0) return [{ text: content, match: false }];
-  ranges.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
-  const merged: Array<[number, number]> = [];
-  for (const r of ranges) {
-    const last = merged[merged.length - 1];
-    if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
-    else merged.push([r[0], r[1]]);
-  }
-  const out: HighlightSegment[] = [];
-  let cursor = 0;
-  for (const [s, e] of merged) {
-    if (s > cursor) out.push({ text: content.slice(cursor, s), match: false });
-    out.push({ text: content.slice(s, e), match: true });
-    cursor = e;
-  }
-  if (cursor < content.length)
-    out.push({ text: content.slice(cursor), match: false });
-  return out;
-}
-
-/**
- * Long messages are clamped in the result list, so a match deep in the text
- * would be cut off. Start the excerpt shortly before the first match.
- */
-export function excerptAroundMatch(
-  content: string,
-  terms: readonly string[],
-  maxChars = 320,
-  lead = 60,
-): string {
-  if (content.length <= maxChars) return content;
-  const lower = content.toLowerCase();
-  let first = -1;
-  for (const term of terms) {
-    const idx = lower.indexOf(term.toLowerCase());
-    if (idx !== -1 && (first === -1 || idx < first)) first = idx;
-  }
-  if (first === -1 || first < maxChars - lead * 2) {
-    return `${content.slice(0, maxChars).trimEnd()}…`;
-  }
-  let start = Math.max(0, first - lead);
-  const space = content.lastIndexOf(" ", start);
-  if (space > start - 20 && space > 0) start = space + 1;
-  const end = Math.min(content.length, start + maxChars);
-  return `…${content.slice(start, end).trim()}${end < content.length ? "…" : ""}`;
-}
+// Text terms, highlighting and excerpts are yap-core's (Rust, built to wasm):
+// @/lib/yap-core-wasm in the browser, @/lib/yap-core-wasm/server in the
+// Worker.
 
 // ─── Typed tokens and autocomplete context ──────────────────────────────────
 

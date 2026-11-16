@@ -120,6 +120,11 @@ jobs:
       - name: Setup pnpm workspace
         uses: ./.github/actions/setup-pnpm
 
+      # The search text rules are yap-core compiled to wasm; the .wasm is
+      # built, not committed.
+      - name: Build yap-core-wasm
+        uses: ./.github/actions/setup-core-wasm
+
       - name: Build
         run: pnpm run build
 

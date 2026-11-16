@@ -10,13 +10,13 @@
  */
 
 import {
-  extractSearchTerms,
   type MessageSearchQuery,
   type MessageSearchResponse,
   type SearchHasValue,
   type SearchResultAttachment,
   type SearchResultMessage,
 } from "@/lib/message-search";
+import { extractSearchTerms } from "@/lib/yap-core-wasm/server";
 import type { D1Database } from "@cloudflare/workers-types";
 
 export interface MessageSearchScope {

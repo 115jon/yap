@@ -169,11 +169,21 @@ then run the checks CI runs:
 
 ```powershell
 pnpm install
+pnpm core-wasm:build
 pnpm format:check
 pnpm lint
 pnpm typecheck
 pnpm test
 ```
+
+`pnpm core-wasm:build` compiles the rules the web shares with the native apps
+(yap-core's message search text, `packages/rust/yap-core-wasm`) to
+WebAssembly. Run it once before `pnpm dev`, `pnpm test` or `pnpm build`, and
+again after changing yap-core. It needs Rust with the `wasm32-unknown-unknown`
+target and `wasm-bindgen-cli` at the version the script names
+(`cargo install wasm-bindgen-cli --version 0.2.130 --locked`). The `.wasm` is
+not committed; its JS glue in `src/lib/yap-core-wasm/pkg` is, and CI checks
+that the glue matches the crate.
 
 Formatting is `oxfmt`, linting is `oxlint` (config in `oxlint.config.ts`, with the
 vendored anti-slop rules under `tools/oxlint/anti-slop`), and `lefthook` runs

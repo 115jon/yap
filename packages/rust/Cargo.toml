@@ -14,3 +14,9 @@ members = ["protocol-ts", "yap-core-wasm"]
 edition = "2021"
 license = "GPL-3.0-only"
 publish = false
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

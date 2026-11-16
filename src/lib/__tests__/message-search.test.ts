@@ -4,13 +4,10 @@ import {
   buildSearchQuery,
   commitTypedTokens,
   dateFiltersToRange,
-  excerptAroundMatch,
-  extractSearchTerms,
   findTypedTokens,
   getAutocompleteContext,
   groupResultsByChannel,
   hasSearchableInput,
-  highlightSegments,
   parseSearchParams,
   resolveToken,
   toSearchParams,
@@ -203,42 +200,7 @@ describe("dates to range", () => {
   });
 });
 
-describe("terms and highlighting", () => {
-  it("splits words, keeps quoted phrases and drops single letters", () => {
-    expect(extractSearchTerms('token "design system" a Token')).toEqual([
-      "token",
-      "design system",
-    ]);
-  });
-
-  it("highlights every occurrence case-insensitively and merges overlaps", () => {
-    expect(highlightSegments("Token tokens TOK", ["tok", "token"])).toEqual([
-      { text: "Token", match: true },
-      { text: " ", match: false },
-      { text: "token", match: true },
-      { text: "s ", match: false },
-      { text: "TOK", match: true },
-    ]);
-  });
-
-  it("returns the whole text when nothing matches", () => {
-    expect(highlightSegments("hello", ["zzz"])).toEqual([
-      { text: "hello", match: false },
-    ]);
-  });
-
-  it("starts long excerpts near the first match", () => {
-    const content = `${"lorem ipsum ".repeat(60)}the needle is here ${"dolor ".repeat(20)}`;
-    const excerpt = excerptAroundMatch(content, ["needle"], 200, 40);
-    expect(excerpt.startsWith("…")).toBe(true);
-    expect(excerpt).toContain("needle");
-    expect(excerpt.length).toBeLessThanOrEqual(203);
-  });
-
-  it("keeps short content untouched", () => {
-    expect(excerptAroundMatch("short", ["x"])).toBe("short");
-  });
-});
+// Terms, highlighting and excerpts: yap-core-wasm/__tests__/search-text.test.ts.
 
 describe("query building and parsing", () => {
   const filters: SearchFilter[] = [
