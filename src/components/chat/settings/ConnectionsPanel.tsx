@@ -6,8 +6,9 @@
  *
  * Connecting leaves the app for the provider's sign-in page; the callback
  * lands back on /chat, where ConnectionReturn reopens this panel with a
- * toast. The desktop and phone builds can't carry the browser cookie the
- * flow needs, so they open the web app in the system browser instead.
+ * toast. The native apps start with `{ app }` instead and run the link in
+ * the system browser (the begin route), which hands the outcome back to
+ * the app by its own link.
  */
 
 import { SettingsSwitch } from "@/components/chat/SettingsSwitch";

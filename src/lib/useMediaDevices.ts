@@ -161,13 +161,6 @@ export function useMediaDevices(): MediaDeviceState {
           mics: snapshot.audioInputs.length,
           cams: snapshot.videoInputs.length,
           speakers: snapshot.audioOutputs.length,
-          nativeAudioDevices: snapshot.nativeAudioDevices.length,
-          nativeAudioInputs: snapshot.nativeAudioDevices.filter(
-            (device) => device.kind === "audioinput",
-          ).length,
-          nativeAudioOutputs: snapshot.nativeAudioDevices.filter(
-            (device) => device.kind === "audiooutput",
-          ).length,
         });
 
         update({
@@ -191,7 +184,7 @@ export function useMediaDevices(): MediaDeviceState {
 
     // Listen for permission grants — when the user grants camera/mic
     // permission through the normal join flow, re-enumerate to get
-    // full device labels and all devices (especially needed in desktop CEF)
+    // full device labels and all devices
     const permissionCleanups: (() => void)[] = [];
     const watchPermission = async (name: string) => {
       try {
