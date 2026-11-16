@@ -35,69 +35,6 @@ function getScreenQualitySettings(quality: string) {
   return { fps, res };
 }
 
-function desktopCaptureSourceId(
-  sourceId: string,
-  sourceKind?: "window" | "monitor" | "device",
-) {
-  if (sourceKind === "window" && sourceId.startsWith("window-")) {
-    return `window:${sourceId.slice("window-".length)}:0`;
-  }
-
-  if (sourceKind === "monitor" && sourceId.startsWith("monitor-")) {
-    return `screen:${sourceId.slice("monitor-".length)}:0`;
-  }
-
-  return null;
-}
-
-export async function getCustomPickerDesktopStream(options: {
-  sourceId?: string;
-  captureId?: string;
-  sourceKind?: "window" | "monitor" | "device";
-  withAudio: boolean;
-  videoConstraints: MediaTrackConstraints;
-  desktopMandatoryConstraints: Record<string, unknown>;
-}): Promise<MediaStream | null> {
-  if (!options.sourceId) return null;
-
-  if (options.sourceKind === "device") {
-    return navigator.mediaDevices.getUserMedia({
-      video: {
-        deviceId: { exact: options.sourceId },
-        ...options.videoConstraints,
-      },
-      audio: false,
-    });
-  }
-
-  const chromeMediaSourceId =
-    options.captureId ??
-    desktopCaptureSourceId(options.sourceId, options.sourceKind);
-  if (!chromeMediaSourceId) return null;
-
-  const constraints: MediaStreamConstraints = {
-    video: {
-      mandatory: {
-        chromeMediaSource: "desktop",
-        chromeMediaSourceId,
-        ...options.desktopMandatoryConstraints,
-      },
-    } as MediaTrackConstraints,
-    audio: false,
-  };
-
-  if (options.withAudio && options.sourceKind === "monitor") {
-    constraints.audio = {
-      mandatory: {
-        chromeMediaSource: "desktop",
-        chromeMediaSourceId,
-      },
-    } as MediaTrackConstraints;
-  }
-
-  return navigator.mediaDevices.getUserMedia(constraints);
-}
-
 export function screenShareVideoConstraints(quality: string) {
   const { fps, res } = getScreenQualitySettings(quality);
   const browserVideoConstraints = {
@@ -108,53 +45,7 @@ export function screenShareVideoConstraints(quality: string) {
     cursor: "always",
   } as MediaTrackConstraints;
 
-  const desktopMandatoryConstraints: Record<string, unknown> = {
-    maxFrameRate: fps,
-    cursor: "always",
-  };
-
-  if (res) {
-    desktopMandatoryConstraints.maxWidth = res.width;
-    desktopMandatoryConstraints.maxHeight = res.height;
-  }
-
-  return { fps, res, browserVideoConstraints, desktopMandatoryConstraints };
-}
-
-/** Whether a screen share is driven by the native hardware pipeline or by CEF. */
-export type ScreenSharePreviewKind = "native" | "cef";
-
-export interface PreviewStartDecision {
-  /** Initial `isPreviewHidden` value for the session. */
-  isPreviewHidden: boolean;
-  /** Whether a CEF preview capture session should be opened for the shared source. */
-  openCefPreview: boolean;
-}
-
-/**
- * Pure decision for the initial Local_Preview state when a screen share starts.
- *
- * Native (hardware) shares default to PAUSED so a second WGC/getDisplayMedia
- * session is not opened on the same source, which would add capture overhead
- * (Req 5.1). If the user explicitly enables "Always Show Stream Preview", that
- * preference overrides the native default and opens the preview immediately.
- * CEF (non-native) shares keep the existing default of showing the preview
- * (Req 5.4). The resume control later reopens the preview through the existing
- * `togglePreviewHidden` flow (Req 5.3).
- *
- * Preview is paused (and no CEF preview session is opened) if and only if the
- * share is native and the user has not opted into always showing the preview.
- */
-export function resolvePreviewStartState(
-  kind: ScreenSharePreviewKind,
-  alwaysShowPreview = false,
-): PreviewStartDecision {
-  const isNative = kind === "native";
-  const shouldPausePreview = isNative && !alwaysShowPreview;
-  return {
-    isPreviewHidden: shouldPausePreview,
-    openCefPreview: !shouldPausePreview,
-  };
+  return { fps, res, browserVideoConstraints };
 }
 
 function describeVideoTrack(track?: MediaStreamTrack) {
@@ -279,13 +170,8 @@ export type WebScreenSource = ScreenShareSourceState &
 export type WebScreenShareRequest = ScreenShareRequest<WebScreenSource>;
 
 export interface WebScreenCapture extends ScreenCapture<MediaStreamTrack> {
-  /**
-   * What the local tile shows: the browser capture itself, or a native
-   * share's CEF preview (null while hidden). The preview toggle replaces it.
-   */
+  /** What the local tile shows: the browser capture itself. */
   stream: MediaStream | null;
-  /** Whether the local preview starts hidden (native shares). */
-  readonly previewHidden: boolean;
 }
 
 export type WebScreenShare = ScreenShare<
@@ -314,7 +200,7 @@ export function webScreenShareRequest(
     sourceKey: options?.sourceId ?? null,
     quality: options?.quality || defaults.quality,
     audio: options?.withAudio ?? defaults.audio,
-    preferNative: !options?.skipNative,
+    preferNative: false,
   };
 }
 
@@ -339,32 +225,12 @@ function stopStream(stream: MediaStream | null): void {
   });
 }
 
-/**
- * Sets the stream a capture's local tile shows. A native share's preview
- * ending by itself means the source closed: `onEnded` ends the share.
- */
-export function attachScreenPreview(
-  capture: WebScreenCapture,
-  stream: MediaStream | null,
-  onEnded: ((capture: WebScreenCapture) => void) | null,
-): void {
-  capture.stream = stream;
-  const videoTrack = stream?.getVideoTracks()[0];
-  if (videoTrack && onEnded) {
-    videoTrack.onended = () => {
-      if (capture.stream !== stream) return;
-      onEnded(capture);
-    };
-  }
-}
-
 type ShareClient = Pick<SFUClient, "updateSenderEncoding">;
 
 export interface WebScreenShareSourcesOptions {
   readonly sfu: ShareClient;
   readonly participantId: () => string;
-  readonly alwaysShowPreview: () => boolean;
-  /** A capture's video (or a native share's preview) ended by itself. */
+  /** A capture's video ended by itself. */
   readonly onCaptureEnded: (capture: WebScreenCapture) => void;
 }
 
@@ -381,7 +247,7 @@ export function createWebScreenShareSources({
     browser: {
       async capture(request) {
         const { source, quality, audio } = request;
-        const { browserVideoConstraints, desktopMandatoryConstraints } =
+        const { browserVideoConstraints } =
           screenShareVideoConstraints(quality);
         const startedAt = performance.now();
         const elapsed = () => Math.round(performance.now() - startedAt);
@@ -398,7 +264,6 @@ export function createWebScreenShareSources({
           quality,
           withAudio: audio,
           browserVideoConstraints,
-          desktopMandatoryConstraints,
         });
 
         let stream: MediaStream;
@@ -457,11 +322,9 @@ export function createWebScreenShareSources({
           video,
           audio: audioTrack,
           stream,
-          previewHidden: false,
         };
         stream.getVideoTracks().forEach((track) => {
-          track.contentHint =
-            source.sourceKind === "window" ? "motion" : "detail";
+          track.contentHint = "detail";
           // The browser's "Stop sharing" (or the window closing) ends it.
           track.onended = () => onCaptureEnded(capture);
         });

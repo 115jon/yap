@@ -1,35 +1,18 @@
-// Frontend unit tests for the preview-paused placeholder and the resume flow.
+// Frontend unit tests for the preview-paused placeholder.
 //
-// Validates: Requirements 5.2 (paused placeholder renders) and 5.3 (resume via
-// the existing togglePreviewHidden flow reopens the CEF preview).
+// Validates: Requirement 5.2 (the paused placeholder renders).
 //
-// Testing approach:
-//   The repo's vitest setup runs in the "node" environment with no DOM testing
-//   stack installed (no jsdom / happy-dom / @testing-library). So:
-//     * Req 5.2 is verified by server-rendering the REAL `ParticipantCard` with
-//       `react-dom/server` and asserting the "Preview paused" placeholder is in
-//       the output when `isPreviewHidden` is true (and absent when false).
-//     * Req 5.3 is verified at the resume seam used by `togglePreviewHidden`:
-//       `resolvePreviewResume` drives the un-hide branching, and its
-//       `openPreviewStream` opener calls the same exported
-//       `getCustomPickerDesktopStream` the hook uses. We assert that opener is
-//       invoked (i.e. a new preview capture is requested) and the resulting
-//       state un-hides the preview (`isPreviewHidden` becomes false).
-//   This is the appropriate seam because the full `togglePreviewHidden` lives
-//   inside `useVoiceChannel` and cannot mount without a DOM + heavy media deps.
+// The repo's vitest setup runs in the "node" environment with no DOM testing
+// stack, so the REAL `ParticipantCard` is server-rendered with
+// `react-dom/server` and the "Preview paused" placeholder is asserted present
+// when `isPreviewHidden` is true (and absent when false).
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { ParticipantCard } from "@/components/voice/ParticipantCard";
 import type { GridItem, VoiceActions } from "@/components/voice/types";
-import {
-  getCustomPickerDesktopStream,
-  resolvePreviewHideState,
-  resolvePreviewResumeMechanism,
-  resolvePreviewResume,
-} from "@/hooks/useVoiceChannel";
 
 function makeLocalScreenItem(overrides: Partial<GridItem> = {}): GridItem {
   return {
@@ -102,155 +85,6 @@ describe("ParticipantCard — preview-paused placeholder (Req 5.2)", () => {
       /aria-label="Open participant tile for You"[^>]*class="[^"]*z-0/,
     );
     expect(markup).toMatch(/data-preview-toggle="true"[^>]*class="[^"]*z-10/);
-  });
-});
-
-describe("togglePreviewHidden resume flow (Req 5.3)", () => {
-  const getUserMedia = vi.fn();
-
-  beforeEach(() => {
-    getUserMedia.mockReset();
-    // Provide a minimal navigator.mediaDevices so the real
-    // getCustomPickerDesktopStream can request a desktop capture stream.
-    vi.stubGlobal("navigator", {
-      mediaDevices: { getUserMedia },
-    } as unknown as Navigator);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("reopens the CEF preview from the paused state and un-hides it", async () => {
-    const reopenedStream = { id: "reopened-preview" } as unknown as MediaStream;
-    getUserMedia.mockResolvedValue(reopenedStream);
-
-    // The opener mirrors exactly what togglePreviewHidden does for a known
-    // native source: call getCustomPickerDesktopStream for that window.
-    const openPreviewStream = vi.fn(() =>
-      getCustomPickerDesktopStream({
-        sourceId: "window-123",
-        sourceKind: "window",
-        withAudio: false,
-        videoConstraints: {},
-        desktopMandatoryConstraints: {},
-      }),
-    );
-
-    const outcome = await resolvePreviewResume({
-      canReopenNativePreview: true, // paused native share with a known source
-      openPreviewStream,
-      existingPreviewStream: null,
-    });
-
-    // A new preview capture was requested (getCustomPickerDesktopStream ->
-    // navigator.mediaDevices.getUserMedia was called).
-    expect(openPreviewStream).toHaveBeenCalledTimes(1);
-    expect(getUserMedia).toHaveBeenCalledTimes(1);
-
-    // The preview is now shown with the freshly opened stream.
-    expect(outcome.isPreviewHidden).toBe(false);
-    expect(outcome.openedStream).toBe(true);
-    expect(outcome.stream).toBe(reopenedStream);
-    expect(outcome.reopenFailed).toBe(false);
-  });
-
-  it("stays paused if reopening the native preview fails", async () => {
-    getUserMedia.mockRejectedValue(new Error("capture denied"));
-
-    const openPreviewStream = vi.fn(() =>
-      getCustomPickerDesktopStream({
-        sourceId: "window-123",
-        sourceKind: "window",
-        withAudio: false,
-        videoConstraints: {},
-        desktopMandatoryConstraints: {},
-      }),
-    );
-
-    const outcome = await resolvePreviewResume({
-      canReopenNativePreview: true,
-      openPreviewStream,
-      existingPreviewStream: null,
-    });
-
-    expect(openPreviewStream).toHaveBeenCalledTimes(1);
-    expect(outcome.isPreviewHidden).toBe(true);
-    expect(outcome.openedStream).toBe(false);
-    expect(outcome.reopenFailed).toBe(true);
-    expect(outcome.stream).toBeNull();
-  });
-
-  it("restores the existing CEF stream without opening a new capture", async () => {
-    const existingCef = { id: "existing-cef" } as unknown as MediaStream;
-    const openPreviewStream = vi.fn();
-
-    const outcome = await resolvePreviewResume({
-      canReopenNativePreview: false, // CEF share: no known native source to reopen
-      openPreviewStream,
-      existingPreviewStream: existingCef,
-    });
-
-    expect(openPreviewStream).not.toHaveBeenCalled();
-    expect(getUserMedia).not.toHaveBeenCalled();
-    expect(outcome.isPreviewHidden).toBe(false);
-    expect(outcome.stream).toBe(existingCef);
-  });
-});
-
-describe("togglePreviewHidden resume mechanism", () => {
-  it("keeps the desktop app on the dedicated loopback path", () => {
-    expect(
-      resolvePreviewResumeMechanism({
-        isHookActive: true,
-        hasReusablePreviewSource: true,
-      }),
-    ).toBe("desktop-loopback");
-  });
-
-  it("reopens a reusable desktop source outside the native hook path", () => {
-    expect(
-      resolvePreviewResumeMechanism({
-        isHookActive: false,
-        hasReusablePreviewSource: true,
-      }),
-    ).toBe("reopen-selected-source");
-  });
-
-  it("restores the existing browser share stream when no source id exists", () => {
-    expect(
-      resolvePreviewResumeMechanism({
-        isHookActive: false,
-        hasReusablePreviewSource: false,
-      }),
-    ).toBe("restore-existing-stream");
-  });
-});
-
-describe("togglePreviewHidden hide flow", () => {
-  it("preserves a browser-share preview stream when there is no source id to reopen from", () => {
-    const decision = resolvePreviewHideState({
-      isHookActive: false,
-      hasReusablePreviewSource: false,
-    });
-
-    expect(decision.preserveStream).toBe(true);
-  });
-
-  it("tears down native or hook previews that can be recreated later", () => {
-    expect(
-      resolvePreviewHideState({
-        isHookActive: true,
-        hasReusablePreviewSource: false,
-      }).preserveStream,
-    ).toBe(false);
-
-    expect(
-      resolvePreviewHideState({
-        isHookActive: false,
-        hasReusablePreviewSource: true,
-      }).preserveStream,
-    ).toBe(false);
   });
 });
 

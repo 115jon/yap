@@ -19,16 +19,15 @@ const NOW = Date.parse("2026-11-14T12:00:00.000Z");
 
 function createFixture() {
   let state: ChatState = { ...initialState };
-  const onChange = vi.fn();
   const onSaveError = vi.fn();
   const actions = createNotificationSettingsActions(
     () => state,
     (action) => {
       state = chatReducer(state, action);
     },
-    { onChange, onSaveError },
+    { onSaveError },
   );
-  return { actions, getState: () => state, onChange, onSaveError };
+  return { actions, getState: () => state, onSaveError };
 }
 
 const channelMute: NotificationSetting = {
@@ -56,13 +55,12 @@ describe("notification settings actions", () => {
       settings: [channelMute, { target_type: "bogus" }],
       server_time: new Date(NOW).toISOString(),
     });
-    const { actions, getState, onChange } = createFixture();
+    const { actions, getState } = createFixture();
     await actions.loadNotificationSettings();
     expect(mocks.apiGet).toHaveBeenCalledWith("/api/notification-settings");
     expect(getState().notificationSettings).toEqual({
       "channel:c1": channelMute,
     });
-    expect(onChange).toHaveBeenCalled();
   });
 
   it("keeps a change that landed while the load was out", async () => {
@@ -163,13 +161,12 @@ describe("notification settings actions", () => {
   });
 
   it("moves the mute clock when a timed mute runs out", async () => {
-    const { actions, getState, onChange } = createFixture();
+    const { actions, getState } = createFixture();
     actions.applyNotificationSetting({
       ...channelMute,
       muted_until: "2026-11-14T13:00:00.000Z",
     });
     expect(getState().notificationSettingsNow).toBe(NOW);
-    onChange.mockClear();
 
     vi.advanceTimersByTime(60 * 60 * 1000 - 1);
     expect(getState().notificationSettingsNow).toBe(NOW);
@@ -177,6 +174,5 @@ describe("notification settings actions", () => {
     expect(getState().notificationSettingsNow).toBe(
       Date.parse("2026-11-14T13:00:00.000Z"),
     );
-    expect(onChange).toHaveBeenCalledTimes(1);
   });
 });
