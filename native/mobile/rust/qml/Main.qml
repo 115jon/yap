@@ -765,6 +765,7 @@ Window {
         dropPlacedShare()
         callWanted = false
         accountPanel.close()
+        mediaSheet.close()
         stack.pop(null, StackView.Immediate)
         pager.snap()
         if (Session.phase === Session.SignedOut)
@@ -799,7 +800,14 @@ Window {
             id: stack
             anchors.fill: parent
             visible: window.ready
-            enabled: visible
+            // Under the player sheet nothing takes a touch: the chat's list
+            // and the pager would take a drag on the sheet's handle (the
+            // sheet's own scrim only stops what reaches it).
+            enabled: visible && !(mediaSheet.up && !mediaSheet.closing)
+            // A page pushed or popped from outside (a notification, a link,
+            // an answered call) is not left under the player, whose view
+            // Android draws over everything in the window.
+            onDepthChanged: mediaSheet.close()
 
             // A sheet rises from the bottom edge and drops back; a page
             // slides and fades in from the right (Android's default
@@ -887,6 +895,25 @@ Window {
         confirmText: qsTr("Open settings")
         onConfirmed: Native.openAppSettings()
     }
+
+    // A video or a web embed's player, in the app over the chat
+    // (MediaLink, from the cards' seams).
+    Connections {
+        target: MediaLink
+        function onVideoRequested(request) { mediaSheet.playVideo(request) }
+        function onWebRequested(request) { mediaSheet.playWeb(request) }
+    }
+    MediaSheet {
+        id: mediaSheet
+        anchors.fill: parent
+        anchors.bottomMargin: Native.clippedBottom
+    }
+    // The player's view is drawn over the whole scene: a ring or the
+    // deletion notice closes it rather than sit under it.
+    onShownRingChanged: if ((shownRing.callId ?? "").length > 0)
+        mediaSheet.close()
+    onPendingDeletionChanged: if (pendingDeletion)
+        mediaSheet.close()
 
     // The share key (ShareLink): what goes with the screen, before
     // Android's own dialog (the whole screen or one app).

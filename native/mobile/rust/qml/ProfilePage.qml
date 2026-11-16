@@ -16,8 +16,8 @@ import Yap.Ui
 // page (its back art under it, its front art over it, the page inset by the
 // frame's footprint) and the profile effect over it, one pass and then its
 // still (only the still under reduced motion). A video banner shows its
-// first frame (InlineVideo's poster): the phone plays video only full
-// screen (Player), so nothing decodes on a page that stays open.
+// first frame (InlineVideo's poster): the phone plays video only in the
+// player sheet or full screen, so nothing decodes on a page that stays open.
 //
 // Their board (Yap.Ui BoardCore and BoardRack, the desktop's widgets) sits
 // under the profile on the desktop column's ply-3: Board · Activity ·
