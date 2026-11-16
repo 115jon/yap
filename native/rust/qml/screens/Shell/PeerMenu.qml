@@ -39,14 +39,12 @@ MenuPanel {
     // 1440p and 4K only with the hdStreams perk (useStreamQualities).
     readonly property var shareQualities: Settings.hdStreams ? ["720p30", "720p60", "1080p30", "1080p60", "1440p30", "1440p60", "4k30", "4k60"]
         : ["720p30", "720p60", "1080p30", "1080p60"]
-    readonly property var calls: JSON.parse(Calls.view)
-    readonly property var moveTargets: {
-        const channels = calls.voiceChannels ?? []
-        const source = channels.find(ch => ch.id === root.channelId)
-        if (!source || !source.moveOut || root.userId === Session.meId)
-            return []
-        return channels.filter(ch => ch.id !== root.channelId && ch.moveIn)
+    // Yap.Ui's VoiceMoveTargets (shared with the phone's sheets).
+    readonly property VoiceMoveTargets moves: VoiceMoveTargets {
+        userId: root.userId
+        channelId: root.channelId
     }
+    readonly property var moveTargets: moves.targets
 
     // The call's tiles, read when the menu opens.
     Instantiator {
@@ -315,7 +313,7 @@ MenuPanel {
             delegate: MenuRow {
                 required property var modelData
                 text: modelData.name
-                onTriggered: Calls.moveMember(root.userId, root.channelId, modelData.id)
+                onTriggered: root.moves.move(modelData.id)
             }
             onObjectAdded: (index, object) => moveMenu.insertItem(index, object)
             onObjectRemoved: (index, object) => moveMenu.removeItem(object)

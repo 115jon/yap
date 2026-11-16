@@ -783,6 +783,56 @@ fn move_should_post_the_voice_move_route() {
 }
 
 #[test]
+fn a_move_should_be_pending_until_answered_and_say_why_it_was_refused() {
+    let mut c = Client::online();
+    let fx = c.calls(CallsCommand::Move {
+        user_id: ALICE.into(),
+        from_channel_id: "a".into(),
+        to_channel_id: "b".into(),
+    });
+    let id = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::Http { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("a request");
+    assert!(c.view.move_pending);
+    c.input(Input::Http {
+        id,
+        result: Err(yap_core::ApiError::Http {
+            status: 403,
+            message: "ROLE_HIERARCHY".into(),
+        }),
+    });
+    assert!(!c.view.move_pending);
+    assert_eq!(
+        c.view.move_error,
+        "You can't move someone with an equal or higher role."
+    );
+
+    // The next one clears the copy as it goes, and an agreed move leaves
+    // none.
+    let fx = c.calls(CallsCommand::Move {
+        user_id: ALICE.into(),
+        from_channel_id: "a".into(),
+        to_channel_id: "b".into(),
+    });
+    assert!(c.view.move_pending);
+    assert!(c.view.move_error.is_empty());
+    let request = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::Http { request, .. } => Some(request.clone()),
+            _ => None,
+        })
+        .expect("a request");
+    c.respond(&request, json!({ "success": true }));
+    assert!(!c.view.move_pending);
+    assert!(c.view.move_error.is_empty());
+}
+
+#[test]
 fn a_sticker_should_land_in_the_view_with_a_new_seq() {
     let mut c = Client::online();
     let voice = c

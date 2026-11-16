@@ -578,6 +578,15 @@ impl State {
     }
 
     fn fill_voice_status(&self, channel_id: &str, row: &mut ChannelTreeRow) {
+        let (status, media, editable) = self.voice_status_shown(channel_id);
+        row.status = status;
+        row.status_media = media;
+        row.status_editable = editable;
+    }
+
+    /// A voice channel's status as the tree shows it: its text, its picture
+    /// (`<url>#<type>;<w>x<h>`), and whether we may change it.
+    pub(super) fn voice_status_shown(&self, channel_id: &str) -> (String, String, bool) {
         let connected = self
             .voice
             .as_ref()
@@ -593,13 +602,12 @@ impl State {
             .find_channel(channel_id)
             .and_then(|c| c.voice_status.as_ref())
             .filter(|_| occupied);
-        row.status_editable = editable;
-        row.status = status
+        let text = status
             .and_then(|s| s.text.as_deref())
             .map(str::trim)
             .unwrap_or_default()
             .to_owned();
-        row.status_media = status
+        let media = status
             .and_then(|s| s.media.as_ref())
             .map(|m| {
                 // The URL, then `#<type>;<w>x<h>` (VoiceChannelMediaDisplay
@@ -621,6 +629,7 @@ impl State {
                 }
             })
             .unwrap_or_default();
+        (text, media, editable)
     }
 
     /// Read marks, newest messages or notifications changed.
@@ -715,6 +724,8 @@ impl State {
         let rows = self.tree_rows();
         fx.view(ViewUpdate::Channels(ViewDiff::Reset(rows.clone())));
         self.view.tree = rows;
+        // The call page shows its channel's status from the calls view.
+        self.sync_calls(fx);
     }
 
     /// The same tree with the call's members changed: row diffs only.
@@ -724,6 +735,8 @@ impl State {
             fx.view(ViewUpdate::Channels(diff));
         }
         self.view.tree = rows;
+        // The call page shows its channel's status from the calls view.
+        self.sync_calls(fx);
     }
 
     fn sync_roster(&mut self, fx: &mut Effects) {

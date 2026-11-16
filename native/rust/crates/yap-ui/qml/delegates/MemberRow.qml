@@ -56,6 +56,12 @@ Item {
         acceptedButtons: Qt.RightButton
         onTapped: eventPoint => ShellState.showPeerMenu(root.userId, root.name, root, eventPoint.position, root.channelId)
     }
+    // A finger's right click: a long press (the phone's drawer opens its
+    // sheet on ShellState.peerMenuRequested).
+    TapHandler {
+        enabled: Theme.touch && !root.me && root.userId.length > 0
+        onLongPressed: ShellState.showPeerMenu(root.userId, root.name, root, point.position, root.channelId)
+    }
 
     // Guides: up, tick, down.
     Rectangle {
