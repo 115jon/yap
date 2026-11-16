@@ -1713,6 +1713,42 @@ fn the_audit_log_should_page_older_entries() {
 }
 
 #[test]
+fn a_reload_should_drop_an_older_page_still_on_its_way() {
+    let mut client = Client::owner();
+    client.command(AdminCommand::OpenServer(SERVER.into()));
+    let load = |client: &mut Client, list| {
+        client.command(AdminCommand::Load {
+            server_id: SERVER.into(),
+            list,
+        });
+    };
+    let page = |page| {
+        admin(AdminRequest::AuditLogs {
+            server_id: SERVER.into(),
+            page,
+        })
+    };
+    load(&mut client, AdminList::Audit);
+    client.respond(&page(1), audit_page(0, 50));
+    load(&mut client, AdminList::AuditMore);
+    let (stale, _) = client.id_of(|r| *r == page(2));
+    // Reopened: page 1 again while page 2 is still out.
+    load(&mut client, AdminList::Audit);
+    client.respond(&page(1), audit_page(0, 50));
+    let result = page(2).decode(audit_page(50, 50));
+    client.input(Input::Http { id: stale, result });
+    assert_eq!(client.view.audit.ready().expect("audit").len(), 50);
+    assert!(client.view.audit_paging.more);
+}
+
+#[test]
+fn a_member_role_change_should_be_about_members() {
+    assert_eq!(admin::audit_kind("MEMBER_ROLE_UPDATE"), "member");
+    assert_eq!(admin::audit_kind("ROLE_UPDATE"), "role");
+    assert_eq!(admin::audit_kind("CATEGORY_CREATE"), "channel");
+}
+
+#[test]
 fn a_short_audit_log_should_have_no_older_page() {
     let mut client = Client::owner();
     client.command(AdminCommand::OpenServer(SERVER.into()));
@@ -1747,7 +1783,7 @@ fn audit_pages_after_the_first_should_ask_for_their_page() {
         page: 3,
     };
     assert_eq!(first.path(), "/api/servers/s1/audit-logs");
-    assert_eq!(third.path(), "/api/servers/s1/audit-logs?page=3");
+    assert_eq!(third.path(), "/api/servers/s1/audit-logs?limit=50&page=3");
 }
 
 #[test]

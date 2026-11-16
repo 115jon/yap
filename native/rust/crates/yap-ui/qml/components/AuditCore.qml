@@ -4,7 +4,8 @@ import Yap.Ui
 // Server settings → Audit log, without its layout, for the desktop's
 // AuditPage and the phone's AdminAuditPage: the load states of the core's
 // rows (`Admin.state` → `audit`, each a sentence the core already wrote:
-// actor, verb, target, details, reason, `when`, `ago`), the older pages
+// actor, verb, target, details, reason, `when`, `at`), how long ago an
+// entry was (`ago`, against a clock that ticks while `live`), the older pages
 // (`auditPaging`: Admin.load(…, "audit-more")), the type and member
 // filters (over the entries loaded so far) and a detail's line of text.
 QtObject {
@@ -29,7 +30,7 @@ QtObject {
     readonly property string moreError: paging.state === "error" ? paging.error : ""
 
     // A row to draw while the list changes under a delegate.
-    readonly property var blank: ({ id: "", kind: "", actorId: "", actor: "", verb: "", target: null, details: [], reason: "", when: "", ago: "", actorInitials: "", actorAvatar: "" })
+    readonly property var blank: ({ id: "", kind: "", actorId: "", actor: "", verb: "", target: null, details: [], reason: "", when: "", at: 0, actorInitials: "", actorAvatar: "" })
 
     // "" is every type / everyone.
     property string kindFilter: ""
@@ -76,6 +77,40 @@ QtObject {
             return qsTr("Everyone")
         const actor = actors.find(a => a.id === actorFilter)
         return actor ? actor.name : qsTr("Everyone")
+    }
+
+    // How long ago, as the core's relative_time says it: "Just now", "5m
+    // ago", "3h ago", "2d ago", then the month and day ("Nov 5").
+    property bool live: false
+    property real now: Date.now()
+    readonly property Timer clock: Timer {
+        interval: 60000
+        repeat: true
+        running: core.live
+        onTriggered: core.now = Date.now()
+    }
+    onLiveChanged: if (live) now = Date.now()
+    function ago(ms) {
+        if (!(ms > 0))
+            return ""
+        const minutes = Math.floor((now - ms) / 60000)
+        if (minutes < 1)
+            return qsTr("Just now")
+        if (minutes < 60)
+            return qsTr("%1m ago").arg(minutes)
+        const hours = Math.floor(minutes / 60)
+        if (hours < 24)
+            return qsTr("%1h ago").arg(hours)
+        const days = Math.floor(hours / 24)
+        if (days < 7)
+            return qsTr("%1d ago").arg(days)
+        return new Date(ms).toLocaleDateString(Qt.locale(), "MMM d")
+    }
+    // A detail for a screen reader: a permission's sign as a word.
+    function detailSpoken(detail) {
+        if (detail.type !== "perm")
+            return detailText(detail)
+        return (detail.sign === "+" ? qsTr("Allowed %1") : qsTr("Removed %1")).arg(detail.name)
     }
 
     function load() {

@@ -17,7 +17,7 @@ use crate::api::ApiError;
 use crate::settings::describe_api_error;
 use crate::store::admin::{AdminOp, AdminThen};
 use crate::store::state::{ServerChannels, State};
-use crate::store::time::{local_date, local_date_time, parse_rfc3339, relative_time};
+use crate::store::time::{local_date, local_date_time, parse_rfc3339};
 use crate::store::view::{
     absolute_url, avatar_url, initials, AdminChannelView, AdminServerView, AdminView, AuditPaging,
     AuditRow, BanRow, InviteRow, Load, MemberOption, NamedOption, OverrideRow, RoleRow, ViewUpdate,
@@ -206,6 +206,10 @@ impl State {
             return;
         }
         let server_id = server_id.to_owned();
+        let page = match list {
+            AdminList::AuditMore => self.admin.audit_page + 1,
+            _ => 0,
+        };
         let request = match list {
             AdminList::Roles => AdminRequest::Roles {
                 server_id: server_id.clone(),
@@ -222,10 +226,18 @@ impl State {
             },
             AdminList::AuditMore => AdminRequest::AuditLogs {
                 server_id: server_id.clone(),
-                page: self.admin.audit_page + 1,
+                page,
             },
         };
-        if !self.admin_http(fx, request, AdminOp::List { server_id, list }) {
+        if !self.admin_http(
+            fx,
+            request,
+            AdminOp::List {
+                server_id,
+                list,
+                page,
+            },
+        ) {
             return;
         }
         match list {
@@ -1110,7 +1122,11 @@ impl State {
         }
         let result = admin_response(result);
         match op {
-            AdminOp::List { server_id, list } => self.on_list(server_id, list, result),
+            AdminOp::List {
+                server_id,
+                list,
+                page,
+            } => self.on_list(server_id, list, page, result),
             AdminOp::Overrides { channel_id } => {
                 if self.admin.channel_id.as_deref() == Some(channel_id.as_str()) {
                     self.admin.overrides = match result {
@@ -1132,6 +1148,7 @@ impl State {
         &mut self,
         server_id: String,
         list: AdminList,
+        page: u32,
         result: Result<AdminResponse, ApiError>,
     ) {
         if self.admin.server_id.as_deref() != Some(server_id.as_str()) {
@@ -1174,6 +1191,10 @@ impl State {
                     Err(error) => Load::Failed(failed(&error, "load the audit log")),
                 }
             }
+            // Only the page the list waits for: a reload (or a second
+            // ask) since this one went out made it stale.
+            AdminList::AuditMore
+                if !self.admin.audit_more.is_loading() || page != self.admin.audit_page + 1 => {}
             AdminList::AuditMore => match result {
                 Ok(response) => {
                     let logs = match response {
@@ -1786,9 +1807,7 @@ impl State {
                         when: at
                             .map(|ms| local_date_time(ms, self.local_offset))
                             .unwrap_or_default(),
-                        ago: at
-                            .map(|ms| relative_time(ms, self.clock_ms(), self.local_offset))
-                            .unwrap_or_default(),
+                        at: at.unwrap_or_default(),
                     }
                 })
                 .collect()

@@ -369,7 +369,10 @@ impl AdminRequest {
                 format!("{}/bans", servers(server_id))
             }
             Self::AuditLogs { server_id, page } if *page > 1 => {
-                format!("{}/audit-logs?page={page}", servers(server_id))
+                format!(
+                    "{}/audit-logs?limit={AUDIT_PAGE}&page={page}",
+                    servers(server_id)
+                )
             }
             Self::AuditLogs { server_id, .. } => format!("{}/audit-logs", servers(server_id)),
             Self::UpdateServer { server_id, .. } | Self::DeleteServer { server_id } => {
@@ -622,6 +625,8 @@ pub(super) enum AdminOp {
     List {
         server_id: String,
         list: AdminList,
+        /// The audit log page asked for (`AuditMore`; 0 otherwise).
+        page: u32,
     },
     Overrides {
         channel_id: String,

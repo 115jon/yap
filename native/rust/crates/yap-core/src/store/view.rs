@@ -978,8 +978,9 @@ pub struct AuditRow {
     pub reason: String,
     /// "Nov 5, 2026, 3:04 PM".
     pub when: String,
-    /// "5m ago", "2d ago", then "Nov 5".
-    pub ago: String,
+    /// When, in ms since the epoch (the phone says how long ago, against
+    /// its own clock).
+    pub at: i64,
 }
 
 /// The audit log's older pages: whether there is one, and how its load goes.
