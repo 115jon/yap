@@ -194,10 +194,20 @@ Item {
                 anchors.right: keys.left
                 anchors.rightMargin: 8
                 height: parent.height
-                Accessible.role: root.dm ? Accessible.Button : Accessible.Heading
+                // A server channel's title opens its media, links and files
+                // (the desktop's title key opens the channel details).
+                readonly property bool opensMedia: !root.dm && Nav.activeChannelId.length > 0
+                Accessible.role: root.dm || title.opensMedia ? Accessible.Button : Accessible.Heading
                 Accessible.name: root.dm ? qsTr("%1, view profile").arg(Nav.activeChannelName)
+                    : title.opensMedia ? qsTr("Channel %1, media, links and files").arg(Nav.activeChannelName)
                     : qsTr("Channel %1").arg(Nav.activeChannelName)
-                Accessible.onPressAction: if (root.dm) root.profileRequested(Nav.dmUserId)
+                Accessible.onPressAction: title.activate()
+                function activate() {
+                    if (root.dm)
+                        root.profileRequested(Nav.dmUserId)
+                    else if (title.opensMedia)
+                        Router.open("MediaPage")
+                }
 
                 Column {
                     id: titleColumn
@@ -244,19 +254,32 @@ Item {
                             id: name
                             anchors.left: root.dm ? face.right : glyph.right
                             anchors.leftMargin: root.dm ? 10 : 4
-                            anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(implicitWidth, parent.width - x - (more.visible ? more.width + 2 : 0))
                             textFormat: Text.PlainText
                             text: Nav.activeChannelName
                             color: Theme.ink1
                             font: Theme.type.columnTitle
                             elide: Text.ElideRight
                         }
+                        // The title is a key: its media, links and files.
+                        Icon {
+                            id: more
+                            anchors.left: name.right
+                            anchors.leftMargin: 2
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: title.opensMedia
+                            name: "chevronRight"
+                            size: Theme.iconSm
+                            color: Theme.ink3
+                            Accessible.ignored: true
+                        }
                     }
                 }
                 TapHandler {
-                    enabled: root.dm
-                    onTapped: root.profileRequested(Nav.dmUserId)
+                    enabled: root.dm || title.opensMedia
+                    gesturePolicy: TapHandler.ReleaseWithinBounds
+                    onTapped: title.activate()
                 }
             }
 
@@ -340,6 +363,17 @@ Item {
                     tip: root.dm ? qsTr("Search messages with %1").arg(Nav.activeChannelName)
                         : qsTr("Search %1").arg(Nav.activeServerName)
                     onClicked: Router.open("SearchPage")
+                }
+                // A DM's media, links and files (MediaPage); a server
+                // channel's title opens them.
+                IconKey {
+                    id: mediaKey
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.dm && Nav.activeChannelId.length > 0
+                    iconName: "image"
+                    tone: "ghost"
+                    tip: qsTr("Media, links and files")
+                    onClicked: Router.open("MediaPage")
                 }
                 // The conversation's pinned messages (PinsPage).
                 IconKey {

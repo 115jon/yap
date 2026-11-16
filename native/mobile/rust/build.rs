@@ -50,6 +50,7 @@ const QML: &[&str] = &[
     "qml/FriendsPage.qml",
     "qml/ThreadPage.qml",
     "qml/SearchPage.qml",
+    "qml/MediaPage.qml",
     "qml/PinsPage.qml",
     "qml/ThreadsPage.qml",
     "qml/InboxPage.qml",
@@ -121,13 +122,14 @@ fn main() {
         .map(|path| QmlFile::from(*path))
         // This phone's own settings (QSettings), the page router, the
         // camera's and the screen share's links to the call, and the
-        // chat's player sheet's.
+        // chat's player sheet's, and file saves into Downloads.
         .chain([
             QmlFile::from("qml/Prefs.qml").singleton(true),
             QmlFile::from("qml/Router.qml").singleton(true),
             QmlFile::from("qml/CameraLink.qml").singleton(true),
             QmlFile::from("qml/ShareLink.qml").singleton(true),
             QmlFile::from("qml/MediaLink.qml").singleton(true),
+            QmlFile::from("qml/FileSaves.qml").singleton(true),
         ]);
     CxxQtBuilder::new_qml_module(QmlModule::new("com.yap.mobile").qml_files(files)).build();
 }
