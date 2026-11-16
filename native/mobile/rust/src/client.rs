@@ -326,6 +326,16 @@ impl Platform for Mobile {
         Some(crate::voice::set_voice_profile(profile))
     }
 
+    #[cfg(target_os = "android")]
+    fn set_voice_value(&self, key: &str, value: &str) -> Option<String> {
+        Some(crate::voice::set_voice_value(key, value))
+    }
+
+    #[cfg(target_os = "android")]
+    fn call_mic_level(&self) -> Option<f64> {
+        crate::voice::mic_level()
+    }
+
     fn on_update(&self, update: ViewUpdate) -> bool {
         // The session for private media (attachments, custom emoji).
         if let ViewUpdate::MediaAuth(token) = update {

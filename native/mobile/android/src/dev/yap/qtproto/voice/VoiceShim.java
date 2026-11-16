@@ -55,6 +55,8 @@ public final class VoiceShim {
     private static final Handler main = new Handler(Looper.getMainLooper());
     private static volatile Context app;
     private static volatile CallAudio audio;
+    /** Settings > Voice & video's output: where each call starts (null: automatic). */
+    private static volatile String preferredRoute;
     /** The natives above are registered and libwebrtc took the context. */
     private static volatile boolean ready;
 
@@ -107,7 +109,7 @@ public final class VoiceShim {
             active = true;
             startedAt = System.currentTimeMillis();
             interruptDeafened = false;
-            audio.begin();
+            audio.begin(preferredRoute);
             // A microphone service may only start with the permission and
             // from the foreground (Android 14 refuses it otherwise, and a
             // service asked to start must then become a foreground one).
@@ -184,6 +186,11 @@ public final class VoiceShim {
      */
     public static void userChanged() {
         main.post(() -> interruptDeafened = false);
+    }
+
+    /** The route each call starts on (`default`: automatic). */
+    public static void setPreferredRoute(String id) {
+        preferredRoute = "default".equals(id) ? null : id;
     }
 
     public static void setRoute(String id) {

@@ -140,6 +140,19 @@ void Native::setCameraCapture(bool on)
   emit cameraCaptureChanged();
 }
 
+void Native::setCameraFacing(bool front)
+{
+  if (front == m_cameraFront)
+    return;
+  if (m_cameraCapture) {
+    // The capture says which camera it took (onCameraStarted).
+    flipCamera();
+    return;
+  }
+  m_cameraFront = front;
+  emit cameraFrontChanged();
+}
+
 void Native::flipCamera()
 {
 #ifdef Q_OS_ANDROID

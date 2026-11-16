@@ -100,10 +100,11 @@ final class CallAudio {
         this.listener = listener;
     }
 
-    void begin() {
+    /** Starts the call's audio on `preferred` while it is there (null: automatic). */
+    void begin(String preferred) {
         if (running) return;
         running = true;
-        chosen = null;
+        chosen = preferred;
         interrupted = false;
         focusAway = false;
         phoneBusy = false;

@@ -14,8 +14,11 @@
 //! device's heat and whether its network is metered (cpp/videohub.cpp
 //! reports both, [`set_limits`]); the call takes a change in place. At
 //! `THERMAL_STATUS_SEVERE` there is none: the shell turns the camera off
-//! (CameraLink.qml), and the last encoding stands meanwhile.
+//! (CameraLink.qml), and the last encoding stands meanwhile. Settings >
+//! Voice & video's "Data saver" sends the low layer always, as a metered
+//! network does ([`set_data_saver`]).
 
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::OnceLock;
 
 use tokio::sync::watch;
@@ -32,10 +35,28 @@ pub fn subscribe() -> watch::Receiver<Vec<CameraEncoding>> {
     encodings().subscribe()
 }
 
+/// The last heat and network [`set_limits`] had, and the data saver.
+static THERMAL: AtomicI32 = AtomicI32::new(-1);
+static METERED: AtomicBool = AtomicBool::new(false);
+static SAVER: AtomicBool = AtomicBool::new(false);
+
+/// "Data saver": the low layer whatever the network.
+pub fn set_data_saver(on: bool) {
+    if SAVER.swap(on, Ordering::Relaxed) != on {
+        set_limits(
+            THERMAL.load(Ordering::Relaxed),
+            METERED.load(Ordering::Relaxed),
+        );
+    }
+}
+
 /// The device's heat (Android's `THERMAL_STATUS_*`, below 0 unknown) and
 /// whether its network is metered, each time one changes.
 pub fn set_limits(thermal: i32, metered: bool) {
-    let Some(encoding) = phone_camera(thermal, metered) else {
+    THERMAL.store(thermal, Ordering::Relaxed);
+    METERED.store(metered, Ordering::Relaxed);
+    let saver = SAVER.load(Ordering::Relaxed);
+    let Some(encoding) = phone_camera(thermal, metered || saver) else {
         return;
     };
     encodings().send_if_modified(|current| {

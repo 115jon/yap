@@ -17,9 +17,11 @@ SettingsFrame {
     readonly property var pages: ({
         SettingsProfilePage: { icon: "profile", title: qsTr("Profile") },
         SettingsAccountPage: { icon: "account", title: qsTr("Account") },
+        ConnectionsPage: { icon: "connections", title: qsTr("Connections") },
         SettingsPrivacyPage: { icon: "privacy", title: qsTr("Privacy & safety") },
         SettingsDevicesPage: { icon: "sessions", title: qsTr("Devices") },
         SettingsPlanPage: { icon: "sparkle", title: qsTr("Yap Loud") },
+        SettingsVoicePage: { icon: "mic", title: qsTr("Voice & video") },
         SettingsSoundboardPage: { icon: "soundboard", title: qsTr("Soundboard") },
         SettingsAppearancePage: { icon: "appearance", title: qsTr("Appearance") },
         SettingsNotificationsPage: { icon: "bell", title: qsTr("Notifications") },
@@ -34,11 +36,22 @@ SettingsFrame {
         { page: "SettingsAccountPage", label: qsTr("Username"), words: "handle sign in" },
         { page: "SettingsAccountPage", label: qsTr("Sign out"), words: "log out logout" },
         { page: "SettingsAccountPage", label: qsTr("Delete account"), words: "remove close account" },
+        { page: "ConnectionsPage", label: qsTr("Steam"), words: "connections link linked accounts deadlock" },
+        { page: "ConnectionsPage", label: qsTr("Show on profile"), words: "connections steam linked accounts" },
         { page: "SettingsPrivacyPage", label: qsTr("Share my activity"), words: "playing game activity status" },
         { page: "SettingsPrivacyPage", label: qsTr("Who can DM you"), words: "direct messages dm calls block" },
         { page: "SettingsPrivacyPage", label: qsTr("Media filter"), words: "gif sticker safe search nsfw sensitive" },
         { page: "SettingsDevicesPage", label: qsTr("Signed-in devices"), words: "sessions sign out other devices phone computer" },
         { page: "SettingsPlanPage", label: qsTr("Your plan"), words: "loud founder billing upgrade subscription tier" },
+        { page: "SettingsVoicePage", label: qsTr("Output"), words: "speaker earpiece phone headset bluetooth headphones audio route device" },
+        { page: "SettingsVoicePage", label: qsTr("Input profile"), words: "voice isolation studio custom microphone mic" },
+        { page: "SettingsVoicePage", label: qsTr("Noise suppression"), words: "background noise mic microphone" },
+        { page: "SettingsVoicePage", label: qsTr("Echo cancellation"), words: "echo feedback mic microphone" },
+        { page: "SettingsVoicePage", label: qsTr("Automatic gain control"), words: "agc volume level mic microphone" },
+        { page: "SettingsVoicePage", label: qsTr("High fidelity"), words: "music quality mic microphone" },
+        { page: "SettingsVoicePage", label: qsTr("Input sensitivity"), words: "voice activity threshold level meter test mic microphone" },
+        { page: "SettingsVoicePage", label: qsTr("Camera"), words: "front back video selfie" },
+        { page: "SettingsVoicePage", label: qsTr("Data saver"), words: "camera video quality mobile data" },
         { page: "SettingsSoundboardPage", label: qsTr("Soundboard volume"), words: "sounds loud" },
         { page: "SettingsAppearancePage", label: qsTr("Theme"), words: "dark light colour color mode match system" },
         { page: "SettingsAppearancePage", label: qsTr("Use on all my devices"), words: "theme sync" },
@@ -104,7 +117,7 @@ SettingsFrame {
 
     function open(page) {
         Qt.inputMethod.hide()
-        Router.open(page, {}, { key: page })
+        Router.open(page)
     }
 
     title: qsTr("Settings")
@@ -247,6 +260,10 @@ SettingsFrame {
             hint: qsTr("Sign out, delete account")
         }
         HubRow {
+            page: "ConnectionsPage"
+            hint: qsTr("Linked accounts, such as Steam")
+        }
+        HubRow {
             page: "SettingsPrivacyPage"
             hint: qsTr("Activity, DMs, media filter")
         }
@@ -261,9 +278,14 @@ SettingsFrame {
     }
 
     AdminSection {
-        visible: root.query.length === 0 && root.hasSoundboard
+        visible: root.query.length === 0
         title: qsTr("Calls")
         HubRow {
+            page: "SettingsVoicePage"
+            hint: qsTr("Output, mic and camera")
+        }
+        HubRow {
+            visible: root.hasSoundboard
             page: "SettingsSoundboardPage"
             hint: qsTr("Playback volume")
         }
