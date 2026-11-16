@@ -8,20 +8,21 @@ import Yap.Ui
 // A widget's options (editor-fields.tsx, the inspector as the toolbar's
 // "More options" popover): the fields its type has, each written straight
 // into the editor's draft (Board.setCfg, typing runs coalesced into one
-// undo step). Text is kept as typed; the server cleans it on save.
+// undo step). Text is kept as typed; the server cleans it on save. The
+// choices, limits and writes are Yap.Ui BoardOptionsCore's, shared with
+// the phone's widget sheet.
 T.Popup {
     id: options
 
     // The cell as the rack has it ({id, type, size, cfg, name, ...}).
     property var cell: null
     property var boardState: ({})
-    readonly property string kind: cell?.type ?? ""
-    readonly property var cfg: cell?.cfg ?? ({})
-
-    function set(key, value, coalesce) {
-        if (cell)
-            Board.setCfg(cell.id, key, JSON.stringify(value), coalesce === true)
+    readonly property BoardOptionsCore core: BoardOptionsCore {
+        cell: options.cell
+        boardState: options.boardState
     }
+    readonly property string kind: core.kind
+    readonly property var cfg: core.cfg
 
     width: 380
     // Never taller than the window (less the 8 px margins): long options
@@ -162,16 +163,6 @@ T.Popup {
         TapHandler { onTapped: if (check.can || check.on) check.toggled() }
     }
 
-    function toggled(list, id, max) {
-        const next = (list ?? []).slice()
-        const at = next.indexOf(id)
-        if (at >= 0)
-            next.splice(at, 1)
-        else if (next.length < max)
-            next.push(id)
-        return next
-    }
-
     contentItem: Flickable {
         id: flick
         clip: true
@@ -202,46 +193,46 @@ T.Popup {
             Choice {
                 visible: options.kind === "now_playing"
                 label: qsTr("When you're not playing")
-                items: [{ id: "last_played", label: qsTr("Show the last game") }, { id: "hide", label: qsTr("Show nothing") }]
-                value: options.cfg.when_idle ?? "last_played"
-                onChosen: id => options.set("when_idle", id)
+                items: options.core.idleChoices
+                value: options.core.whenIdle
+                onChosen: id => options.core.set("when_idle", id)
             }
             // top_games
             Choice {
                 visible: options.kind === "top_games"
                 label: qsTr("Range")
-                items: [{ id: "7d", label: qsTr("7 days") }, { id: "30d", label: qsTr("30 days") }, { id: "all", label: qsTr("All time") }]
-                value: options.cfg.range ?? "30d"
-                onChosen: id => options.set("range", id)
+                items: options.core.gameRanges
+                value: options.core.gameRange
+                onChosen: id => options.core.set("range", id)
             }
             // deadlock
             Choice {
                 visible: options.kind === "deadlock"
                 label: qsTr("When you're not in a match")
-                items: [{ id: "career", label: qsTr("Career") }, { id: "last_match", label: qsTr("Last match") }]
-                value: options.cfg.at_rest ?? "career"
-                onChosen: id => options.set("at_rest", id)
+                items: options.core.deadlockRests
+                value: options.core.deadlockRest
+                onChosen: id => options.core.set("at_rest", id)
             }
             Choice {
                 visible: options.kind === "deadlock"
                 label: qsTr("Range")
-                items: [{ id: "7d", label: qsTr("7 days") }, { id: "30d", label: qsTr("30 days") }, { id: "season", label: qsTr("Season") }]
-                value: options.cfg.range ?? "30d"
-                onChosen: id => options.set("range", id)
+                items: options.core.deadlockRanges
+                value: options.core.deadlockRange
+                onChosen: id => options.core.set("range", id)
             }
             Check {
                 visible: options.kind === "deadlock"
                 label: qsTr("Show my party (Yap friends who linked Steam)")
-                on: options.cfg.show_party !== false
-                onToggled: options.set("show_party", !on)
+                on: options.core.showParty
+                onToggled: options.core.set("show_party", !on)
             }
             // voice_hours
             Choice {
                 visible: options.kind === "voice_hours"
                 label: qsTr("Period")
-                items: [{ id: "month", label: qsTr("This month") }, { id: "30d", label: qsTr("Last 30 days") }]
-                value: options.cfg.period ?? "month"
-                onChosen: id => options.set("period", id)
+                items: options.core.voicePeriods
+                value: options.core.voicePeriod
+                onChosen: id => options.core.set("period", id)
             }
             // listening
             Text {
@@ -265,14 +256,14 @@ T.Popup {
                     font: Theme.type.silk
                 }
                 Repeater {
-                    model: options.kind === "badges" ? (options.boardState?.myBadges ?? []) : []
+                    model: options.core.myBadges
                     delegate: Check {
                         required property var modelData
-                        readonly property var picked: options.cfg.badge_ids ?? []
+                        readonly property var picked: options.core.badgeIds
                         label: modelData.name
                         on: picked.indexOf(modelData.id) >= 0
-                        can: picked.length < 8
-                        onToggled: options.set("badge_ids", options.toggled(picked, modelData.id, 8))
+                        can: picked.length < options.core.maxBadges
+                        onToggled: options.core.toggleBadge(modelData.id)
                     }
                 }
                 Text {
@@ -295,14 +286,14 @@ T.Popup {
                     font: Theme.type.silk
                 }
                 Repeater {
-                    model: options.kind === "servers" ? (options.boardState?.myServers ?? []) : []
+                    model: options.core.myServers
                     delegate: Check {
                         required property var modelData
-                        readonly property var picked: options.cfg.server_ids ?? []
+                        readonly property var picked: options.core.serverIds
                         label: modelData.name
                         on: picked.indexOf(modelData.id) >= 0
-                        can: picked.length < 4
-                        onToggled: options.set("server_ids", options.toggled(picked, modelData.id, 4))
+                        can: picked.length < options.core.maxServers
+                        onToggled: options.core.toggleServer(modelData.id)
                     }
                 }
             }
@@ -311,14 +302,10 @@ T.Popup {
                 visible: options.kind === "quote"
                 width: parent.width
                 label: qsTr("Message link or id")
-                limit: 200
+                limit: options.core.limits.quote
                 placeholder: qsTr("Paste a link to a message you sent")
                 value: options.cfg.message_id ?? ""
-                onEdited: text => {
-                    const parts = text.trim().split(/[\/#?]/).filter(p => p.length > 0)
-                    const id = parts.length > 0 ? parts[parts.length - 1] : ""
-                    options.set("message_id", id.length > 0 ? id : null, true)
-                }
+                onEdited: text => options.core.setQuote(text)
             }
             Text {
                 textFormat: Text.PlainText
@@ -333,7 +320,7 @@ T.Popup {
             Check {
                 visible: options.kind === "guestbook"
                 label: qsTr("Open for notes")
-                on: (Board.data.length > 0 ? (JSON.parse(Board.data).guestbook?.enabled ?? true) : true)
+                on: options.core.guestbookOpen
                 onToggled: Board.setGuestbookEnabled(!on)
             }
             Text {
@@ -349,27 +336,24 @@ T.Popup {
             Choice {
                 visible: options.kind === "mood"
                 label: qsTr("Pose")
-                items: [{ id: "bark", label: qsTr("Bark") }, { id: "stuffed", label: qsTr("Stuffed") }, { id: "sad", label: qsTr("Sad") }, { id: "squashed", label: qsTr("Squashed") }]
-                value: options.cfg.pose ?? "bark"
-                onChosen: id => options.set("pose", id)
+                items: options.core.poses
+                value: options.core.pose
+                onChosen: id => options.core.set("pose", id)
             }
             Field {
                 visible: options.kind === "mood"
                 width: parent.width
                 label: qsTr("How's it going")
-                limit: 60
+                limit: options.core.limits.mood
                 value: options.cfg.text ?? ""
-                onEdited: text => options.set("text", text, true)
+                onEdited: text => options.core.set("text", text, true)
             }
             Choice {
                 visible: options.kind === "mood"
                 label: qsTr("Clear after")
-                items: [{ id: "never", label: qsTr("Never") }, { id: "4h", label: qsTr("4 hours") }, { id: "1d", label: qsTr("A day") }, { id: "1w", label: qsTr("A week") }]
-                value: options.cfg.clears_at ? "" : "never"
-                onChosen: id => {
-                    const hours = { "4h": 4, "1d": 24, "1w": 168 }[id]
-                    options.set("clears_at", hours ? new Date(Date.now() + hours * 3600000).toISOString() : null)
-                }
+                items: options.core.clearChoices
+                value: options.core.clearAfter
+                onChosen: id => options.core.setClearAfter(id)
             }
             Text {
                 textFormat: Text.PlainText
@@ -383,34 +367,28 @@ T.Popup {
                 visible: options.kind === "countdown"
                 width: parent.width
                 label: qsTr("Title")
-                limit: 40
+                limit: options.core.limits.countdownTitle
                 value: options.cfg.title ?? ""
-                onEdited: text => options.set("title", text, true)
+                onEdited: text => options.core.set("title", text, true)
             }
             Field {
                 id: when
                 visible: options.kind === "countdown"
                 width: parent.width
                 label: qsTr("When (YYYY-MM-DD HH:MM)")
-                limit: 16
+                limit: options.core.limits.countdownWhen
                 placeholder: "2026-12-24 20:00"
                 value: options.cfg.at_local ?? ""
-                onEdited: text => {
-                    // Only a whole date and time: a partial one would be
-                    // read early and rewrite the field under the typist.
-                    const iso = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(text.trim()) ? Board.localToIso(text) : ""
-                    if (iso.length > 0)
-                        options.set("at", iso, true)
-                }
+                onEdited: text => options.core.setCountdownWhen(text)
             }
             // photos
             Field {
                 visible: options.kind === "photos"
                 width: parent.width
                 label: qsTr("Caption")
-                limit: 80
+                limit: options.core.limits.caption
                 value: options.cfg.caption ?? ""
-                onEdited: text => options.set("caption", text, true)
+                onEdited: text => options.core.set("caption", text, true)
             }
             Repeater {
                 // A count, not the array: an edit makes a new array, and a
@@ -432,13 +410,9 @@ T.Popup {
                     Field {
                         width: parent.width - 40 - 8 - 32 - 8
                         label: qsTr("Describe picture %1").arg(photoRow.index + 1)
-                        limit: 80
+                        limit: options.core.limits.alt
                         value: photoRow.item.alt ?? ""
-                        onEdited: text => {
-                            const next = (options.cfg.photos ?? []).map(p => ({ asset: p.asset, alt: p.alt }))
-                            next[photoRow.index].alt = text
-                            options.set("photos", next, true)
-                        }
+                        onEdited: text => options.core.setPhotoAlt(photoRow.index, text)
                     }
                     IconKey {
                         anchors.verticalCenter: parent.verticalCenter
@@ -446,11 +420,7 @@ T.Popup {
                         iconName: "trash"
                         tone: "destructive"
                         tip: qsTr("Remove picture")
-                        onClicked: {
-                            const next = (options.cfg.photos ?? []).map(p => ({ asset: p.asset, alt: p.alt }))
-                            next.splice(photoRow.index, 1)
-                            options.set("photos", next)
-                        }
+                        onClicked: options.core.removePhoto(photoRow.index)
                     }
                 }
             }
@@ -464,9 +434,7 @@ T.Popup {
                     width: column.width
                     spacing: 8
                     function update(key, value) {
-                        const next = (options.cfg.links ?? []).map(l => ({ label: l.label, url: l.url }))
-                        next[index][key] = value
-                        options.set("links", next, true)
+                        options.core.setLink(index, key, value)
                     }
                     Row {
                         width: parent.width
@@ -474,14 +442,14 @@ T.Popup {
                         Field {
                             width: (parent.width - 40 - 8) * 0.4
                             label: qsTr("Label")
-                            limit: 24
+                            limit: options.core.limits.linkLabel
                             value: linkRow.item.label ?? ""
                             onEdited: text => linkRow.update("label", text)
                         }
                         Field {
                             width: (parent.width - 40 - 8) * 0.6 - 8
                             label: qsTr("Link %1").arg(linkRow.index + 1)
-                            limit: 200
+                            limit: options.core.limits.linkUrl
                             placeholder: "https://"
                             value: linkRow.item.url ?? ""
                             onEdited: text => linkRow.update("url", text)
@@ -492,58 +460,46 @@ T.Popup {
                             iconName: "trash"
                             tone: "destructive"
                             tip: qsTr("Remove link")
-                            onClicked: {
-                                const next = (options.cfg.links ?? []).map(l => ({ label: l.label, url: l.url }))
-                                next.splice(linkRow.index, 1)
-                                options.set("links", next)
-                            }
+                            onClicked: options.core.removeLink(linkRow.index)
                         }
                     }
                 }
             }
             KitButton {
-                visible: options.kind === "links" && (options.cfg.links ?? []).length < 5
+                visible: options.kind === "links" && options.core.links.length < options.core.maxLinks
                 size: "sm"
                 variant: "secondary"
                 iconName: "add"
                 text: qsTr("Add a link")
-                onClicked: options.set("links", (options.cfg.links ?? []).concat([{ label: "", url: "" }]))
+                onClicked: options.core.addLink()
             }
             // custom
             Field {
                 visible: options.kind === "custom"
                 width: parent.width
                 label: qsTr("Legend")
-                limit: 24
+                limit: options.core.limits.legend
                 value: options.cfg.legend ?? ""
-                onEdited: text => options.set("legend", text, true)
+                onEdited: text => options.core.set("legend", text, true)
             }
             Field {
                 visible: options.kind === "custom"
                 width: parent.width
                 label: qsTr("Title")
-                limit: 40
+                limit: options.core.limits.customTitle
                 value: options.cfg.title ?? ""
-                onEdited: text => options.set("title", text, true)
+                onEdited: text => options.core.set("title", text, true)
             }
             Repeater {
-                model: options.kind === "custom" ? 4 : 0
+                model: options.kind === "custom" ? options.core.customLines : 0
                 delegate: Field {
                     id: lineField
                     required property int index
                     width: column.width
                     label: qsTr("Line %1").arg(index + 1)
-                    limit: 48
+                    limit: options.core.limits.line
                     value: (options.cfg.lines ?? [])[index] ?? ""
-                    onEdited: text => {
-                        const next = (options.cfg.lines ?? []).slice()
-                        while (next.length <= lineField.index)
-                            next.push("")
-                        next[lineField.index] = text
-                        while (next.length > 0 && next[next.length - 1] === "")
-                            next.pop()
-                        options.set("lines", next, true)
-                    }
+                    onEdited: text => options.core.setLine(lineField.index, text)
                 }
             }
             KitButton {
@@ -552,7 +508,7 @@ T.Popup {
                 variant: "secondary"
                 iconName: "trash"
                 text: qsTr("Remove the picture")
-                onClicked: options.set("asset", null)
+                onClicked: options.core.set("asset", null)
             }
             Text {
                 textFormat: Text.PlainText
@@ -565,7 +521,7 @@ T.Popup {
             }
             Text {
                 textFormat: Text.PlainText
-                visible: options.kind === "custom" && !(options.boardState?.canCustom ?? false)
+                visible: options.core.customLocked
                 width: parent.width
                 text: qsTr("Custom widgets show to others with Yap Loud. Until then this one is a draft only you see.")
                 wrapMode: Text.Wrap
