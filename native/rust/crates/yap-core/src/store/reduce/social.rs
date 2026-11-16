@@ -190,7 +190,17 @@ impl State {
                     avatar,
                     deco,
                     block: block.map(|b| b.as_str().to_owned()).unwrap_or_default(),
-                    block_notice: block.map(|b| b.notice().to_owned()).unwrap_or_default(),
+                    block_notice: block
+                        .map(|b| {
+                            let name = dm
+                                .recipient
+                                .display_name
+                                .as_deref()
+                                .filter(|name| !name.trim().is_empty())
+                                .unwrap_or(&dm.recipient.username);
+                            b.notice(name)
+                        })
+                        .unwrap_or_default(),
                 }
             })
             .unwrap_or_default();
@@ -415,6 +425,13 @@ impl State {
                 self.select_dm(fx, &id);
             }
             Err(error) if error.is_unauthorized() => self.fail(fx, &error),
+            // A block either way, or their "who can DM you" setting: the
+            // server's sentence says why ("Alex isn't accepting messages
+            // from you.").
+            Err(error) if crate::store::blocks::block_sentence(&error).is_some() => {
+                let sentence = crate::store::blocks::block_sentence(&error).unwrap_or(DM_FAILED);
+                fx.view(ViewUpdate::Notice(sentence.to_owned()));
+            }
             Ok(_) | Err(_) => fx.view(ViewUpdate::Notice(DM_FAILED.to_owned())),
         }
     }

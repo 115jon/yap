@@ -19,6 +19,10 @@ import type {
 } from "@/lib/types";
 import { toast } from "@/components/ui/toast";
 import { blockErrorMessage, blockStateFromError } from "@/lib/blocks";
+import {
+  dmNotAcceptingErrorMessage,
+  dmPermissionOf,
+} from "@/lib/dm-permission";
 import { useDmBlockStore } from "./useDmBlockStore";
 import { useMediaSafetySettingsStore } from "./useMediaSafetySettingsStore";
 import { mutedChannelPredicate } from "@/lib/notification-settings-client";
@@ -417,13 +421,18 @@ export function createChatActions(
         },
       });
 
-    // A DM closed by a block: the message was not sent and never will be,
-    // so it leaves the list (no Retry) and the composer says why.
+    // A DM closed by a block or by the recipient's "who can DM you"
+    // setting: the message was not sent and won't be, so it leaves the list
+    // (no Retry) and the composer says why.
     const refusedByBlock = (error: unknown) => {
       const block = blockStateFromError(error);
-      if (!block) return false;
+      const notAccepting = block ? null : dmNotAcceptingErrorMessage(error);
+      if (!block && !notAccepting) return false;
       dispatch({ type: "DELETE_MESSAGE", id: pendingId });
-      useDmBlockStore.getState().refuse(channelId, block);
+      if (block) useDmBlockStore.getState().refuse(channelId, block);
+      else if (notAccepting) {
+        useDmBlockStore.getState().refuseNotAccepting(channelId, notAccepting);
+      }
       return true;
     };
 
@@ -481,6 +490,10 @@ export function createChatActions(
       dispatch({ type: "REMOVE_REACTION", messageId, emoji, userId: user.id });
       const block = blockStateFromError(error);
       if (block) useDmBlockStore.getState().refuse(channelId, block);
+      const notAccepting = block ? null : dmNotAcceptingErrorMessage(error);
+      if (notAccepting) {
+        useDmBlockStore.getState().refuseNotAccepting(channelId, notAccepting);
+      }
     }
   };
 
@@ -842,6 +855,10 @@ export function createChatActions(
           theme_preference: string | null;
           theme_sync_enabled: number;
           media_content_filter: string;
+          /** "Who can DM you"; absent from servers that predate it. */
+          dm_permission?: string;
+          /** "Share my activity"; absent from servers that predate it. */
+          share_activity?: boolean;
           updated_at?: string | null;
           created_at?: string | null;
           bio?: string | null;
@@ -892,6 +909,8 @@ export function createChatActions(
           media_content_filter: parseMediaContentFilter(
             profile.media_content_filter,
           ),
+          dm_permission: dmPermissionOf(profile.dm_permission),
+          share_activity: profile.share_activity ?? current?.share_activity,
           updated_at: profile.updated_at ?? current?.updated_at,
           created_at: profile.created_at ?? current?.created_at,
           // users/me sends null for a cleared field: clear it, don't keep
@@ -1274,9 +1293,11 @@ export function createChatActions(
       dispatch({ type: "ADD_DM_CHANNEL", dmChannel: data });
       return data.id;
     } catch (error) {
-      // A block either way: no new DM, and the server's sentence says why.
-      const blocked = blockErrorMessage(error);
-      if (blocked) toast.error(blocked);
+      // A block either way, or their "who can DM you" setting: no new DM,
+      // and the server's sentence says why.
+      const refused =
+        blockErrorMessage(error) ?? dmNotAcceptingErrorMessage(error);
+      if (refused) toast.error(refused);
       return null;
     }
   };

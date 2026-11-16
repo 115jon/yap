@@ -18,6 +18,7 @@ import {
 } from "@/lib/profile-customization";
 import type { D1Database } from "@cloudflare/workers-types";
 import type { UserBadge } from "@/lib/badges";
+import { dmPermissionOf, type DmPermission } from "@/lib/dm-permission";
 import type { Entitlement } from "@/lib/entitlements";
 import type { PublicConnection } from "@/lib/connections";
 import { getShownConnections } from "@/services/connection.service";
@@ -44,6 +45,8 @@ export interface UserProfile {
   media_content_filter: string;
   /** "Share my activity": others may see the game this user is playing. */
   share_activity: boolean;
+  /** "Who can DM you" (migration 049); only ever sent to the user. */
+  dm_permission: DmPermission;
   updated_at: string | null;
   created_at: string | null;
   bio: string | null;
@@ -62,12 +65,14 @@ type UserProfileRow = Omit<
   UserProfile,
   | "display_name_style"
   | "share_activity"
+  | "dm_permission"
   | "entitlement"
   | "badges"
   | "connections"
 > & {
   display_name_style: string | null;
   share_activity: number | null;
+  dm_permission: string | null;
 };
 
 export interface MutualInfo {
@@ -101,7 +106,7 @@ export async function getMe(
   const [user, extras, connections] = await Promise.all([
     db
       .prepare(
-        `SELECT id, username, display_name, avatar_url, avatar_display, banner_url, banner_content_type, nameplate_url, nameplate_content_type, profile_accent_color, profile_background_color, profile_banner_color, display_name_style, theme_preference, theme_sync_enabled, media_content_filter, share_activity, updated_at, created_at, bio, pronouns, status, custom_status FROM users WHERE id = ?`,
+        `SELECT id, username, display_name, avatar_url, avatar_display, banner_url, banner_content_type, nameplate_url, nameplate_content_type, profile_accent_color, profile_background_color, profile_banner_color, display_name_style, theme_preference, theme_sync_enabled, media_content_filter, share_activity, dm_permission, updated_at, created_at, bio, pronouns, status, custom_status FROM users WHERE id = ?`,
       )
       .bind(userId)
       .first<UserProfileRow>(),
@@ -123,6 +128,7 @@ export async function getMe(
     avatar_display: normalizeAvatarDisplay(user.avatar_display),
     display_name_style: normalizeDisplayNameStyle(user.display_name_style),
     share_activity: user.share_activity !== 0,
+    dm_permission: dmPermissionOf(user.dm_permission),
     entitlement: extras.entitlement,
     badges: extras.badges,
     connections,

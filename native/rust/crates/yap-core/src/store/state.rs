@@ -793,6 +793,9 @@ pub struct SettingsState {
     /// "Share my activity" being saved: the value before it.
     pub share_activity_saving: Option<Option<bool>>,
     pub share_activity_error: String,
+    /// (value being saved, the value before it): "Who can DM you".
+    pub dm_permission_saving: Option<(String, Option<String>)>,
+    pub dm_permission_error: String,
     pub revoking_share: Option<String>,
     pub share_error: (String, String),
     /// `GET /api/billing/status`: ready with `enabled` on a 200; anything
@@ -814,6 +817,7 @@ pub(super) struct SettingsPending {
     pub media_filter: Option<RequestId>,
     pub revoke: Option<RequestId>,
     pub share_activity: Option<RequestId>,
+    pub dm_permission: Option<RequestId>,
     pub billing: Option<RequestId>,
 }
 

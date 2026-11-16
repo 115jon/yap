@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS users (
     theme_sync_enabled INTEGER NOT NULL DEFAULT 0,
     media_content_filter TEXT NOT NULL DEFAULT 'high',
     share_activity INTEGER NOT NULL DEFAULT 1, -- 0 hides game activity from others
+    dm_permission TEXT NOT NULL DEFAULT 'everyone' -- who can start a DM: everyone | friends_and_servers | nobody (migration 049)
+        CHECK (dm_permission IN ('everyone', 'friends_and_servers', 'nobody')),
     sound_settings TEXT,
     bio TEXT,
     pronouns TEXT,
@@ -419,6 +421,7 @@ CREATE TABLE IF NOT EXISTS user_stats (
 
 CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id);
 CREATE INDEX IF NOT EXISTS idx_messages_author_id ON messages(author_id);
+CREATE INDEX IF NOT EXISTS idx_messages_channel_author ON messages(channel_id, author_id);
 CREATE INDEX IF NOT EXISTS idx_messages_reply_to_id ON messages(reply_to_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(channel_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_history_cursor ON messages(channel_id, created_at DESC, id DESC);

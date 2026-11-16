@@ -52,11 +52,12 @@ pub enum ApiError {
     /// routes answers while the account waits for deletion.
     #[error("{0}")]
     Deletion(crate::account_deletion::DeletionRefusal),
-    /// A refusal over a block, by its `code`
-    /// ([`crate::store::blocks::refusal`]): `USER_BLOCKED` (you blocked
-    /// them) or `BLOCKED_BY_USER` (they blocked you). `message` is the
+    /// A refusal over a block or the recipient's "who can DM you" setting,
+    /// by its `code` ([`crate::store::blocks::refusal`]): `USER_BLOCKED`
+    /// (you blocked them), `BLOCKED_BY_USER` (they blocked you) or
+    /// `NOT_ACCEPTING_DMS` ([`crate::dm_permission`]). `message` is the
     /// server's sentence, written for people ("You can't message this
-    /// user.").
+    /// user.", "Alex isn't accepting messages from you.").
     #[error("{message}")]
     Blocked {
         block: crate::store::blocks::DmBlock,

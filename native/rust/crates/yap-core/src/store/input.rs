@@ -275,6 +275,9 @@ pub enum Command {
     SetMediaFilter(String),
     /// Settings → Privacy → "Share my activity".
     SetShareActivity(bool),
+    /// Settings → Privacy → "Who can DM you" (`everyone`,
+    /// `friends_and_servers`, `nobody`; [`crate::dm_permission`]).
+    SetDmPermission(String),
     /// What local game detection sees now (`None`: no game, detection off
     /// or the game hidden). Sent to the gateway only when it changes.
     SetGameActivity(Option<Box<yap_protocol::game_activity::GameActivity>>),

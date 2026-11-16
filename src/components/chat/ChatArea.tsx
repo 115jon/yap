@@ -295,8 +295,9 @@ export default function ChatArea({
         onOpenSearch={() => setLocalState({ showSearch: !showSearch })}
         showSearch={showSearch}
         onClose={onClose}
-        // No call button in a DM closed by a block (the server refuses rings).
-        onCall={dmBlock.block ? undefined : onCall}
+        // No call button in a DM closed by a block or by the recipient's
+        // "who can DM you" setting (the server refuses rings).
+        onCall={dmBlock.block || dmBlock.notAccepting ? undefined : onCall}
         dmUsername={dmUsername}
       />
       {/* The connection strip sits in the flow under the header, so a drop
@@ -396,6 +397,10 @@ export default function ChatArea({
                 channelId={channelId}
                 recipientId={dmBlock.recipientId}
               />
+            ) : isDM && dmBlock.notAccepting ? (
+              <div data-testid="dm-not-accepting-composer">
+                <ComposerReadOnly message={dmBlock.notAccepting} />
+              </div>
             ) : canSendMessages || isDM ? (
               <MessageInput
                 channelId={channelId}

@@ -1162,6 +1162,12 @@ pub struct SettingsView {
     pub share_activity: bool,
     pub share_activity_saving: bool,
     pub share_activity_error: String,
+    /// "Who can DM you" ([`crate::dm_permission`]; `everyone` when the
+    /// account has no say yet), the value being saved (empty: none) and
+    /// the last failure.
+    pub dm_permission: String,
+    pub dm_permission_saving: String,
+    pub dm_permission_error: String,
     pub revoking_share: String,
     /// (share id, error copy) of the last failed revoke.
     pub share_error: (String, String),

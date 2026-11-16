@@ -316,7 +316,13 @@ pub const ANSWERED_ELSEWHERE: &str = "answered_elsewhere";
 pub fn silent_stop(reason: &str) -> bool {
     matches!(
         reason,
-        "busy" | "unavailable" | "invalid" | "declined" | "blocked" | ANSWERED_ELSEWHERE
+        "busy"
+            | "unavailable"
+            | "invalid"
+            | "declined"
+            | "blocked"
+            | crate::dm_permission::RING_NOT_ACCEPTING
+            | ANSWERED_ELSEWHERE
     )
 }
 

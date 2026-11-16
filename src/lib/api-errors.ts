@@ -1,4 +1,5 @@
 import { blockErrorMessage } from "@/lib/blocks";
+import { dmNotAcceptingErrorMessage } from "@/lib/dm-permission";
 import { formatUploadLimit, parseServerLimitBytes } from "@/lib/upload-limits";
 
 /**
@@ -40,6 +41,10 @@ export function describeApiError(
   // message this user.").
   const blocked = blockErrorMessage(error);
   if (blocked) return blocked;
+  // So is a refusal over their "who can DM you" setting ("Alex isn't
+  // accepting messages from you.").
+  const notAccepting = dmNotAcceptingErrorMessage(error);
+  if (notAccepting) return notAccepting;
   if (status === 401) {
     return `Your session has ended. Sign in again to ${action}.`;
   }

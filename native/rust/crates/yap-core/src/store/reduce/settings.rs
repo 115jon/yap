@@ -564,6 +564,37 @@ impl State {
         }
     }
 
+    /// "Who can DM you" (PrivacyPanel.tsx `DmPermissionRow`): shown at
+    /// once, rolled back with the reason if the save fails.
+    pub(super) fn set_dm_permission(&mut self, fx: &mut Effects, value: &str) {
+        if !crate::dm_permission::is_dm_permission(value)
+            || self.settings.dm_permission_saving.is_some()
+        {
+            return;
+        }
+        let Some(before) = self.me().map(|me| me.dm_permission.clone()) else {
+            return;
+        };
+        if crate::dm_permission::dm_permission(before.as_deref()) == value {
+            return;
+        }
+        self.edit_me(fx, |me| me.dm_permission = Some(value.to_owned()));
+        let request = ApiRequest::UpdateProfile(json!({ "dmPermission": value }));
+        self.pending.settings.dm_permission = self.http(fx, request);
+        self.settings.dm_permission_saving = Some((value.to_owned(), before));
+        self.settings.dm_permission_error.clear();
+    }
+
+    fn on_dm_permission_saved(&mut self, fx: &mut Effects, result: Result<ApiResponse, ApiError>) {
+        let Some((_, before)) = self.settings.dm_permission_saving.take() else {
+            return;
+        };
+        if let Err(error) = result {
+            self.edit_me(fx, |me| me.dm_permission = before);
+            self.settings.dm_permission_error = describe_api_error(&error, "save who can DM you");
+        }
+    }
+
     pub(super) fn save_theme(&mut self, fx: &mut Effects, theme: Option<String>, sync: bool) {
         let theme = theme.filter(|theme| is_app_theme(theme));
         let preference = theme.clone();
@@ -597,6 +628,7 @@ impl State {
             &mut pending.media_filter,
             &mut pending.revoke,
             &mut pending.share_activity,
+            &mut pending.dm_permission,
             &mut pending.billing,
         ]
         .into_iter()
@@ -663,6 +695,7 @@ impl State {
             7 => self.on_media_filter_saved(fx, result),
             8 => self.on_share_revoked(result),
             9 => self.on_share_activity_saved(fx, result),
+            10 => self.on_dm_permission_saved(fx, result),
             _ => {
                 self.settings.billing = match result {
                     Ok(ApiResponse::BillingStatus(enabled)) => Load::Ready(enabled),
@@ -788,6 +821,12 @@ impl State {
             media_filter_error: s.media_filter_error.clone(),
             share_activity_saving: s.share_activity_saving.is_some(),
             share_activity_error: s.share_activity_error.clone(),
+            dm_permission_saving: s
+                .dm_permission_saving
+                .as_ref()
+                .map(|(value, _)| value.clone())
+                .unwrap_or_default(),
+            dm_permission_error: s.dm_permission_error.clone(),
             revoking_share: s.revoking_share.clone().unwrap_or_default(),
             share_error: s.share_error.clone(),
             ..SettingsView::default()
@@ -844,6 +883,8 @@ impl State {
             view.theme_sync = me.theme_sync();
             view.media_filter = media_filter(me.media_content_filter.as_deref()).to_owned();
             view.share_activity = me.share_activity != Some(false);
+            view.dm_permission =
+                crate::dm_permission::dm_permission(me.dm_permission.as_deref()).to_owned();
             view.created_at = text(&me.created_at);
             // The editor's preview card (SettingsAccountTab.tsx
             // `referenceDate`): joined the shown server, else created.

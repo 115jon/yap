@@ -359,6 +359,19 @@ impl State {
                     crate::store::blocks::CALL_BLOCKED.to_owned(),
                 ));
             }
+            // The callee's "who can DM you" setting: the server names them.
+            if stop.reason == crate::dm_permission::RING_NOT_ACCEPTING {
+                let message = stop
+                    .message
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|message| !message.is_empty())
+                    .map_or_else(
+                        || crate::dm_permission::not_accepting_call(""),
+                        str::to_owned,
+                    );
+                fx.view(ViewUpdate::Notice(message));
+            }
         }
         // A stop for another call (a ring we declined while busy) is not ours.
         let ours = self.calls.ring.as_ref().and_then(|r| r.call_id.as_deref());

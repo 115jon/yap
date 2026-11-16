@@ -241,6 +241,11 @@ pub struct User {
     /// that predate it, which means on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub share_activity: Option<bool>,
+    /// "Who can DM you" (`everyone`, `friends_and_servers`, `nobody`;
+    /// `GET /api/users/me` only); absent from servers that predate it,
+    /// which means everyone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dm_permission: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
     /// The synced join and leave sounds and the soundboard volume

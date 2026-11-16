@@ -71,6 +71,11 @@ pub mod qobject {
         #[qproperty(bool, share_activity, cxx_name = "shareActivity")]
         #[qproperty(bool, share_activity_saving, cxx_name = "shareActivitySaving")]
         #[qproperty(QString, share_activity_error, cxx_name = "shareActivityError")]
+        /// "Who can DM you" (`everyone`, `friends_and_servers`, `nobody`),
+        /// the value being saved (empty: none) and the last failure.
+        #[qproperty(QString, dm_permission, cxx_name = "dmPermission")]
+        #[qproperty(QString, dm_permission_saving, cxx_name = "dmPermissionSaving")]
+        #[qproperty(QString, dm_permission_error, cxx_name = "dmPermissionError")]
         #[qproperty(QString, revoking_share, cxx_name = "revokingShare")]
         #[qproperty(QString, share_error_id, cxx_name = "shareErrorId")]
         #[qproperty(QString, share_error, cxx_name = "shareError")]
@@ -194,6 +199,11 @@ pub mod qobject {
         #[cxx_name = "shareMyActivity"]
         fn share_my_activity(self: &Settings, on: bool);
 
+        /// Settings > Privacy > "Who can DM you".
+        #[qinvokable]
+        #[cxx_name = "changeDmPermission"]
+        fn change_dm_permission(self: &Settings, value: &QString);
+
         /// Picks a theme on this device (and on the account when synced).
         #[qinvokable]
         #[cxx_name = "chooseTheme"]
@@ -283,6 +293,9 @@ pub struct SettingsRust {
     share_activity: bool,
     share_activity_saving: bool,
     share_activity_error: QString,
+    dm_permission: QString,
+    dm_permission_saving: QString,
+    dm_permission_error: QString,
     revoking_share: QString,
     share_error_id: QString,
     share_error: QString,
@@ -508,6 +521,11 @@ fn apply(mut object: Pin<&mut qobject::Settings>, view: &SettingsView) {
         .set_share_activity_saving(view.share_activity_saving);
     o.as_mut()
         .set_share_activity_error(q(&view.share_activity_error));
+    o.as_mut().set_dm_permission(q(&view.dm_permission));
+    o.as_mut()
+        .set_dm_permission_saving(q(&view.dm_permission_saving));
+    o.as_mut()
+        .set_dm_permission_error(q(&view.dm_permission_error));
     o.as_mut().set_revoking_share(q(&view.revoking_share));
     o.as_mut().set_share_error_id(q(&view.share_error.0));
     o.set_share_error(q(&view.share_error.1));
@@ -741,6 +759,10 @@ impl qobject::Settings {
 
     pub fn share_my_activity(&self, on: bool) {
         client::command(Command::SetShareActivity(on));
+    }
+
+    pub fn change_dm_permission(&self, value: &QString) {
+        client::command(Command::SetDmPermission(value.to_string()));
     }
 
     pub fn choose_theme(mut self: Pin<&mut Self>, theme: &QString) {

@@ -135,6 +135,8 @@ export interface User {
   media_content_filter?: MediaContentFilter | null;
   /** Own account only: "Share my activity" (default on). */
   share_activity?: boolean;
+  /** "Who can DM you"; only on the signed-in user (from /api/users/me). */
+  dm_permission?: import("@/lib/dm-permission").DmPermission;
   updated_at?: string;
   created_at?: string | null;
   bio?: string | null;

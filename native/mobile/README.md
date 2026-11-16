@@ -243,10 +243,15 @@ Not there yet:
   `ProfileCard`, which needs QtMultimedia. A video banner shows its first
   frame (the phone plays video only full screen). The profile board under
   it is the desktop's (`Yap.Ui` `BoardCore`, `BoardRack` and the widgets in
-  `board/`), read-only: editing the board, and the desktop's widget picker
-  and options, stay on the desktop and web. It rises as a page of the
-  stack; it moves into the shared bottom sheet (drag to dismiss) when that
-  lands.
+  `board/`). Your own has Edit board: `BoardEditPage` lists the widgets in
+  board order (hold one to drag it, or use its arrows), opens a sheet for a
+  widget's size and settings and a catalogue sheet to add one, previews the
+  Rack as Me, a friend or anyone, and saves with Done through the same
+  editor in the core as the desktop. The picker's and the options' rules are
+  shared with the desktop (`BoardPickerCore`, `BoardOptionsCore`). Adding
+  pictures to the photo strip or a Custom widget stays on the web. It rises
+  as a page of the stack; it moves into the shared bottom sheet (drag to
+  dismiss) when that lands.
 - The rail has no unread-DM avatar keys under Home (the desktop's), no
   create-server tile and no shop row. Friends is the first row of Home's
   pane ("Settings and Friends").
