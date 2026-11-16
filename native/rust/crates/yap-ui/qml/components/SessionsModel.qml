@@ -6,6 +6,10 @@ import Yap.Ui
 // (`Settings.sessions`), this device and the others, the load states, the
 // device whose Sign out is asking first, and each revoke's busy and error
 // (`Extras.account`). Each surface keeps its own rows and confirm.
+// `othersSupported` false (the sign-in service cannot list or sign out other
+// devices yet) hides the other-devices part; `othersListed` false says they
+// could not be listed this time. "Sign out all other devices" arms and
+// tracks as the id `allOthers` ("*", ExtrasCommand::RevokeOtherSessions).
 QtObject {
     id: model
 
@@ -25,6 +29,10 @@ QtObject {
     readonly property bool loadingFirst: loading && sessions.length === 0
     readonly property bool failed: Settings.sessionsState === "error"
     readonly property string error: Settings.sessionsError
+    readonly property bool othersListed: Settings.sessionsOthersListed
+    readonly property bool othersSupported: Settings.sessionsOthersSupported
+    // The armed/busy/error id of "Sign out all other devices".
+    readonly property string allOthers: "*"
     // The revoke's state (`{revoking, revokeErrorId, revokeError}`).
     readonly property var account: {
         try {
@@ -46,7 +54,10 @@ QtObject {
         armed = ""
     }
     function revoke(id) {
-        Extras.revokeSession(id)
+        if (id === allOthers)
+            Extras.revokeOtherSessions()
+        else
+            Extras.revokeSession(id)
     }
     function busy(id) {
         return account.revoking === id

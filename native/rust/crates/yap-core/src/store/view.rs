@@ -1142,6 +1142,11 @@ pub struct SettingsView {
     pub email: Load<String>,
     pub sign_in_methods: Load<String>,
     pub sessions: Load<Vec<SessionRow>>,
+    /// False: other devices could not be listed this time.
+    pub sessions_others_listed: bool,
+    /// False: other devices cannot be listed or signed out at all yet; the
+    /// pages hide that part.
+    pub sessions_others_supported: bool,
     pub shares: Load<Vec<ShareRow>>,
     pub display_name_saving: bool,
     pub display_name_error: String,

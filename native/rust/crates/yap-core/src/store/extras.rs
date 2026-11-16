@@ -152,6 +152,9 @@ pub enum ExtrasCommand {
     Claim(String),
     /// Settings → Sessions: revoke another device's session.
     RevokeSession(String),
+    /// Settings → Sessions: sign out every other device. While it runs,
+    /// `revoking` (and a failure's `revokeErrorId`) is [`ALL_OTHER_SESSIONS`].
+    RevokeOtherSessions,
     /// The channel's quick invite: a fresh 7-day link to it.
     ChannelInvite {
         server_id: String,
@@ -225,6 +228,7 @@ pub enum ExtrasRequest {
     RevokeSession {
         session_id: String,
     },
+    RevokeOtherSessions,
     ChannelInvite {
         server_id: String,
         channel_id: String,
@@ -248,7 +252,8 @@ impl ExtrasRequest {
             Self::ClearNotifications
             | Self::RemoveReaction { .. }
             | Self::DeleteAvatar { .. }
-            | Self::RevokeSession { .. } => Method::Delete,
+            | Self::RevokeSession { .. }
+            | Self::RevokeOtherSessions => Method::Delete,
             Self::AddVoiceMedia { .. }
             | Self::GenerateEmoji { .. }
             | Self::Share { .. }
@@ -284,7 +289,7 @@ impl ExtrasRequest {
             }
             Self::SaveUsername { .. } => "/api/update-profile".into(),
             Self::Claims | Self::Claim { .. } => "/api/account-claims".into(),
-            Self::RevokeSession { .. } => "/api/sessions".into(),
+            Self::RevokeSession { .. } | Self::RevokeOtherSessions => "/api/sessions".into(),
             Self::ChannelInvite { server_id, .. } => format!("/api/servers/{server_id}/invites"),
         }
     }
@@ -317,6 +322,7 @@ impl ExtrasRequest {
             Self::SaveUsername { username } => json!({ "username": username }),
             Self::Claim { legacy_user_id } => json!({ "legacyUserId": legacy_user_id }),
             Self::RevokeSession { session_id } => json!({ "sessionId": session_id }),
+            Self::RevokeOtherSessions => json!({ "allOthers": true }),
             Self::ChannelInvite { channel_id, .. } => {
                 json!({ "channel_id": channel_id, "max_age": CHANNEL_INVITE_MAX_AGE })
             }
@@ -403,7 +409,8 @@ impl ExtrasRequest {
             | Self::DeleteAvatar { .. }
             | Self::SaveUsername { .. }
             | Self::Claim { .. }
-            | Self::RevokeSession { .. } => ExtrasResponse::Done,
+            | Self::RevokeSession { .. }
+            | Self::RevokeOtherSessions => ExtrasResponse::Done,
         })
     }
 }
@@ -561,8 +568,13 @@ pub enum ExtrasOp {
     Claims,
     Claim,
     RevokeSession(String),
+    RevokeOtherSessions,
     Invite,
 }
+
+/// `AccountView::revoking` and `revoke_error_id` while "Sign out all other
+/// devices" runs or after it failed: never a session id.
+pub const ALL_OTHER_SESSIONS: &str = "*";
 
 /// A load's state, as the view says it.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -647,6 +659,7 @@ pub struct ExtrasState {
     pub(super) claims: Vec<ClaimCandidate>,
     pub(super) claiming: Option<RequestId>,
     pub(super) claim_error: String,
+    /// The session being signed out, or [`ALL_OTHER_SESSIONS`].
     pub(super) revoking: Option<String>,
     pub(super) revoke_error: Option<(String, String)>,
     pub(super) invite_channel: String,

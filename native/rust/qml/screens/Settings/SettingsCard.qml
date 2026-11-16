@@ -16,6 +16,9 @@ Column {
     // Trailing controls on the legend line, before the index.
     property Component actions: null
     property Component legendLead: null
+    // False hides the card whatever the search shows (a feature the
+    // server does not have yet).
+    property bool available: true
     default property alias rows: list.data
 
     readonly property var section: SettingsNav.sections[sectionId] ?? null
@@ -37,7 +40,7 @@ Column {
             last.rule = false
     }
 
-    visible: title.length > 0 || SettingsNav.sectionShown(sectionId)
+    visible: available && (title.length > 0 || SettingsNav.sectionShown(sectionId))
     spacing: 0
     Accessible.role: Accessible.Grouping
     Accessible.name: legend

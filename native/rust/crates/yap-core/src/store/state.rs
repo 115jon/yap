@@ -752,12 +752,32 @@ impl ProfileStep {
     }
 }
 
+/// What `GET /api/sessions` knows of the account's other devices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionsOthers {
+    /// False: they could not be listed this time; others may exist.
+    pub listed: bool,
+    /// False: the sign-in service cannot list or sign out other devices at
+    /// all yet (Kova without its app-session endpoints). Clients hide them.
+    pub supported: bool,
+}
+
+impl Default for SessionsOthers {
+    fn default() -> Self {
+        Self {
+            listed: true,
+            supported: true,
+        }
+    }
+}
+
 /// What the settings dialog loaded and is saving.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SettingsState {
     pub email: Load<String>,
     pub sign_in_methods: Load<String>,
     pub sessions: Load<Vec<SessionInfo>>,
+    pub sessions_others: SessionsOthers,
     pub shares: Load<Vec<ShareItem>>,
     pub display_name_saving: bool,
     pub display_name_error: String,
