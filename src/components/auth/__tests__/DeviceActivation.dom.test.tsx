@@ -2,6 +2,7 @@
 
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -97,9 +98,17 @@ beforeEach(() => {
   mocks.markAuthLogoutIntent.mockClear();
   mocks.endKovaBrowserSession.mockReset();
   mocks.endKovaBrowserSession.mockResolvedValue(undefined);
+  // The launch is a passive effect. One that is still pending when a test
+  // ends flushes during unmount, after the afterEach below, so a call from
+  // the last test can land here; start every test from a clean spy.
+  mocks.launchNativeApp.mockReset();
 });
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  // Unmount first so any pending effect fires before the spies are cleared.
+  cleanup();
+  vi.clearAllMocks();
+});
 
 describe("DeviceActivation", () => {
   it("sends signed-out visitors to sign-in with a path-only return", () => {
@@ -286,7 +295,8 @@ describe("DeviceActivation", () => {
       name: "You're signed in on Yap",
     });
     const link = "yap-native://signin?code=ABCD-EFGH";
-    expect(mocks.launchNativeApp).toHaveBeenCalledTimes(1);
+    // The heading commits before the launch effect has to have run.
+    await waitFor(() => expect(mocks.launchNativeApp).toHaveBeenCalledTimes(1));
     expect(mocks.launchNativeApp).toHaveBeenCalledWith(link);
     expect(screen.getByRole("link", { name: "Open Yap" })).toHaveAttribute(
       "href",
@@ -321,7 +331,7 @@ describe("DeviceActivation", () => {
     await screen.findByRole("heading", { name: "You're signed in on Yap" });
     const link =
       "intent://signin?code=ABCD-EFGH#Intent;scheme=yap;package=dev.yap.app;end";
-    expect(mocks.launchNativeApp).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.launchNativeApp).toHaveBeenCalledTimes(1));
     expect(mocks.launchNativeApp).toHaveBeenCalledWith(link);
     expect(screen.getByRole("link", { name: "Open Yap" })).toHaveAttribute(
       "href",
