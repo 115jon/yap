@@ -321,7 +321,7 @@ const SETTINGS_PANELS: SettingsPanelDef[] = [
     icon: "privacy",
     headline: "What you see and what you share.",
     blurb:
-      "What others see you playing, the media you see, and the messages you've shared publicly.",
+      "What others see you playing, who can DM you, the media you see, and the messages you've shared publicly.",
     sections: [
       {
         id: "activity",
@@ -340,6 +340,30 @@ const SETTINGS_PANELS: SettingsPanelDef[] = [
               "rich presence",
               "status",
               "detection",
+            ],
+          },
+        ],
+      },
+      {
+        id: "direct-messages",
+        title: "Direct messages",
+        desc: "Who can start a DM with you. A DM you've written in stays open whatever you pick, and blocking someone always closes it.",
+        rows: [
+          {
+            id: "dm-permission",
+            label: "Who can DM you",
+            desc: "Applies to new messages and calls from people you haven't talked with.",
+            keywords: [
+              "dm",
+              "direct message",
+              "message requests",
+              "privacy",
+              "who can message",
+              "friends",
+              "server members",
+              "strangers",
+              "spam",
+              "calls",
             ],
           },
         ],

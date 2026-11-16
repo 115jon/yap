@@ -74,6 +74,7 @@ vi.mock("@/components/ui/toast", () => ({ toast: { error: vi.fn() } }));
 import { createChatGateway } from "./chat-gateway";
 import { SocketTicketError } from "@/lib/voice/socket-ticket-client";
 import { toast } from "@/components/ui/toast";
+import { useDmBlockStore } from "./useDmBlockStore";
 import {
   playCallConnect,
   playCallEnd,
@@ -890,6 +891,65 @@ describe("chat gateway CALL_RING_STOP", () => {
     expect(endCall).toHaveBeenCalledWith("blocked");
     expect(playCallEnd).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledWith("You can't call this user.");
+    gateway.disconnectGateway();
+  });
+
+  it("names the callee when their DM setting refuses the ring", async () => {
+    const { gateway, socket, endCall } = await connectWithCall({
+      status: "ringing_outgoing",
+      callId: null,
+    });
+
+    socket.message({
+      op: 19,
+      d: {
+        seq: 1,
+        event: "CALL_RING_STOP",
+        data: {
+          call_id: null,
+          reason: "not_accepting",
+          message: "Alex isn't accepting calls from you.",
+        },
+      },
+    });
+
+    expect(endCall).toHaveBeenCalledWith("not_accepting");
+    expect(playCallEnd).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(
+      "Alex isn't accepting calls from you.",
+    );
+    gateway.disconnectGateway();
+  });
+
+  it("reopens a DM the recipient's setting closed once they write in it", async () => {
+    const { gateway, socket } = await connectWithCall({
+      status: "idle",
+      callId: null,
+    });
+    useDmBlockStore
+      .getState()
+      .refuseNotAccepting("dm-1", "Alex isn't accepting messages from you.");
+
+    // Our own message (another device) leaves it closed.
+    const message = (authorId: string) =>
+      socket.message({
+        op: 19,
+        d: {
+          seq: 2,
+          event: "MESSAGE_CREATE",
+          data: {
+            id: `m-${authorId}`,
+            channel_id: "dm-1",
+            author_id: authorId,
+            content: "hi",
+            created_at: "2026-11-16T00:00:00.000Z",
+          },
+        },
+      });
+    message("user-1");
+    expect(useDmBlockStore.getState().notAccepting["dm-1"]).toBeDefined();
+    message("user-2");
+    expect(useDmBlockStore.getState().notAccepting["dm-1"]).toBeUndefined();
     gateway.disconnectGateway();
   });
 

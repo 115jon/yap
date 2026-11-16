@@ -372,6 +372,8 @@ export type ChatAction =
       pronouns?: string | null;
       /** The signed-in user's own "Share my activity" setting. */
       share_activity?: boolean;
+      /** The signed-in user's own "who can DM you" setting. */
+      dm_permission?: import("@/lib/dm-permission").DmPermission;
       updated_at?: string;
       created_at?: string | null;
     }
@@ -1409,6 +1411,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           newUser.media_content_filter = action.media_content_filter;
         if (action.share_activity !== undefined)
           newUser.share_activity = action.share_activity;
+        if (action.dm_permission !== undefined)
+          newUser.dm_permission = action.dm_permission;
         if (action.bio !== undefined) newUser.bio = action.bio;
         if (action.pronouns !== undefined) newUser.pronouns = action.pronouns;
         if (action.updated_at !== undefined)

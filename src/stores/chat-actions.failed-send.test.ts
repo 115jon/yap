@@ -103,7 +103,7 @@ describe("failed sends", () => {
 describe("sends refused over a block", () => {
   beforeEach(() => {
     mocks.apiPost.mockReset();
-    useDmBlockStore.setState({ refusals: {} });
+    useDmBlockStore.setState({ refusals: {}, notAccepting: {} });
   });
 
   function refusal(code: string, message: string) {
@@ -135,5 +135,35 @@ describe("sends refused over a block", () => {
     expect(useDmBlockStore.getState().refusals["channel-1"]).toBe(
       "you_blocked",
     );
+  });
+});
+
+describe("sends refused by the recipient's DM setting", () => {
+  beforeEach(() => {
+    mocks.apiPost.mockReset();
+    useDmBlockStore.setState({ refusals: {}, notAccepting: {} });
+  });
+
+  it("drops the row and keeps the server's sentence for the composer", async () => {
+    mocks.apiPost.mockRejectedValueOnce(
+      Object.assign(new Error("Alex isn't accepting messages from you."), {
+        status: 403,
+        code: "NOT_ACCEPTING_DMS",
+      }),
+    );
+    const { actions, getState } = setup();
+
+    await actions.sendMessage("channel-1", "hey");
+
+    expect(getState().messages.some((m) => m.content === "hey")).toBe(false);
+    expect(useDmBlockStore.getState().notAccepting["channel-1"]).toBe(
+      "Alex isn't accepting messages from you.",
+    );
+    expect(useDmBlockStore.getState().refusals["channel-1"]).toBeUndefined();
+
+    useDmBlockStore.getState().forget("channel-1");
+    expect(
+      useDmBlockStore.getState().notAccepting["channel-1"],
+    ).toBeUndefined();
   });
 });
