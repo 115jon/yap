@@ -138,6 +138,35 @@ describe("api-client 401 recovery (web)", () => {
     expect(getAppSessionState()).toBe("signed-out");
   });
 
+  it("goes signed out, and says why, when another device signed this browser out", async () => {
+    // Kova's terminal answer while the browser's app session stays revoked.
+    mint = () =>
+      Response.json({ error: "app_session_revoked" }, { status: 401 });
+    const { apiGet } = await freshClient();
+
+    await expect(apiGet("/api/users/me")).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(localStorage.getItem(PK_KEY)).toBeNull();
+    const recovery = await import("@/lib/app-session-recovery");
+    expect(recovery.getAppSessionState()).toBe("signed-out");
+    expect(recovery.getSignedOutElsewhere()).toBe(true);
+    // No retry loop: later refusals inside the cooldown do not ask again.
+    await expect(apiGet("/api/servers")).rejects.toMatchObject({ status: 401 });
+    expect(mintCalls()).toHaveLength(1);
+  });
+
+  it("does not say another device did it for a plain expired session", async () => {
+    mint = () => Response.json({ error: "Not authenticated" }, { status: 401 });
+    const { apiGet } = await freshClient();
+
+    await expect(apiGet("/api/users/me")).rejects.toMatchObject({
+      status: 401,
+    });
+    const recovery = await import("@/lib/app-session-recovery");
+    expect(recovery.getSignedOutElsewhere()).toBe(false);
+  });
+
   it("does not loop when a freshly minted token is refused too", async () => {
     validTokens = new Set();
     const { apiGet } = await freshClient();
