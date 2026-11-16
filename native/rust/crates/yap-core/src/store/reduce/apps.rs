@@ -37,6 +37,8 @@ use crate::wordle::{self, Completion};
 /// The playback id previews use (`local-preview`, `settings-preview`).
 const PREVIEW: &str = "local-preview";
 const SETTINGS_PREVIEW: &str = "settings-preview";
+/// The server key settings previews play under (no call's room).
+const SETTINGS_PREVIEW_KEY: &str = "settings";
 
 /// File types the upload route takes by extension
 /// (`SOUNDBOARD_AUDIO_TYPES_BY_EXTENSION`).
@@ -773,7 +775,13 @@ impl State {
                     }
                 }
             }
-            AppsCommand::LoadCatalog(server_id) => self.load_catalog(fx, &server_id),
+            AppsCommand::LoadCatalog(server_id) => {
+                // Settings: the members say whether we may upload there.
+                if !server_id.is_empty() {
+                    self.request_members(fx, &server_id);
+                }
+                self.load_catalog(fx, &server_id);
+            }
             AppsCommand::Play(sound_id) => self.play_sound(fx, &sound_id),
             AppsCommand::Preview(sound_id) => self.preview_sound(fx, &sound_id),
             AppsCommand::StopPlayback(playback_id) => {
@@ -1921,11 +1929,12 @@ impl State {
             }
             _ => return,
         };
-        let server_key = wire::server_key(sound.server_id.as_deref());
+        // One key for every settings preview, so a new one replaces the
+        // last (a server sound and a tone would otherwise overlap).
         let name = format!("Preview: {}", sound.name);
         self.play_local(
             fx,
-            &server_key,
+            SETTINGS_PREVIEW_KEY,
             SETTINGS_PREVIEW,
             &name,
             source,

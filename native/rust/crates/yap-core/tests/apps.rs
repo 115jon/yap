@@ -647,6 +647,16 @@ fn settings_should_upload_to_a_server_outside_a_call_then_choose_the_sound() {
 }
 
 #[test]
+fn the_chooser_should_ask_for_a_servers_members_to_know_the_upload_right() {
+    let mut client = Client::signed_in_with(Value::Null);
+    client.apps(AppsCommand::LoadCatalog("srv_fixture_two".into()));
+    assert!(client.asked.iter().any(|(_, r)| matches!(
+        r,
+        ApiRequest::Members { server_id } if server_id == "srv_fixture_two"
+    )));
+}
+
+#[test]
 fn a_chooser_entry_should_preview_without_a_call() {
     let mut client = Client::signed_in_with(Value::Null);
     client.apps(AppsCommand::LocalSettings {
