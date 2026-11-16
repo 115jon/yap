@@ -157,6 +157,28 @@ pub mod qobject {
         #[cxx_name = "previewTrigger"]
         fn preview_trigger(self: &Apps, trigger: &QString, scope: &QString);
 
+        /// Hear a join or leave chooser entry (`default:<id>` or
+        /// `server:<server>:<id>`) before choosing it.
+        #[qinvokable]
+        #[cxx_name = "previewPick"]
+        fn preview_pick(self: &Apps, pick: &QString);
+
+        /// Settings: upload an audio file (a path from the picker) as a
+        /// sound of `server_id`, then make it the `trigger` sound for
+        /// `scope`.
+        #[qinvokable]
+        #[cxx_name = "uploadTrigger"]
+        fn upload_trigger(
+            self: &Apps,
+            server_id: &QString,
+            trigger: &QString,
+            scope: &QString,
+            path: &QString,
+            name: &QString,
+            emoji: &QString,
+            volume: f64,
+        );
+
         /// `wordle` (or `warp-rush`) for the call.
         #[qinvokable]
         #[cxx_name = "startActivity"]
@@ -294,6 +316,34 @@ pub fn send(command: AppsCommand) {
     client::command(Command::Apps(command));
 }
 
+/// An upload of the file at `path` (its size and name read here).
+fn upload_command(
+    path: String,
+    name: &QString,
+    emoji: &QString,
+    volume: f64,
+    server_id: String,
+    then_pick: Option<(Trigger, String)>,
+) -> AppsCommand {
+    let file = std::path::Path::new(&path);
+    let size = std::fs::metadata(file).map_or(0, |m| m.len());
+    let file_name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    AppsCommand::Upload {
+        path,
+        file_name,
+        size,
+        content_type: String::new(),
+        sound_name: text(name),
+        emoji: text(emoji),
+        volume,
+        server_id,
+        then_pick,
+    }
+}
+
 fn text(value: &QString) -> String {
     value.to_string()
 }
@@ -400,22 +450,42 @@ impl qobject::Apps {
     }
 
     pub fn upload(&self, path: &QString, name: &QString, emoji: &QString, volume: f64) {
-        let path = text(path);
-        let file = std::path::Path::new(&path);
-        let size = std::fs::metadata(file).map_or(0, |m| m.len());
-        let file_name = file
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        send(AppsCommand::Upload {
-            path,
-            file_name,
-            size,
-            content_type: String::new(),
-            sound_name: text(name),
-            emoji: text(emoji),
+        send(upload_command(
+            text(path),
+            name,
+            emoji,
             volume,
-        });
+            String::new(),
+            None,
+        ));
+    }
+
+    #[expect(clippy::too_many_arguments, reason = "one QML call")]
+    pub fn upload_trigger(
+        &self,
+        server_id: &QString,
+        trigger: &QString,
+        scope: &QString,
+        path: &QString,
+        name: &QString,
+        emoji: &QString,
+        volume: f64,
+    ) {
+        let Some(trigger) = Trigger::parse(&text(trigger)) else {
+            return;
+        };
+        send(upload_command(
+            text(path),
+            name,
+            emoji,
+            volume,
+            text(server_id),
+            Some((trigger, text(scope))),
+        ));
+    }
+
+    pub fn preview_pick(&self, pick: &QString) {
+        send(AppsCommand::PreviewPick(text(pick)));
     }
 
     pub fn delete_sound(&self, sound_id: &QString) {

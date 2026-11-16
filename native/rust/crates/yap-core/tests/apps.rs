@@ -103,6 +103,19 @@ impl Client {
     /// Signed in (with `sound_settings`), on the fixture server, in its
     /// voice channel with the voice socket ready, the catalog answered.
     fn in_call_with(sound_settings: Value, catalog: Value) -> Self {
+        let mut client = Self::signed_in_with(sound_settings);
+        client.input(Input::User(Command::JoinVoice(VOICE.into())));
+        client.voice(VoiceUpdate::Connected);
+        client.voice(VoiceUpdate::VoiceReady {
+            participant_id: PID.into(),
+        });
+        client.respond(&catalog_request(), catalog);
+        client
+    }
+
+    /// Signed in (with `sound_settings`) and on the fixture server, its
+    /// channels in, no call.
+    fn signed_in_with(sound_settings: Value) -> Self {
         let mut client = Self {
             state: State::new(BASE),
             asked: Vec::new(),
@@ -133,12 +146,6 @@ impl Client {
             session,
             event: GatewayEvent::Ready,
         });
-        client.input(Input::User(Command::JoinVoice(VOICE.into())));
-        client.voice(VoiceUpdate::Connected);
-        client.voice(VoiceUpdate::VoiceReady {
-            participant_id: PID.into(),
-        });
-        client.respond(&catalog_request(), catalog);
         client
     }
 
@@ -432,6 +439,8 @@ fn an_upload_should_post_the_soundboard_fields_then_announce_the_sound() {
         sound_name: " Horn ".into(),
         emoji: "📯".into(),
         volume: 0.7,
+        server_id: String::new(),
+        then_pick: None,
     });
     let Some(Effect::SoundUpload {
         id,
@@ -485,6 +494,8 @@ fn a_non_audio_upload_should_be_refused_before_it_goes() {
         sound_name: "Notes".into(),
         emoji: String::new(),
         volume: 1.0,
+        server_id: String::new(),
+        then_pick: None,
     });
     assert!(!fx.iter().any(|e| matches!(e, Effect::SoundUpload { .. })));
     assert_eq!(
@@ -573,6 +584,92 @@ fn a_new_join_sound_should_be_saved_for_the_scope() {
         )
     );
     assert!(!client.view.joins[SERVER].inherited);
+}
+
+#[test]
+fn settings_should_upload_to_a_server_outside_a_call_then_choose_the_sound() {
+    let mut client = Client::signed_in_with(Value::Null);
+    client.apps(AppsCommand::LoadCatalog(SERVER.into()));
+    client.respond(&catalog_request(), json!([]));
+    assert!(client.view.upload_servers.iter().any(|s| s == SERVER));
+    let fx = client.apps(AppsCommand::Upload {
+        path: "C:/tmp/horn.mp3".into(),
+        file_name: "horn.mp3".into(),
+        size: 2048,
+        content_type: String::new(),
+        sound_name: "Horn".into(),
+        emoji: String::new(),
+        volume: 1.0,
+        server_id: SERVER.into(),
+        then_pick: Some((Trigger::Leave, "*".into())),
+    });
+    let Some(Effect::SoundUpload { id, channel_id, .. }) =
+        fx.iter().find(|e| matches!(e, Effect::SoundUpload { .. }))
+    else {
+        panic!("no upload: {:?}", client.view.sound_error);
+    };
+    assert!(!channel_id.is_empty());
+    let uploaded = yap_core::store::ApiResponse::Uploaded(
+        serde_json::from_value(json!({
+            "id": "snd_new", "file_url": "/api/soundboard/uploads/snd_new",
+            "file_name": "horn.mp3", "file_size": 2048, "content_type": "audio/mpeg",
+        }))
+        .expect("uploaded"),
+    );
+    let fx = client.input(Input::Http {
+        id: *id,
+        result: Ok(uploaded),
+    });
+    // No call: nothing goes to a room.
+    assert!(Client::frames(&fx).is_empty());
+    let saved = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::Http {
+                request: ApiRequest::Apps(request @ AppsRequest::SaveTrigger { .. }),
+                ..
+            } => Some(request.body()["sound_settings"]["voiceLeaveSoundboard"]["*"].clone()),
+            _ => None,
+        })
+        .expect("a save");
+    assert_eq!(
+        (
+            &saved["enabled"],
+            &saved["sound"]["soundId"],
+            &saved["sound"]["serverId"]
+        ),
+        (&json!(true), &json!("snd_new"), &json!(SERVER))
+    );
+    assert_eq!(
+        client.view.leaves["*"].pick,
+        format!("server:{SERVER}:snd_new")
+    );
+}
+
+#[test]
+fn the_chooser_should_ask_for_a_servers_members_to_know_the_upload_right() {
+    let mut client = Client::signed_in_with(Value::Null);
+    client.apps(AppsCommand::LoadCatalog("srv_fixture_two".into()));
+    assert!(client.asked.iter().any(|(_, r)| matches!(
+        r,
+        ApiRequest::Members { server_id } if server_id == "srv_fixture_two"
+    )));
+}
+
+#[test]
+fn a_chooser_entry_should_preview_without_a_call() {
+    let mut client = Client::signed_in_with(Value::Null);
+    client.apps(AppsCommand::LocalSettings {
+        sounds_enabled: true,
+        sound_volume: 50,
+        soundboard_volume: 100,
+    });
+    let fx = client.apps(AppsCommand::PreviewPick("default:pop".into()));
+    let Some(AudioCommand::Play { source, volume, .. }) = Client::audio(&fx).into_iter().next()
+    else {
+        panic!("no preview");
+    };
+    assert_eq!((source, volume), (ClipSource::Tone("pop".into()), 0.5));
 }
 
 // ── Listen Together ───────────────────────────────────────────────────────

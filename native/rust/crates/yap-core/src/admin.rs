@@ -492,6 +492,22 @@ impl TargetKind {
     }
 }
 
+/// What an audit entry is about, for the log's type filter: `role`,
+/// `channel` (channels and categories), `invite`, `member` or `server`.
+pub fn audit_kind(action: &str) -> &'static str {
+    // A member's roles changing is about the member (its target).
+    if action.starts_with("MEMBER_") {
+        return "member";
+    }
+    match TargetKind::of(action) {
+        TargetKind::Role => "role",
+        TargetKind::Channel => "channel",
+        TargetKind::Invite => "invite",
+        TargetKind::Member => "member",
+        TargetKind::Server => "server",
+    }
+}
+
 /// Names for audit targets: roles, members and channels the client knows.
 #[derive(Debug, Clone, Default)]
 pub struct AuditLookup {

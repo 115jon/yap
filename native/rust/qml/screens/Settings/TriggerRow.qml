@@ -6,31 +6,20 @@ import Yap.Ui
 // A join or leave sound (SoundboardPanel.tsx `TriggerRow`): the sound and
 // whether it comes from All servers, Preview, Change (a chooser of the
 // default sounds and the scope's server sounds), Clear with its confirm,
-// and the switch.
+// and the switch. The words and the choices: Yap.Ui's JoinLeaveCore.
 SettingsRow {
     id: root
 
     required property string trigger
-    required property string scope
-    required property var config
-    required property var catalogs
-    required property var serverIds
+    required property JoinLeaveCore core
     property bool choosing: false
     property bool clearing: false
 
-    readonly property string action: trigger === "join" ? qsTr("join") : qsTr("leave")
-    readonly property var choices: {
-        const out = [{ pick: "default:ping", name: qsTr("Ping") }, { pick: "default:pop", name: qsTr("Pop") },
-                     { pick: "default:chime", name: qsTr("Chime") }, { pick: "default:tada", name: qsTr("Ta-da") }]
-        for (const id of serverIds)
-            for (const sound of catalogs[id] ?? [])
-                out.push({ pick: "server:" + id + ":" + sound.id, name: sound.emoji ? sound.emoji + " " + sound.name : sound.name })
-        return out
-    }
+    readonly property var config: core.config(trigger)
+    readonly property string action: core.action(trigger)
 
     layout: "inline"
-    description: (config?.emoji ? config.emoji + " " : "") + (config?.name ?? qsTr("No sound chosen"))
-        + (config?.inherited ? qsTr(" · From All servers") : "")
+    description: core.describe(config)
 
     Row {
         spacing: 2
@@ -40,7 +29,7 @@ SettingsRow {
             tone: "ghost"
             enabled: root.config?.hasSound === true
             tip: qsTr("Preview %1 sound").arg(root.action)
-            onClicked: Apps.previewTrigger(root.trigger, root.scope)
+            onClicked: root.core.preview(root.trigger)
         }
         IconKey {
             size: 32
@@ -48,8 +37,7 @@ SettingsRow {
             tone: "ghost"
             tip: qsTr("Change %1 sound").arg(root.action)
             onClicked: {
-                for (const id of root.serverIds)
-                    Apps.loadCatalog(id)
+                root.core.loadCatalogs()
                 root.choosing = !root.choosing
             }
         }
@@ -65,7 +53,7 @@ SettingsRow {
             anchors.verticalCenter: parent.verticalCenter
             checked: root.config?.enabled === true
             Accessible.name: qsTr("Play a sound when you %1").arg(root.action)
-            onClicked: Apps.setTrigger(root.trigger, root.scope, checked ? 0 : 1, "", false)
+            onClicked: root.core.setEnabled(root.trigger, !checked)
         }
     }
 
@@ -73,12 +61,11 @@ SettingsRow {
         ConfirmStrip {
             visible: root.clearing
             width: parent ? parent.width : 0
-            consequence: qsTr("%1 stops playing when you %2 a voice channel. You can pick a sound again any time.")
-                .arg(root.config?.name ?? qsTr("This sound")).arg(root.action)
+            consequence: root.core.clearPrompt(root.trigger, root.config)
             confirmLabel: qsTr("Clear sound")
             onCancelled: root.clearing = false
             onConfirmed: {
-                Apps.setTrigger(root.trigger, root.scope, -1, "", true)
+                root.core.clear(root.trigger)
                 root.clearing = false
             }
         },
@@ -87,14 +74,14 @@ SettingsRow {
             width: parent ? parent.width : 0
             spacing: 6
             Repeater {
-                model: root.choosing ? root.choices : []
+                model: root.choosing ? root.core.choices : []
                 delegate: KitButton {
                     required property var modelData
                     size: "sm"
                     variant: "secondary"
                     text: modelData.name
                     onClicked: {
-                        Apps.setTrigger(root.trigger, root.scope, -1, modelData.pick, false)
+                        root.core.choose(root.trigger, modelData.pick)
                         root.choosing = false
                     }
                 }

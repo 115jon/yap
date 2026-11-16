@@ -117,7 +117,12 @@ pub enum AdminList {
     Invites,
     Bans,
     Audit,
+    /// The audit log's next older page, after `Audit`.
+    AuditMore,
 }
+
+/// Entries per audit log page (the server's default `limit`).
+pub const AUDIT_PAGE: usize = 50;
 
 /// What Server settings → Overview saves.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -153,8 +158,10 @@ pub enum AdminRequest {
     Bans {
         server_id: String,
     },
+    /// `page` counts from 1 (the newest).
     AuditLogs {
         server_id: String,
+        page: u32,
     },
     Overrides {
         channel_id: String,
@@ -361,7 +368,13 @@ impl AdminRequest {
             | Self::Unban { server_id, .. } => {
                 format!("{}/bans", servers(server_id))
             }
-            Self::AuditLogs { server_id } => format!("{}/audit-logs", servers(server_id)),
+            Self::AuditLogs { server_id, page } if *page > 1 => {
+                format!(
+                    "{}/audit-logs?limit={AUDIT_PAGE}&page={page}",
+                    servers(server_id)
+                )
+            }
+            Self::AuditLogs { server_id, .. } => format!("{}/audit-logs", servers(server_id)),
             Self::UpdateServer { server_id, .. } | Self::DeleteServer { server_id } => {
                 format!("{}/settings", servers(server_id))
             }
@@ -581,6 +594,11 @@ pub struct AdminState {
     pub invites: Load<Vec<Invite>>,
     pub bans: Load<Vec<Ban>>,
     pub audit: Load<Vec<AuditLog>>,
+    /// Audit log pages loaded, and whether the last one was the oldest.
+    pub audit_page: u32,
+    pub audit_end: bool,
+    /// The next page on its way, or why it didn't load.
+    pub audit_more: Load<()>,
     /// Channel settings are open on this channel, with its overrides.
     pub channel_id: Option<String>,
     pub overrides: Load<Vec<PermissionOverride>>,
@@ -607,6 +625,8 @@ pub(super) enum AdminOp {
     List {
         server_id: String,
         list: AdminList,
+        /// The audit log page asked for (`AuditMore`; 0 otherwise).
+        page: u32,
     },
     Overrides {
         channel_id: String,
