@@ -144,8 +144,6 @@ Rectangle {
         contentHeight: list.height
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        flickDeceleration: Native.flingDeceleration
-        maximumFlickVelocity: Native.maxFlingVelocity
 
         Column {
             id: list

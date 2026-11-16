@@ -408,8 +408,6 @@ Item {
         clip: true
         contentWidth: width
         contentHeight: content.height
-        flickDeceleration: Native.flingDeceleration
-        maximumFlickVelocity: Native.maxFlingVelocity
         // A scroll puts the keyboard away, as the system pickers do.
         onMovementStarted: Qt.inputMethod.hide()
 

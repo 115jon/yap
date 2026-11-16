@@ -135,8 +135,6 @@ FocusScope {
         anchors.rightMargin: 16 + page.SafeArea.margins.right
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        flickDeceleration: Native.flingDeceleration
-        maximumFlickVelocity: Native.maxFlingVelocity
         model: page.files
         header: Text {
             width: fileList.width
@@ -214,8 +212,6 @@ FocusScope {
         anchors.rightMargin: 16 + page.SafeArea.margins.right
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        flickDeceleration: Native.flingDeceleration
-        maximumFlickVelocity: Native.maxFlingVelocity
         model: page.chunks
         header: Item { width: 1; height: 16 }
         footer: Item { width: 1; height: 16 + page.SafeArea.margins.bottom }

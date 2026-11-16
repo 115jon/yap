@@ -19,7 +19,6 @@ import android.graphics.BitmapFactory;
 import android.graphics.ImageDecoder;
 import android.graphics.Insets;
 import android.graphics.Matrix;
-import android.hardware.SensorManager;
 import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Build;
@@ -36,7 +35,6 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewConfiguration;
 import android.view.WindowInsets;
 import android.view.WindowInsetsAnimation;
 import android.view.WindowInsetsController;
@@ -502,30 +500,6 @@ public final class NativeShim {
     public static int accent() {
         if (activity == null || Build.VERSION.SDK_INT < 31) return 0;
         return activity.getColor(android.R.color.system_accent1_500);
-    }
-
-    /** The platform's top fling speed, in dp/s (Qt's logical px). */
-    public static float maxFlingVelocity() {
-        if (activity == null) return 8000f;
-        return ViewConfiguration.get(activity).getScaledMaximumFlingVelocity() / density;
-    }
-
-    /**
-     * A constant deceleration (dp/s^2) that makes Qt's fling travel as far as
-     * Android's spline fling (OverScroller) does from a typical 2500 dp/s.
-     */
-    public static float flingDeceleration() {
-        if (activity == null) return 1500f;
-        final double inflexion = 0.35;
-        final double rate = Math.log(0.78) / Math.log(0.9);
-        double ppi = activity.getResources().getDisplayMetrics().density * 160.0;
-        double physical = SensorManager.GRAVITY_EARTH * 39.37 * ppi * 0.84;
-        double friction = ViewConfiguration.getScrollFriction() * physical;
-        double v = 2500.0 * density;
-        double l = Math.log(inflexion * v / friction);
-        double distance = friction * Math.exp(rate / (rate - 1.0) * l);
-        double decel = v * v / (2.0 * distance);
-        return (float) (decel / density);
     }
 
     // ---- Photos and videos for the composer ---------------------------------

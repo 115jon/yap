@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "a11y.h"
+#include "fling.h"
 #include "native.h"
 #include "rustnetwork.h"
 #include "videohub.h"
@@ -148,6 +149,8 @@ int main(int argc, char* argv[])
                      auto* window = qobject_cast<QQuickWindow*>(object);
                      if (!window)
                        return;
+                     // Flings at the finger's speed, as far as Android's (fling.h).
+                     installFling(window);
                      auto* pacing = new QElapsedTimer;
                      auto* intervals = new std::vector<qint64>;
                      auto* report = new QElapsedTimer;

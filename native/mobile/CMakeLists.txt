@@ -72,6 +72,7 @@ qt_add_executable(yapqt
   # TalkBack under sheets (a11y.h).
   cpp/a11y.cpp cpp/a11y.h
   cpp/native.cpp cpp/native.h
+  cpp/fling.cpp cpp/fling.h
   cpp/push.cpp
   cpp/links.cpp
   cpp/keystore.cpp

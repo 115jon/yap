@@ -154,8 +154,6 @@ Rectangle {
         anchors.fill: parent
         contentHeight: framedBox.y + framedBox.height + root.bottomInset + 24
         boundsBehavior: Flickable.StopAtBounds
-        flickDeceleration: Native.flingDeceleration
-        maximumFlickVelocity: Native.maxFlingVelocity
 
         // The page in its frame: under the status bar when framed, and the
         // banner runs up under it when not.

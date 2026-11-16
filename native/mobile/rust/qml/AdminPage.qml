@@ -144,8 +144,6 @@ Rectangle {
         contentHeight: body.height + root.keyboardPad
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        flickDeceleration: Native.flingDeceleration
-        maximumFlickVelocity: Native.maxFlingVelocity
 
         Column {
             id: body

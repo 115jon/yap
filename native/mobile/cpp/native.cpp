@@ -145,8 +145,6 @@ Native::Native(QObject* parent)
     qWarning("[native] could not register the shim's callbacks");
   QJniObject::callStaticMethod<void>(kShim, "install", "(Landroid/app/Activity;)V",
                                      QNativeInterface::QAndroidApplication::context().object());
-  m_maxFling = QJniObject::callStaticMethod<jfloat>(kShim, "maxFlingVelocity");
-  m_deceleration = QJniObject::callStaticMethod<jfloat>(kShim, "flingDeceleration");
   readConfiguration();
   applyBars();
   installPush();

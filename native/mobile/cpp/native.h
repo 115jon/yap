@@ -15,7 +15,6 @@
 //   text size      Configuration.fontScale
 //   motion         the animator duration scale (Remove animations)
 //   accent         Material You's system accent (Android 12+)
-//   fling          ViewConfiguration's fling speed and a matching friction
 //   media          the composer's attach menu: the photo picker
 //                  (ACTION_PICK_IMAGES, GET_CONTENT before 13), the files
 //                  picker (OPEN_DOCUMENT) and the system camera, each item
@@ -74,8 +73,6 @@ class Native : public QObject
   Q_PROPERTY(qreal fontScale READ fontScale NOTIFY configurationChanged)
   Q_PROPERTY(bool reducedMotion READ reducedMotion NOTIFY configurationChanged)
   Q_PROPERTY(QColor accent READ accent NOTIFY configurationChanged)
-  Q_PROPERTY(qreal maxFlingVelocity READ maxFlingVelocity CONSTANT)
-  Q_PROPERTY(qreal flingDeceleration READ flingDeceleration CONSTANT)
   // Picked files are being copied in (a long video takes a moment).
   Q_PROPERTY(bool pickingMedia READ pickingMedia NOTIFY pickingMediaChanged)
   // Dark system bar icons, for a light ground (the light themes). While
@@ -130,8 +127,6 @@ public:
   qreal fontScale() const { return m_fontScale; }
   bool reducedMotion() const { return m_reducedMotion; }
   QColor accent() const { return m_accent; }
-  qreal maxFlingVelocity() const { return m_maxFling; }
-  qreal flingDeceleration() const { return m_deceleration; }
   bool pickingMedia() const { return m_pickingMedia; }
   bool lightBars() const { return m_lightBars; }
   void setLightBars(bool on);
@@ -380,8 +375,6 @@ private:
   qreal m_fontScale = 1;
   bool m_reducedMotion = false;
   QColor m_accent;
-  qreal m_maxFling = 8000;
-  qreal m_deceleration = 1500;
   bool m_pickingMedia = false;
   // A picker was started and its result has not come back. Qt keeps one
   // callback per request code, so a second picker must not start meanwhile.
