@@ -2,6 +2,7 @@ package dev.yap.qtproto;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.view.MotionEvent;
 
 import org.qtproject.qt.android.bindings.QtActivity;
 
@@ -19,7 +20,8 @@ import dev.yap.qtproto.voice.VoiceShim;
  * its Answer go to IncomingCalls, which keeps them for Qt the same way, and
  * shows the app over the lock screen while the call needs it. And with a
  * call's goodbye on the way out. Crash reports (crash/CrashReports) are
- * set up before Qt starts, and last run's crash is offered on top.
+ * set up before Qt starts, and last run's crash is offered on top. Every
+ * touch passes FlingShim first, for the finger's speed at a lift.
  */
 public class YapActivity extends QtActivity {
     private static YapActivity shown;
@@ -53,6 +55,12 @@ public class YapActivity extends QtActivity {
             ShareShim.offer(intent);
         }
         CrashReports.test(intent);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        FlingShim.track(event);
+        return super.dispatchTouchEvent(event);
     }
 
     @Override
