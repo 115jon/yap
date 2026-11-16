@@ -126,6 +126,59 @@ function SessionItem({
   );
 }
 
+/** "Sign out all other devices", asking first. Throws nothing: shows its error. */
+function SignOutOthers({
+  count,
+  onRevokeAll,
+}: {
+  count: number;
+  onRevokeAll: () => Promise<void>;
+}) {
+  const { armed, arm, cancel, done, triggerRef } = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (armed) {
+    return (
+      <ConfirmStrip
+        consequence={
+          count === 1
+            ? "Your other device will be signed out and need to sign in again."
+            : `Your ${count} other devices will be signed out and need to sign in again.`
+        }
+        confirmLabel="Sign out all other devices"
+        busy={busy}
+        error={error}
+        onCancel={() => {
+          setError(null);
+          cancel();
+        }}
+        onConfirm={() => {
+          setBusy(true);
+          setError(null);
+          onRevokeAll()
+            .then(() => done())
+            .catch((err: unknown) =>
+              setError(describeApiError(err, "sign out your other devices")),
+            )
+            .finally(() => setBusy(false));
+        }}
+      />
+    );
+  }
+  return (
+    <Button
+      ref={triggerRef}
+      type="button"
+      variant="secondary"
+      size="sm"
+      onClick={arm}
+    >
+      Sign out all other devices
+    </Button>
+  );
+}
+
 /** Placeholder rows at the real row height while sessions load. */
 function SessionSkeleton() {
   return (
@@ -148,6 +201,9 @@ export default function SessionsPanel() {
   const [sessions, setSessions] = useState<any[]>([]);
   // False when the server could not list other devices (only this one).
   const [othersListed, setOthersListed] = useState(true);
+  // False when Yap's sign-in service cannot list or sign out other devices
+  // at all yet: that part is hidden.
+  const [othersSupported, setOthersSupported] = useState(true);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sessionEnded, setSessionEnded] = useState(false);
@@ -158,11 +214,14 @@ export default function SessionsPanel() {
     setLoadError(null);
     setSessionEnded(false);
     try {
-      const data = await apiGet<{ sessions: any[]; othersListed?: boolean }>(
-        "/api/sessions",
-      );
+      const data = await apiGet<{
+        sessions: any[];
+        othersListed?: boolean;
+        othersSupported?: boolean;
+      }>("/api/sessions");
       setSessions(data.sessions);
       setOthersListed(data.othersListed !== false);
+      setOthersSupported(data.othersSupported !== false);
     } catch (err: unknown) {
       setLoadError(describeApiError(err, "load your sessions"));
       setSessionEnded(isSessionEnded(err));
@@ -179,6 +238,12 @@ export default function SessionsPanel() {
   const handleRevokeSession = async (sessionId: string) => {
     await apiDelete("/api/sessions", { sessionId });
     setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+  };
+
+  /** Throws on failure; the confirm strip shows the error. */
+  const handleRevokeOthers = async () => {
+    await apiDelete("/api/sessions", { allOthers: true });
+    setSessions((prev) => prev.filter((s) => s.isCurrent));
   };
 
   const currentSessions = sessions.filter((session) => session.isCurrent);
@@ -234,40 +299,52 @@ export default function SessionsPanel() {
         </SettingsRow>
       </SettingsCard>
 
-      <SettingsCard id="other-devices">
-        <SettingsRow id="other-sessions" layout="block" hideLabel>
-          {() =>
-            unknown ? (
-              loadingFirst ? (
-                <SessionSkeleton />
+      {othersSupported ? (
+        <SettingsCard id="other-devices">
+          <SettingsRow id="other-sessions" layout="block" hideLabel>
+            {() =>
+              unknown ? (
+                loadingFirst ? (
+                  <SessionSkeleton />
+                ) : (
+                  <p className="text-ui-sm text-ink-2">
+                    Your other devices show here once your sessions load.
+                  </p>
+                )
+              ) : otherSessions.length > 0 ? (
+                <div className="flex flex-col gap-3">
+                  <ul className="divide-y divide-line">
+                    {otherSessions.map((session) => (
+                      <SessionItem
+                        key={session.id}
+                        session={session}
+                        onRevoke={handleRevokeSession}
+                        now={referenceTime}
+                      />
+                    ))}
+                  </ul>
+                  {otherSessions.length > 0 ? (
+                    <div className="flex flex-col items-start border-t border-line pt-3">
+                      <SignOutOthers
+                        count={otherSessions.length}
+                        onRevokeAll={handleRevokeOthers}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              ) : othersListed ? (
+                <p className="text-ui-sm text-ink-2">
+                  No other devices are signed in.
+                </p>
               ) : (
                 <p className="text-ui-sm text-ink-2">
-                  Your other devices show here once your sessions load.
+                  Other signed-in devices can't be listed right now.
                 </p>
               )
-            ) : otherSessions.length > 0 ? (
-              <ul className="divide-y divide-line">
-                {otherSessions.map((session) => (
-                  <SessionItem
-                    key={session.id}
-                    session={session}
-                    onRevoke={handleRevokeSession}
-                    now={referenceTime}
-                  />
-                ))}
-              </ul>
-            ) : othersListed ? (
-              <p className="text-ui-sm text-ink-2">
-                No other devices are signed in.
-              </p>
-            ) : (
-              <p className="text-ui-sm text-ink-2">
-                Other signed-in devices can't be listed right now.
-              </p>
-            )
-          }
-        </SettingsRow>
-      </SettingsCard>
+            }
+          </SettingsRow>
+        </SettingsCard>
+      ) : null}
     </>
   );
 }
