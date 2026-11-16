@@ -23,7 +23,6 @@ import {
 } from "@/lib/dm-permission";
 import { useDmBlockStore } from "./useDmBlockStore";
 import { useMediaSafetySettingsStore } from "./useMediaSafetySettingsStore";
-import { mutedChannelPredicate } from "@/lib/notification-settings-client";
 import {
   createNotificationSettingsActions,
   type NotificationSettingsActions,

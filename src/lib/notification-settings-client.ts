@@ -197,46 +197,6 @@ export const NO_MUTES: NotificationMuteLookup = createNotificationMuteLookup(
 );
 
 /**
- * Channel id → server id for every cached server channel, so a channel id
- * alone (lastMessageAt keys) can find its server's mute.
- */
-export function channelServerIndex(
-  channelsByServerId: Record<string, ReadonlyArray<{ id: string }>>,
-): Map<string, string> {
-  const index = new Map<string, string>();
-  for (const [serverId, channels] of Object.entries(channelsByServerId)) {
-    for (const channel of channels) index.set(channel.id, serverId);
-  }
-  return index;
-}
-
-/**
- * A predicate for getUnreadChannelState: is this channel or DM muted (so its
- * unread activity should not light the tray badge)? Built from the store.
- */
-export function mutedChannelPredicate(input: {
-  notificationSettings: NotificationSettingsMap;
-  notificationSettingsNow: number;
-  channelsByServerId: Record<string, ReadonlyArray<{ id: string }>>;
-  channels?: ReadonlyArray<{ id: string; server_id?: string | null }>;
-}): (channelId: string, isDm: boolean) => boolean {
-  const lookup = createNotificationMuteLookup(
-    input.notificationSettings,
-    input.notificationSettingsNow,
-  );
-  const serverOf = channelServerIndex(input.channelsByServerId);
-  for (const channel of input.channels ?? []) {
-    if (channel.server_id && !serverOf.has(channel.id)) {
-      serverOf.set(channel.id, channel.server_id);
-    }
-  }
-  return (channelId, isDm) =>
-    isDm
-      ? lookup.isDmMuted(channelId)
-      : lookup.isChannelMuted(channelId, serverOf.get(channelId) ?? null);
-}
-
-/**
  * What the settings will be once `change` is saved, so the menu can show it
  * before the server answers. `nowMs` is the server-adjusted clock.
  */

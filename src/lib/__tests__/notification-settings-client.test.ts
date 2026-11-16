@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { chatReducer, initialState } from "@/lib/chat-reducer";
-import { getUnreadChannelState } from "@/lib/desktop-notifications";
 import type { NotificationSetting } from "@/lib/notification-levels";
 import {
   applyNotificationSettingsChange,
   createNotificationMuteLookup,
   effectiveSettingsFor,
   formatMutedUntil,
-  mutedChannelPredicate,
   parseNotificationSetting,
   silencesChannelSounds,
   toNotificationSettingsMap,
@@ -98,28 +96,6 @@ describe("mute lookups (the unread rule)", () => {
   it("dims a muted DM, and DMs ignore server mutes", () => {
     expect(mutes.isDmMuted("dm-muted")).toBe(true);
     expect(mutes.isDmMuted("dm-open")).toBe(false);
-  });
-
-  it("keeps muted channels and DMs off the tray badge", () => {
-    const isMuted = mutedChannelPredicate({
-      notificationSettings: settings,
-      notificationSettingsNow: NOW,
-      channelsByServerId: { "s-muted": [{ id: "c-in-muted-server" }] },
-    });
-    const unread = getUnreadChannelState({
-      lastMessageAt: {
-        "c-muted": "2026-11-14T11:59:00.000Z",
-        "c-in-muted-server": "2026-11-14T11:59:00.000Z",
-        "c-open": "2026-11-14T11:59:00.000Z",
-        "dm-muted": "2026-11-14T11:59:00.000Z",
-        "dm-open": "2026-11-14T11:59:00.000Z",
-      },
-      readStates: {},
-      dmChannelIds: ["dm-muted", "dm-open"],
-      isMuted,
-    });
-    expect(unread.unreadServerChannelIds).toEqual(["c-open"]);
-    expect(unread.unreadDmChannelIds).toEqual(["dm-open"]);
   });
 });
 
