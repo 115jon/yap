@@ -486,9 +486,9 @@ fn apply(mut object: Pin<&mut qobject::Settings>, view: &SettingsView) {
     o.as_mut().set_sessions_error(q(view.sessions.error()));
     o.as_mut().set_sessions_state(q(view.sessions.state()));
     o.as_mut()
-        .set_sessions_others_listed(view.sessions_others_listed);
+        .set_sessions_others_listed(!view.sessions_others_unlisted);
     o.as_mut()
-        .set_sessions_others_supported(view.sessions_others_supported);
+        .set_sessions_others_supported(!view.sessions_others_unsupported);
     o.as_mut().set_shares(q(&shares_json(view, now)));
     o.as_mut().set_shares_error(q(view.shares.error()));
     o.as_mut().set_shares_state(q(view.shares.state()));

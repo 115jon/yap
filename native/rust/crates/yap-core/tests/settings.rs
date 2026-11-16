@@ -420,7 +420,10 @@ fn sessions_should_say_when_other_devices_are_unsupported_or_unlisted() {
         let fx = client.respond(id, &request, body);
         let view = settings(&fx).expect("view");
         assert_eq!(
-            (view.sessions_others_listed, view.sessions_others_supported),
+            (
+                !view.sessions_others_unlisted,
+                !view.sessions_others_unsupported
+            ),
             expected,
             "{flags}"
         );

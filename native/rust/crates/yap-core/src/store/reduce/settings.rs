@@ -768,8 +768,8 @@ impl State {
             email: s.email.clone(),
             sign_in_methods: s.sign_in_methods.clone(),
             sessions: map_load(&s.sessions, |list| list.iter().map(session_row).collect()),
-            sessions_others_listed: s.sessions_others.listed,
-            sessions_others_supported: s.sessions_others.supported,
+            sessions_others_unlisted: !s.sessions_others.listed,
+            sessions_others_unsupported: !s.sessions_others.supported,
             shares: map_load(&s.shares, |list| {
                 list.iter()
                     .map(|share| share_row(share, &self.api_base))
