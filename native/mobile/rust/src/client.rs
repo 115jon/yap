@@ -310,6 +310,22 @@ impl Platform for Mobile {
         crate::sound::play_test();
     }
 
+    /// The Voice settings page's processing switches (`voice.rs`).
+    #[cfg(target_os = "android")]
+    fn voice_settings_json(&self) -> Option<String> {
+        Some(crate::voice::voice_settings_json())
+    }
+
+    #[cfg(target_os = "android")]
+    fn set_voice_switch(&self, key: &str, on: bool) -> Option<String> {
+        Some(crate::voice::set_voice_switch(key, on))
+    }
+
+    #[cfg(target_os = "android")]
+    fn set_voice_profile(&self, profile: &str) -> Option<String> {
+        Some(crate::voice::set_voice_profile(profile))
+    }
+
     fn on_update(&self, update: ViewUpdate) -> bool {
         // The session for private media (attachments, custom emoji).
         if let ViewUpdate::MediaAuth(token) = update {

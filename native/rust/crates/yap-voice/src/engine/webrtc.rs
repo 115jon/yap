@@ -170,6 +170,23 @@ fn release_factory_later() {
     }
 }
 
+/// The ADM path's mic processing as libwebrtc resolved it, per component:
+/// its software APM, the platform's effect (Android's AcousticEchoCanceler
+/// and NoiseSuppressor on a VOICE_COMMUNICATION recording), or off. A line
+/// whenever it changes (checked with the stats, so a change shows within a
+/// few seconds), and once in each call; the own path's APM is not this one.
+fn log_apm_state(f: &PeerConnectionFactory) {
+    let state = f.audio_processing_state();
+    let mut last = lock(&APM_LOGGED);
+    if *last != state {
+        eprintln!("[voice] {state}");
+        *last = state;
+    }
+}
+
+/// The last state [`log_apm_state`] logged; a call's opening clears it.
+static APM_LOGGED: Mutex<String> = Mutex::new(String::new());
+
 fn err(what: &str) -> impl FnOnce(libwebrtc::RtcError) -> MediaError + '_ {
     move |e| MediaError(format!("{what}: {e:?}"))
 }
@@ -1072,6 +1089,7 @@ impl MediaEngine for LibwebrtcEngine {
         // device track is created.
         f.set_adm_recording_enabled(true);
         f.set_adm_playout_enabled(true);
+        lock(&APM_LOGGED).clear();
         let mic: RtcAudioTrack = f.create_device_audio_track("mic");
         let (session, states) = Self::connect(f, ice_servers, Some(mic), true)?;
         Ok((session, states))
@@ -2063,6 +2081,10 @@ impl MediaSession for LibwebrtcSession {
             line += " ";
             line += &pipeline().stats();
             (out.mic_device_failed, out.speaker_device_failed) = pipeline().failing();
+        } else if self.sender_session {
+            if let Some(f) = existing_factory() {
+                log_apm_state(&f);
+            }
         }
         if let Some((rtt, remote)) = pair {
             out.round_trip = (rtt > 0.0).then_some(rtt);
