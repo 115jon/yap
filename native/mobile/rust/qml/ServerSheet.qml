@@ -112,12 +112,14 @@ BottomSheet {
         // The voice channel we are in: its status and vibe
         // (VoiceStatusSheet).
         SheetRow {
+            readonly property var calls: sheet.onChannel && sheet.voice ? JSON.parse(Calls.view) : ({})
+            // Once our voice session is up there (the core's `editable`).
             visible: sheet.onChannel && sheet.voice && Voice.channelId === sheet.channelId
+                && calls.channelStatusEditable === true
             iconName: "edit"
             text: qsTr("Set channel status")
             onTriggered: {
                 sheet.close()
-                const calls = JSON.parse(Calls.view)
                 ShellState.voiceStatusRequested(sheet.channelId, sheet.channelName, false, calls.channelStatus ?? "")
             }
         }

@@ -92,15 +92,16 @@ QtObject {
         return core.tooBig.length === 0 && core.localError.length === 0
     }
     function useRecent(assetId) {
-        core.localError = ""
-        core.tooBig = ""
         Extras.useVoiceMedia(core.channelId, assetId)
     }
     // A GIF picker tile (`GifListModel.gifId`).
     function useGif(gifId) {
+        Extras.setVoiceMediaGif(core.channelId, gifId)
+    }
+    // A fresh pick: the last one's refusal and too-big card go.
+    function clearPickError() {
         core.localError = ""
         core.tooBig = ""
-        Extras.setVoiceMediaGif(core.channelId, gifId)
     }
     function removeMedia() {
         Extras.removeVoiceMedia(core.channelId)

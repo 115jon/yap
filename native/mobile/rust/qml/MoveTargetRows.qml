@@ -44,7 +44,9 @@ Column {
                 return
             root.movingTo = ""
             answerTimer.stop()
-            if (moves.error.length > 0) {
+            // From the same parse as `pending` (a sibling binding may not
+            // have caught up yet).
+            if ((moves.calls.moveError ?? "").length > 0) {
                 root.refused = true
                 Native.haptic(Native.Reject)
             } else {

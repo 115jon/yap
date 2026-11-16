@@ -37,6 +37,9 @@ BottomSheet {
     // Remove is in flight until the picture goes.
     property bool removing: false
     onCurrentMediaChanged: removing = false
+    // A refused remove: the key comes back.
+    readonly property bool saving: core.status.saving === true
+    onSavingChanged: if (!saving) removing = false
     // This sheet asked for the photo picker; the file it is uploading
     // (a picked copy, let go once the upload ends).
     property bool picking: false
@@ -57,6 +60,7 @@ BottomSheet {
         core.start(channelId, name, media, text)
         sheet.view = media ? "media" : "text"
         sheet.removing = false
+        sheet.picking = false
         // From the top: the vibe set now and Remove come first.
         mediaFlick.contentY = 0
         open()
@@ -83,9 +87,10 @@ BottomSheet {
         if (core.mediaBusy || Native.pickingMedia)
             return
         Native.haptic(Native.Tick)
-        core.localError = ""
-        core.tooBig = ""
+        core.clearPickError()
         sheet.picking = true
+        // The photo picker takes several; the first is the vibe and the
+        // rest are let go as they arrive.
         Native.pickMedia(26214400)
     }
     function chooseGif() {
@@ -102,9 +107,13 @@ BottomSheet {
             if (!sheet.picking)
                 return
             sheet.picking = false
+            // Closed meanwhile: nothing is set.
+            const first = sheet.up ? 1 : 0
             // One picture: the rest of a several-item pick goes.
-            for (let i = 1; i < paths.length; ++i)
+            for (let i = first; i < paths.length; ++i)
                 Native.discardPicked(paths[i])
+            if (!sheet.up)
+                return
             if (paths.length === 0) {
                 if (failed > 0)
                     core.localError = qsTr("That file couldn't be read, or it is over 25 MB. Try another one.")
@@ -130,6 +139,7 @@ BottomSheet {
     onClosed: {
         gifPane.stop()
         core.close()
+        sheet.picking = false
     }
 
     Item {
@@ -463,6 +473,7 @@ BottomSheet {
                             if (core.mediaBusy)
                                 return
                             Native.haptic(Native.Tick)
+                            core.clearPickError()
                             core.useRecent(recent.modelData.id)
                         }
                         Rectangle {
@@ -504,6 +515,7 @@ BottomSheet {
             target: gifPane.core
             function onPicked(gifId) {
                 Native.haptic(Native.Tick)
+                core.clearPickError()
                 core.useGif(gifId)
             }
             // The tile was taken: back to the vibe while it saves.
