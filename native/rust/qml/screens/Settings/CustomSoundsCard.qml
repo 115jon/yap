@@ -9,12 +9,16 @@ import Yap.Ui
 // picks its sound) with the summary of what went in, a row per UI sound
 // (its file and length, or "Built-in · voice-join"; Preview, Import a file
 // and Reset), then Reset all, which asks first. The files stay in this
-// device's app folder. Importing a file turns the switch on.
+// device's app folder. Importing a file turns the switch on. The rows and
+// their words: Yap.Ui's CustomSoundsCore.
 SettingsCard {
     id: root
 
-    readonly property var model: JSON.parse(CustomSounds.state)
     property bool confirmReset: false
+
+    CustomSoundsCore {
+        id: core
+    }
 
     sectionId: "custom-sounds"
 
@@ -30,22 +34,22 @@ SettingsCard {
         layout: "stack"
         KitButton {
             text: qsTr("Choose files")
-            loading: root.model.bulkBusy
+            loading: core.bulkBusy
             onClicked: {
                 const files = Files.pickFiles(qsTr("Choose sound files"))
                 if (files.length > 0)
-                    CustomSounds.importFiles(files)
+                    core.importFiles(files)
             }
         }
         footer: Column {
-            visible: root.model.bulkLine.length > 0
+            visible: core.bulkLine.length > 0
             width: parent ? parent.width : 0
             topPadding: 12
             spacing: 8
             Text {
                 width: parent.width
                 textFormat: Text.PlainText
-                text: root.model.bulkLine
+                text: core.bulkLine
                 color: Theme.ink2
                 font: Theme.type.description
                 Accessible.role: Accessible.StaticText
@@ -54,21 +58,20 @@ SettingsCard {
             RowError {
                 width: parent.width
                 above: 0
-                text: root.model.bulkFailures.join("\n")
+                text: core.bulkFailures.join("\n")
             }
         }
     }
 
     Repeater {
-        model: root.model.rows
+        model: core.rows
         SettingsRow {
             id: sound
             required property var modelData
             custom: true
             rowId: "custom-sound-" + modelData.stem
             label: modelData.label
-            description: modelData.custom ? modelData.name + " · " + modelData.seconds
-                : qsTr("Built-in · %1").arg(modelData.stem)
+            description: core.describe(modelData)
             layout: "inline"
             Row {
                 spacing: 4
@@ -76,7 +79,7 @@ SettingsCard {
                     iconName: "play"
                     size: 32
                     tip: qsTr("Preview %1 sound").arg(sound.modelData.label)
-                    onClicked: CustomSounds.preview(sound.modelData.id)
+                    onClicked: core.preview(sound.modelData.id)
                 }
                 IconKey {
                     iconName: "upload"
@@ -86,7 +89,7 @@ SettingsCard {
                     onClicked: {
                         const files = Files.pickFiles(qsTr("Choose a sound file"))
                         if (files.length > 0)
-                            CustomSounds.importFile(sound.modelData.id, files[0])
+                            core.importFile(sound.modelData.id, files[0])
                     }
                 }
                 IconKey {
@@ -94,7 +97,7 @@ SettingsCard {
                     size: 32
                     enabled: sound.modelData.custom && !sound.modelData.busy
                     tip: qsTr("Reset %1 to the built-in sound").arg(sound.modelData.label)
-                    onClicked: CustomSounds.reset(sound.modelData.id)
+                    onClicked: core.reset(sound.modelData.id)
                 }
             }
             footer: RowError {
@@ -110,18 +113,18 @@ SettingsCard {
         KitButton {
             variant: "destructive"
             text: qsTr("Reset all")
-            enabled: root.model.any && !root.confirmReset
+            enabled: core.any && !root.confirmReset
             onClicked: root.confirmReset = true
         }
         footer: Loader {
             width: parent ? parent.width : 0
             active: root.confirmReset
             sourceComponent: ConfirmStrip {
-                consequence: qsTr("Every imported file is deleted from this device. All sounds go back to the built-in ones.")
+                consequence: core.resetAllPrompt
                 confirmLabel: qsTr("Reset all")
                 onCancelled: root.confirmReset = false
                 onConfirmed: {
-                    CustomSounds.resetAll()
+                    core.resetAll()
                     root.confirmReset = false
                 }
             }

@@ -72,6 +72,7 @@ SettingsFrame {
         { page: "SettingsNotificationsPage", label: qsTr("Calls"), words: "sounds ringback ringtone dm call" },
         { page: "SettingsNotificationsPage", label: qsTr("Screen share"), words: "sounds stream tone" },
         { page: "SettingsNotificationsPage", label: qsTr("Test notification sound"), words: "sound play" },
+        { page: "SettingsNotificationsPage", label: qsTr("Custom sounds"), words: "import file replace sound effects experimental ringtone" },
         { page: "SettingsAboutPage", label: qsTr("Version"), words: "about update build" },
         { page: "SettingsAboutPage", label: qsTr("Open source licences"), words: "licenses notices" },
         { page: "SettingsAboutPage", label: qsTr("Privacy"), words: "policy" }

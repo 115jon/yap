@@ -494,7 +494,9 @@ the decisions.
   - Invite to channel (ChannelInviteModal.tsx): a fresh 7-day link to the
     channel, from the row's key or its menu;
   - custom UI sounds (CustomSoundsCard.tsx): import one or several files,
-    preview, reset, under `%LOCALAPPDATA%\Yap.Data\custom-sounds`;
+    preview, reset, under `%LOCALAPPDATA%\Yap.Data\custom-sounds` (the
+    `CustomSounds` object and its player live in `yap-ui`, shared with the
+    phone);
   - Listen Together results' action menu, the voice switch confirm (with
     Don't ask again) and the stream watcher list on share tiles.
 - The voice core and 1:1 calls of batch N4 (`yap-voice` `machine.rs`,

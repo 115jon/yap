@@ -136,6 +136,20 @@ impl Platform for Desktop {
     fn player_level(&self) -> f64 {
         yap_audio::player::level()
     }
+
+    fn sound_volume(&self) -> u8 {
+        crate::desktop::current().sound_settings.sound_volume
+    }
+
+    fn custom_sounds_imported(&self) {
+        if let Some(mut desktop) = crate::gui::object::<crate::desktop::qobject::Desktop>() {
+            if !*desktop.custom_sounds() {
+                desktop
+                    .as_mut()
+                    .set_setting(&cxx_qt_lib::QString::from("customSounds"), true);
+            }
+        }
+    }
 }
 
 /// Before QML loads (main.cpp): the desktop's platform.

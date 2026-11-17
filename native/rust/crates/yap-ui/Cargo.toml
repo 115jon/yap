@@ -24,6 +24,9 @@ tokio.workspace = true
 uuid = { version = "1.29.0", features = ["v4"] }
 yap-anim.workspace = true
 yap-cache = { workspace = true, features = ["sqlite"] }
+# Custom UI sounds: decoding an imported file and playing it (the app picks
+# the TLS and Opus features).
+yap-audio = { path = "../yap-audio", default-features = false, features = ["store"] }
 # Path deps, not workspace ones: the workspace entries keep their default
 # (desktop) features, and the mobile app builds this crate without them.
 yap-core = { path = "../yap-core", default-features = false, features = ["runtime"] }

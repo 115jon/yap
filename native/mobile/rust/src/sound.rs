@@ -7,8 +7,10 @@
 //! - [`listen_volume`]: the Listen Together volume this phone saved, which
 //!   the stream starts at when a call joins a room that is already playing.
 //! - [`play`] / [`stop`]: the core's UI sounds, gated by the sound settings
-//!   as on the desktop. Settings > Notifications sets them
-//!   ([`settings_json`], [`set_setting`], [`play_test`]).
+//!   as on the desktop, with "Use custom sounds" playing a file imported
+//!   for a sound instead (`yap_ui::custom_sounds`). Settings >
+//!   Notifications sets them ([`settings_json`], [`set_setting`],
+//!   [`play_test`]).
 //!
 //! In a call the speaker plays as call audio (voice.rs tells it), so clips
 //! and sounds follow the call's route and volume; outside one, UI sounds
@@ -18,6 +20,7 @@ use yap_cache::settings::{self, DesktopSettings};
 use yap_core::shell::Sound;
 use yap_core::store::apps::AppsCommand;
 use yap_core::{AudioEvents, AudioHandle};
+use yap_ui::custom_sounds::start;
 
 /// The sound settings saved in the app's folder (the defaults until
 /// Settings changes one).
@@ -100,6 +103,7 @@ pub fn settings_json() -> String {
         "soundMute": p.mute_deafen,
         "soundScreenShare": p.screen_share,
         "soundCalls": p.calls,
+        "customSounds": p.custom_sounds,
     })
     .to_string()
 }
@@ -123,6 +127,7 @@ pub fn set_setting(key: &str, value: i32) {
         "soundMute" => sound.mute_deafen = on,
         "soundScreenShare" => sound.screen_share = on,
         "soundCalls" => sound.calls = on,
+        "customSounds" => sound.custom_sounds = on,
         _ => {
             eprintln!("[sound] unknown setting {key}");
             return;
@@ -137,7 +142,13 @@ pub fn set_setting(key: &str, value: i32) {
 /// Test: the notification sound at the sound volume, whatever the
 /// switches say (the desktop's `play_test`).
 pub fn play_test() {
-    yap_audio::ui::play(Sound::Notification, saved().sound_settings.sound_volume);
+    let sound = saved().sound_settings;
+    start(Sound::Notification, sound.sound_volume, sound.custom_sounds);
+}
+
+/// The UI sound volume, 0..=100 (a custom sound's preview plays at it).
+pub fn sound_volume() -> u8 {
+    saved().sound_settings.sound_volume.min(100)
 }
 
 /// The core's copy of the sound settings (join and leave sounds play at
@@ -163,7 +174,8 @@ pub fn play(sound: Sound) {
     if !settings.sounds || !sound.enabled_in(&settings.sound_settings) {
         return;
     }
-    yap_audio::ui::play(sound, settings.sound_settings.sound_volume);
+    let sound_settings = &settings.sound_settings;
+    start(sound, sound_settings.sound_volume, sound_settings.custom_sounds);
 }
 
 /// Cuts a sound's voices (`playRingStop`).

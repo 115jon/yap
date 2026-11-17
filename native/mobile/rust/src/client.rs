@@ -310,6 +310,17 @@ impl Platform for Mobile {
         crate::sound::play_test();
     }
 
+    #[cfg(target_os = "android")]
+    fn sound_volume(&self) -> u8 {
+        crate::sound::sound_volume()
+    }
+
+    /// Importing a custom sound turns "Use custom sounds" on.
+    #[cfg(target_os = "android")]
+    fn custom_sounds_imported(&self) {
+        crate::sound::set_setting("customSounds", 1);
+    }
+
     /// The Voice settings page's processing switches (`voice.rs`).
     #[cfg(target_os = "android")]
     fn voice_settings_json(&self) -> Option<String> {
