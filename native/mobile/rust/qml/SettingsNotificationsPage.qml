@@ -15,11 +15,11 @@ import Yap.Ui
 SettingsFrame {
     id: root
 
-    // The incoming ring is Android's ringtone here (Ringer.java), so it
-    // takes no file.
+    // The incoming ring is Android's ringtone here (Ringer.java), and no
+    // native build plays the stream watcher sounds: they take no file.
     CustomSoundsCore {
         id: custom
-        hidden: ["ring"]
+        hidden: ["ring", "streamWatcherStart", "streamWatcherStop"]
     }
     // The row whose sheet is open, the one a pick is for, and the picked
     // copy, dropped once its import is over.
@@ -28,6 +28,9 @@ SettingsFrame {
     property var importing: ({})
     property string notice: ""
     function startImport(id) {
+        // One pick at a time: the picker ignores a second while one copies.
+        if (root.pickingId.length > 0 || Native.pickingMedia)
+            return
         Native.haptic(Native.Tick)
         root.notice = ""
         root.pickingId = id
