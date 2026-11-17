@@ -11,11 +11,8 @@ import {
   type ClientDateFormatter,
 } from "@/lib/client-date-format";
 import { getFileIcon } from "@/lib/file-icons";
-import {
-  excerptAroundMatch,
-  highlightSegments,
-  type SearchResultMessage,
-} from "@/lib/message-search";
+import { type SearchResultMessage } from "@/lib/message-search";
+import { excerptAroundMatch, highlightSegments } from "@/lib/yap-core-wasm";
 import { cn } from "@/lib/utils";
 import { memo, useId, useMemo, type CSSProperties } from "react";
 

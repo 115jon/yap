@@ -428,9 +428,27 @@ pub fn byte_to_utf16(text: &str, at: usize) -> usize {
         .sum()
 }
 
+/// JavaScript's `\s` (and what `String.prototype.trim` strips): Unicode
+/// White_Space without U+0085, plus U+FEFF. The web split and trimmed
+/// search text with it, so the terms and excerpts here do too.
+fn js_space(c: char) -> bool {
+    (c.is_whitespace() && c != '\u{85}') || c == '\u{feff}'
+}
+
+/// `String.prototype.trim`.
+fn js_trim(text: &str) -> &str {
+    text.trim_matches(js_space)
+}
+
 /// One char, lower-cased when that keeps it one char (so offsets map back
 /// onto the original text).
 fn fold(c: char) -> char {
+    // Final sigma is a lowercase sigma: JavaScript's whole-string
+    // `toLowerCase` turns a word-final Σ into ς, so the web matched
+    // "ΟΔΟΣ" with "οδος" ("ς"); folding both to σ keeps that.
+    if c == 'ς' {
+        return 'σ';
+    }
     let mut lower = c.to_lowercase();
     match (lower.next(), lower.next()) {
         (Some(l), None) => l,
@@ -511,7 +529,7 @@ pub fn extract_search_terms(text: &str) -> Vec<String> {
         // `"([^"]+)"`
         if let Some(inner) = rest.strip_prefix('"') {
             if let Some(close) = inner.find('"').filter(|&n| n > 0) {
-                let phrase = inner[..close].trim();
+                let phrase = js_trim(&inner[..close]);
                 if !phrase.is_empty() {
                     terms.push(phrase.to_owned());
                 }
@@ -520,7 +538,7 @@ pub fn extract_search_terms(text: &str) -> Vec<String> {
             }
         }
         // `(\S+)`
-        let n = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let n = rest.find(js_space).unwrap_or(rest.len());
         if n == 0 {
             at += rest.chars().next().map_or(1, char::len_utf8);
             continue;
@@ -616,7 +634,7 @@ pub fn excerpt_around_match(content: &str, terms: &[String], max: usize, lead: u
         Some(first) if first >= max.saturating_sub(lead * 2) => first,
         _ => {
             let cut = &content[..utf16_to_byte(content, max)];
-            return format!("{}…", cut.trim_end());
+            return format!("{}…", cut.trim_end_matches(js_space));
         }
     };
     let mut start = first.saturating_sub(lead);
@@ -636,7 +654,7 @@ pub fn excerpt_around_match(content: &str, terms: &[String], max: usize, lead: u
     }
     let end = len.min(start + max);
     let slice = &content[utf16_to_byte(content, start)..utf16_to_byte(content, end)];
-    format!("…{}{}", slice.trim(), if end < len { "…" } else { "" })
+    format!("…{}{}", js_trim(slice), if end < len { "…" } else { "" })
 }
 
 // Typed tokens and autocomplete context
@@ -1680,6 +1698,19 @@ pub fn result_stamps(created_at: &str, clock: Clock) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Search text splits and trims on JavaScript's whitespace, as the web
+    /// did: U+FEFF separates words, U+0085 does not.
+    #[test]
+    fn terms_and_excerpts_should_use_javascript_whitespace() {
+        assert_eq!(extract_search_terms("em\u{feff}bom"), ["em", "bom"]);
+        assert_eq!(extract_search_terms("nel\u{85}joined"), ["nel\u{85}joined"]);
+        let tail = format!("{}\u{feff}\u{feff}\u{feff}", "x".repeat(318));
+        assert_eq!(
+            excerpt_around_match(&tail, &[], 320, 60),
+            format!("{}…", "x".repeat(318))
+        );
+    }
 
     #[test]
     fn form_value_should_match_url_search_params() {

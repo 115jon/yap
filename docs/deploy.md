@@ -79,8 +79,9 @@ migration may be refused; check `wrangler rollback`'s output.
 ## Manual deploy (fallback)
 
 `pnpm run deploy:main` still works from a local checkout logged in with
-`wrangler login`: it applies production migrations, builds and runs
-`wrangler deploy --env=""`. It skips the Preview and the smoke tests, so run
+`wrangler login`: it builds yap-core-wasm (Rust, see README "Development";
+before anything touches production), applies production migrations, builds
+and runs `wrangler deploy --env=""`. It skips the Preview and the smoke tests, so run
 `node scripts/smoke-web.mjs <production URL>` afterwards.
 
 ## Preview resources

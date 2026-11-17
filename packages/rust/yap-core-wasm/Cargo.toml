@@ -11,3 +11,8 @@ description = "yap-core's pure half (no I/O, no async runtime) built for wasm32-
 # for wasm32-unknown-unknown, which keeps the store and the rules modules
 # free of them.
 yap-core = { path = "../../../native/rust/crates/yap-core", default-features = false }
+serde_json = "1"
+wasm-bindgen = "=0.2.130"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
