@@ -15,19 +15,14 @@ Column {
 
     required property var host
 
-    readonly property var shares: JSON.parse(Settings.shares)
-    readonly property var live: shares.filter(share => share.status === "active")
-    property string filter: "current"
+    // The shared links, their filter, labels and revokes (shared with the
+    // phone's Settings > Privacy & safety).
+    readonly property SharesModel sharesModel: SharesModel {}
+    readonly property var shares: sharesModel.shares
+    readonly property var live: sharesModel.live
 
     spacing: 40
-    Component.onCompleted: Settings.loadShares()
-
-    function formatDate(iso) {
-        if (!iso)
-            return qsTr("Never")
-        const date = new Date(iso)
-        return isNaN(date) ? qsTr("Never") : date.toLocaleDateString(Qt.locale(), "MMM d, yyyy")
-    }
+    Component.onCompleted: sharesModel.load()
 
     // Activity (PrivacyPanel.tsx ShareActivityRow): applied at once,
     // rolled back with the reason if the account does not take it.
@@ -123,15 +118,15 @@ Column {
                         size: "sm"
                         iconName: "refresh"
                         text: qsTr("Refresh")
-                        loading: Settings.sharesState === "loading"
-                        onClicked: Settings.loadShares()
+                        loading: root.sharesModel.loading
+                        onClicked: root.sharesModel.load()
                     }
                 }
 
-                readonly property var visibleShares: root.filter === "current" ? root.live : root.shares
+                readonly property var visibleShares: root.sharesModel.shown
 
                 Row {
-                    visible: Settings.sharesState === "loading" && root.shares.length === 0
+                    visible: root.sharesModel.loadingFirst
                     spacing: 8
                     Icon {
                         id: spinner
@@ -157,21 +152,20 @@ Column {
                 }
                 RowError {
                     above: 0
-                    text: Settings.sharesState === "error" ? Settings.sharesError : ""
+                    text: root.sharesModel.failed ? root.sharesModel.error : ""
                 }
                 Text {
-                    visible: Settings.sharesState === "ready" && list.visibleShares.length === 0
+                    visible: root.sharesModel.empty
                     width: parent.width
                     textFormat: Text.PlainText
-                    text: root.filter === "current" ? qsTr("No live links. Share a message from its menu to make one.")
-                        : qsTr("You haven't shared any messages yet.")
+                    text: root.sharesModel.emptyText
                     wrapMode: Text.Wrap
                     color: Theme.ink2
                     font: Theme.type.description
                 }
                 Column {
                     width: parent.width
-                    visible: Settings.sharesState !== "error"
+                    visible: !root.sharesModel.failed
                     Repeater {
                         model: list.visibleShares
                         delegate: ShareItem {}
@@ -186,7 +180,7 @@ Column {
         id: tab
         property string value
         property int count
-        readonly property bool on: root.filter === value
+        readonly property bool on: root.sharesModel.filter === value
         implicitWidth: implicitContentWidth + leftPadding + rightPadding
         height: 36
         leftPadding: 8
@@ -195,7 +189,7 @@ Column {
         Accessible.role: Accessible.PageTab
         Accessible.name: text
         Accessible.selected: on
-        onClicked: root.filter = value
+        onClicked: root.sharesModel.filter = value
         contentItem: Row {
             spacing: 8
             Text {
@@ -294,7 +288,7 @@ Column {
                     width: parent.width
                     topPadding: 2
                     textFormat: Text.PlainText
-                    text: share.modelData.content.length > 0 ? share.modelData.content : qsTr("(Attachment only)")
+                    text: root.sharesModel.content(share.modelData)
                     wrapMode: Text.Wrap
                     maximumLineCount: 2
                     elide: Text.ElideRight
@@ -306,14 +300,12 @@ Column {
                     topPadding: 4
                     spacing: 12
                     LedLabel {
-                        text: share.modelData.status === "active" ? qsTr("Live")
-                            : share.modelData.status === "revoked" ? qsTr("Revoked")
-                            : share.modelData.status === "deleted" ? qsTr("Deleted") : qsTr("Expired")
-                        ledState: share.modelData.status === "active" ? "live" : share.modelData.status === "expired" ? "idle" : "off"
+                        text: root.sharesModel.statusLabel(share.modelData.status)
+                        ledState: root.sharesModel.ledState(share.modelData.status)
                     }
-                    Meta { text: qsTr("Shared %1").arg(root.formatDate(share.modelData.createdAt)) }
-                    Meta { text: qsTr("Expires %1").arg(root.formatDate(share.modelData.expiresAt)) }
-                    Meta { text: share.modelData.views === 1 ? qsTr("1 view") : qsTr("%1 views").arg(share.modelData.views) }
+                    Meta { text: root.sharesModel.sharedText(share.modelData) }
+                    Meta { text: root.sharesModel.expiresText(share.modelData) }
+                    Meta { text: root.sharesModel.viewsText(share.modelData) }
                 }
             }
             Row {
@@ -362,10 +354,10 @@ Column {
                 consequence: qsTr("Anyone with this link will see that it's gone. You can't undo this.")
                 confirmLabel: qsTr("Revoke link")
                 irreversible: true
-                busy: Settings.revokingShare === share.modelData.id
-                error: Settings.shareErrorId === share.modelData.id ? Settings.shareError : ""
+                busy: root.sharesModel.busy(share.modelData.id)
+                error: root.sharesModel.errorFor(share.modelData.id)
                 onCancelled: share.cancelRevoke()
-                onConfirmed: Settings.revokeShare(share.modelData.id)
+                onConfirmed: root.sharesModel.revoke(share.modelData.id)
             }
         }
     }

@@ -16,10 +16,14 @@ Column {
     required property var host
 
     spacing: 40
-    readonly property var account: JSON.parse(Extras.account)
+    readonly property var account: core.account
+    // The sign-in rows and the username editor's state (shared with the
+    // phone's Settings > Account).
+    readonly property AccountCore core: AccountCore {
+        onUsernameDone: userRow.cancel()
+    }
     Component.onCompleted: {
-        if (Settings.emailState !== "ready" || Settings.methodsState !== "ready")
-            Settings.loadAccount()
+        core.load()
         Extras.loadClaims()
     }
 
@@ -156,56 +160,28 @@ Column {
             rowId: "username"
             layout: "inline"
 
-            property bool editing: false
-            property int savedAt: 0
-            readonly property string check: root.account.usernameCheck
+            readonly property bool editing: root.core.usernameEditing
 
             function edit() {
                 userField.text = Settings.username
-                editing = true
-                savedAt = root.account.usernameSaved
-                Extras.checkUsername(Settings.username)
+                root.core.beginUsername()
                 root.host.pushEscape(userRow)
                 userField.forceActiveFocus()
                 userField.cursorPosition = userField.length
             }
             function cancel() {
-                editing = false
-                Extras.cancelUsername()
+                root.core.endUsername()
                 root.host.popEscape(userRow)
                 userKey.forceActiveFocus()
             }
             function save() {
-                if (checkTimer.running) {
-                    // Still inside the debounce: check this name now; the
-                    // person saves once it is known to be free.
-                    checkTimer.stop()
-                    Extras.checkUsername(userField.text)
-                    return
-                }
-                if (!root.account.usernameSaving && check === "available")
-                    Extras.saveUsername(userField.text)
+                root.core.saveUsername(userField.text)
             }
             function dismiss() {
-                if (!root.account.usernameSaving)
+                if (!root.core.usernameSaving)
                     cancel()
             }
             Component.onDestruction: root.host.popEscape(userRow)
-
-            Connections {
-                target: Extras
-                function onAccountChanged() {
-                    if (userRow.editing && root.account.usernameSaved !== userRow.savedAt) {
-                        userRow.savedAt = root.account.usernameSaved
-                        userRow.cancel()
-                    }
-                }
-            }
-            Timer {
-                id: checkTimer
-                interval: 400
-                onTriggered: Extras.checkUsername(userField.text)
-            }
 
             Row {
                 visible: !userRow.editing
@@ -233,11 +209,11 @@ Column {
                         width: parent.width - userKeys.width - 8
                         leadingInset: 14
                         maximumLength: 32
-                        invalid: root.account.usernameError.length > 0 || userRow.check === "unavailable"
+                        invalid: root.core.usernameInvalid
                         Accessible.name: qsTr("Username")
                         Keys.onReturnPressed: userRow.save()
                         Keys.onEnterPressed: userRow.save()
-                        onTextEdited: checkTimer.restart()
+                        onTextEdited: root.core.typeUsername(text)
                         Text {
                             x: 16
                             anchors.verticalCenter: parent.verticalCenter
@@ -262,7 +238,7 @@ Column {
                             size: "lg"
                             text: qsTr("Save")
                             loading: root.account.usernameSaving
-                            enabled: userRow.check === "available" && !checkTimer.running
+                            enabled: root.core.canSaveUsername
                             Accessible.name: qsTr("Save username")
                             onClicked: userRow.save()
                         }
@@ -272,7 +248,7 @@ Column {
                     topPadding: 4
                     width: parent.width
                     textFormat: Text.PlainText
-                    text: checkTimer.running ? qsTr("Checking availability…") : root.account.usernameMessage
+                    text: root.core.usernameMessage
                     wrapMode: Text.Wrap
                     color: Theme.ink2
                     font: Theme.type.caption
@@ -306,18 +282,14 @@ Column {
         SettingsRow {
             rowId: "email"
             layout: "inline"
-            ValueText {
-                text: Settings.emailState === "ready"
-                    ? (Settings.email.length > 0 ? Settings.email : qsTr("No email on file"))
-                    : Settings.emailState === "error" ? qsTr("No email on file") : qsTr("Loading…")
-            }
+            ValueText { text: root.core.emailText }
         }
         // If Kova can't say, the row stays out rather than guess.
         SettingsRow {
             rowId: "sign-in-method"
             layout: "inline"
-            visible: Settings.methodsState !== "error" && SettingsNav.matches("sign-in-method")
-            ValueText { text: Settings.methodsState === "ready" ? Settings.signInMethods : qsTr("Loading…") }
+            visible: root.core.methodsKnown && SettingsNav.matches("sign-in-method")
+            ValueText { text: root.core.methodsText }
         }
         // Sign out, behind its confirm (the web's only sign-out key).
         SettingsRow {

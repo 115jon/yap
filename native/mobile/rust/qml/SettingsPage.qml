@@ -33,7 +33,9 @@ SettingsFrame {
         { page: "SettingsProfilePage", label: qsTr("Edit profile"), words: "avatar banner bio name picture" },
         { page: "SettingsProfilePage", label: qsTr("Status"), words: "online idle away do not disturb dnd invisible presence" },
         { page: "SettingsProfilePage", label: qsTr("Custom status"), words: "status message" },
-        { page: "SettingsAccountPage", label: qsTr("Username"), words: "handle sign in" },
+        { page: "SettingsAccountPage", label: qsTr("Username"), words: "handle tag change" },
+        { page: "SettingsAccountPage", label: qsTr("Email"), words: "mail address sign in" },
+        { page: "SettingsAccountPage", label: qsTr("Sign-in methods"), words: "password security kova login google discord github provider linked" },
         { page: "SettingsAccountPage", label: qsTr("Sign out"), words: "log out logout" },
         { page: "SettingsAccountPage", label: qsTr("Delete account"), words: "remove close account" },
         { page: "ConnectionsPage", label: qsTr("Steam"), words: "connections link linked accounts deadlock" },
@@ -41,6 +43,7 @@ SettingsFrame {
         { page: "SettingsPrivacyPage", label: qsTr("Share my activity"), words: "playing game activity status" },
         { page: "SettingsPrivacyPage", label: qsTr("Who can DM you"), words: "direct messages dm calls block" },
         { page: "SettingsPrivacyPage", label: qsTr("Media filter"), words: "gif sticker safe search nsfw sensitive" },
+        { page: "SettingsPrivacyPage", label: qsTr("Shared messages"), words: "share shares links public revoke" },
         { page: "SettingsDevicesPage", label: qsTr("Signed-in devices"), words: "sessions sign out other devices phone computer" },
         { page: "SettingsPlanPage", label: qsTr("Your plan"), words: "loud founder billing upgrade subscription tier" },
         { page: "SettingsVoicePage", label: qsTr("Output"), words: "speaker earpiece phone headset bluetooth headphones audio route device" },
@@ -261,7 +264,7 @@ SettingsFrame {
         title: qsTr("You")
         HubRow {
             page: "SettingsAccountPage"
-            hint: qsTr("Sign out, delete account")
+            hint: qsTr("Username, email, sign out")
         }
         HubRow {
             page: "ConnectionsPage"
@@ -269,7 +272,7 @@ SettingsFrame {
         }
         HubRow {
             page: "SettingsPrivacyPage"
-            hint: qsTr("Activity, DMs, media filter")
+            hint: qsTr("Activity, DMs, media filter, shared links")
         }
         HubRow {
             page: "SettingsDevicesPage"
