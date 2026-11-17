@@ -13,8 +13,7 @@
           "path": "native/rust/Cargo.toml",
           "jsonpath": "$.workspace.package.version"
         }
-      ],
-      "release-as": "4.6.0"
+      ]
     },
     "native/mobile": {
       "release-type": "simple",
@@ -22,8 +21,7 @@
       "package-name": "qt-android",
       "version-file": "VERSION",
       "bump-minor-pre-major": true,
-      "prerelease": true,
-      "release-as": "0.15.0"
+      "prerelease": true
     }
   }
 }
