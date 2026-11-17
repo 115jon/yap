@@ -156,7 +156,7 @@ fn unknown_routes_should_be_refused() {
         "yap-native://",
         "yap-native:///",
         "yap-native://open",
-        "yap-native://room/abc",
+        "yap-native://meet/abc",
         "yap-native://share/token",
         "yap-native://activate?code=ABCD-EFGH",
     ] {
@@ -333,7 +333,7 @@ fn what_yap_native_refuses_yap_should_refuse_too() {
         "",
         "/",
         "open",
-        "room/abc",
+        "meet/abc",
         "activate?code=ABCD-EFGH",
         "invite/a/b",
         "invite//a",
@@ -708,4 +708,28 @@ fn links_into_the_chat_should_ask_to_uncover_it() {
     assert_eq!(client.view.nav_seq, 3);
     client.link(Link::SignIn { user_code: None });
     assert_eq!(client.view.nav_seq, 3, "signin only brings the window up");
+}
+
+#[test]
+fn room_links_should_name_the_room() {
+    assert_eq!(
+        arg("yap://room/standup"),
+        Some(Link::Room("standup".into()))
+    );
+    assert_eq!(
+        arg("yap-native://room/standup/"),
+        Some(Link::Room("standup".into()))
+    );
+    assert_eq!(
+        parse_link(&format!("{SITE}/room/k3x9q2-7f1a"), SITE),
+        Some(Link::Room("k3x9q2-7f1a".into()))
+    );
+    for refused in [
+        "yap://room/standup?x=1",
+        "yap://room/voice-s-c",
+        "yap://room/standup/extra",
+        "yap://room/",
+    ] {
+        assert_eq!(arg(refused), None, "{refused}");
+    }
 }

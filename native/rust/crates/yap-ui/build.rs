@@ -82,6 +82,7 @@ fn main() {
         QmlFile::from("qml/components/PresenceOut.qml"),
         QmlFile::from("qml/components/PresenceRail.qml"),
         QmlFile::from("qml/components/RailPill.qml"),
+        QmlFile::from("qml/components/RoomJoinForm.qml"),
         QmlFile::from("qml/components/SearchChip.qml"),
         QmlFile::from("qml/components/SearchCore.qml"),
         QmlFile::from("qml/components/SearchEmpty.qml"),

@@ -67,6 +67,9 @@ impl State {
             InviteCommand::OpenLink(Link::SignIn { user_code }) => {
                 self.nudge_sign_in(fx, user_code.as_deref());
             }
+            // The shell's join prompt takes a room link, signed in or not
+            // (`crate::rooms`); the store has nothing to do for it.
+            InviteCommand::OpenLink(Link::Room(_)) => {}
             InviteCommand::OpenLink(link) => {
                 if self.links_ready() {
                     self.follow_link(fx, link);
@@ -136,7 +139,7 @@ impl State {
     fn follow_link(&mut self, fx: &mut Effects, link: Link) {
         if !matches!(
             link,
-            Link::Settings { .. } | Link::SignIn { .. } | Link::Connection { .. }
+            Link::Settings { .. } | Link::SignIn { .. } | Link::Connection { .. } | Link::Room(_)
         ) {
             self.invites.nav_seq += 1;
         }
@@ -156,7 +159,7 @@ impl State {
                 self.invites.settings_seq += 1;
             }
             // Handled as it comes (`on_invites`), never held.
-            Link::SignIn { .. } => {}
+            Link::SignIn { .. } | Link::Room(_) => {}
             Link::Connection { provider, outcome } => {
                 self.on_connection_link(fx, provider, outcome);
             }

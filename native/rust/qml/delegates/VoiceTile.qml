@@ -108,8 +108,10 @@ Item {
     TapHandler {
         onTapped: ShellState.toggleFocus(root.tileId)
     }
+    // A meeting room's people are guests, not accounts: no peer menu.
     TapHandler {
         acceptedButtons: Qt.RightButton
+        enabled: Voice.room.length === 0
         onTapped: eventPoint => ShellState.showPeerMenu(root.memberId, root.name, root, eventPoint.position, Voice.channelId)
     }
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
@@ -386,7 +388,7 @@ Item {
     // Faded, not hidden, so it can take keyboard focus and reveal itself.
     IconKey {
         id: moreKey
-        visible: !root.tray
+        visible: !root.tray && Voice.room.length === 0
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 8

@@ -15,7 +15,7 @@ Item {
         context: Qt.ApplicationShortcut
         // Closing the switcher is always allowed; opening it waits for
         // Settings, the profile editor and every other modal to be shut.
-        enabled: Session.phase === Session.Ready
+        enabled: Session.phase === Session.Ready && Voice.room.length === 0
             && ((switcher.item?.opened ?? false) || (ShellState.modalCount === 0 && !SettingsNav.open))
         onActivated: {
             if (switcher.item?.opened)
@@ -30,7 +30,7 @@ Item {
     // with Shift the previous and next unread one; Ctrl+Alt+Up and
     // Ctrl+Alt+Down the previous and next server (Home first). Not while a
     // dialog, Settings or the switcher is up. Text fields do not use these.
-    readonly property bool navAllowed: Session.phase === Session.Ready
+    readonly property bool navAllowed: Session.phase === Session.Ready && Voice.room.length === 0
         && ShellState.modalCount === 0 && !SettingsNav.open && !(switcher.item?.opened ?? false)
     Shortcut {
         sequence: "Alt+Up"

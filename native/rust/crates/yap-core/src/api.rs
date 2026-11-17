@@ -280,13 +280,68 @@ impl Api {
         self.request(method, path)
     }
 
-    /// A request to `base` (the API, or Kova's auth server) with the session.
+    /// A request to `base` (the API, or Kova's auth server) with the session
+    /// (none for an empty token: a meeting room's guest).
     fn request_at(&self, method: Method, base: &str, path: &str) -> RequestBuilder {
         let cfg = config::get();
-        self.http
+        let builder = self
+            .http
             .request(method, format!("{base}{path}"))
-            .bearer_auth(self.token.as_str())
-            .header("X-Publishable-Key", &cfg.publishable_key)
+            .header("X-Publishable-Key", &cfg.publishable_key);
+        if self.token.as_str().is_empty() {
+            builder
+        } else {
+            builder.bearer_auth(self.token.as_str())
+        }
+    }
+
+    /// `POST path` with extra headers, answering the body and the
+    /// response's `Set-Cookie` values (a meeting room's admission keeps
+    /// the server's guest session that way).
+    pub async fn post_with_cookies(
+        &self,
+        path: &str,
+        body: &Value,
+        headers: &[(&'static str, String)],
+    ) -> Result<(Value, Vec<String>), ApiError> {
+        let builder = headers.iter().fold(
+            self.request(Method::POST, path).json(body),
+            |b, (name, value)| b.header(*name, value),
+        );
+        let (client, request) = builder.build_split();
+        let request = request.map_err(|error| ApiError::network(&error))?;
+        if let Some(error) =
+            crate::faults::intercept(request.method().as_str(), request.url().as_str())
+        {
+            return Err(error);
+        }
+        let response = client
+            .execute(request)
+            .await
+            .map_err(|error| ApiError::network(&error))?;
+        let cookies = response
+            .headers()
+            .get_all(reqwest::header::SET_COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok().map(str::to_owned))
+            .collect();
+        let status = response.status();
+        if status == StatusCode::UNAUTHORIZED {
+            return Err(ApiError::Unauthorized);
+        }
+        let body: Value = response.json().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            let message = body
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or(NO_SERVER_MESSAGE)
+                .to_owned();
+            return Err(ApiError::Http {
+                status: status.as_u16(),
+                message,
+            });
+        }
+        Ok((body, cookies))
     }
 
     async fn send(&self, builder: RequestBuilder) -> Result<Value, ApiError> {

@@ -640,6 +640,15 @@ pub struct VoiceCall {
     pub move_grant: Option<String>,
     /// The spatial panel's room map (JSON), empty until the call has one.
     pub spatial: String,
+    /// A meeting room's slug (`crate::rooms`): no server, no channel, no
+    /// gateway presence; `channel_id` is [`room_channel`] of it.
+    pub room: Option<String>,
+}
+
+/// The stand-in channel id a meeting room's call keeps, so the roster and
+/// tiles key it like any call and nothing mistakes it for a channel.
+pub fn room_channel(slug: &str) -> String {
+    format!("room:{slug}")
 }
 
 /// What [`super::Command::RegisterPush`] gave: the body of

@@ -228,6 +228,12 @@ pub enum Command {
     /// `None` when the pointer left it.
     MentionHover(Option<String>),
     JoinVoice(String),
+    /// Joins a meeting room (`crate::rooms`) under `name`, signed in or
+    /// not, leaving any other call first. Left with [`Command::LeaveVoice`].
+    JoinRoom {
+        slug: String,
+        name: String,
+    },
     LeaveVoice,
     SetVoiceMuted(bool),
     /// Deafen (or not). Like mute, it is kept between calls.

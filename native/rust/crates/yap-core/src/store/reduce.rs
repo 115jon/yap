@@ -714,8 +714,10 @@ impl State {
     /// The voice channel the roster model shows: the open voice view, else
     /// the call's channel.
     fn roster_channel(&self) -> Option<&str> {
-        self.voice_view
-            .as_deref()
+        // A meeting room covers the shell: its people, whatever is open.
+        let room = self.voice.as_ref().filter(|c| c.room.is_some());
+        room.map(|c| c.channel_id.as_str())
+            .or(self.voice_view.as_deref())
             .or(self.voice.as_ref().map(|c| c.channel_id.as_str()))
     }
 
@@ -837,6 +839,7 @@ impl State {
                         self.dm(&call.channel_id)
                             .map(|dm| dm.recipient.label().to_owned())
                     })
+                    .or_else(|| call.room.clone())
                     .unwrap_or_default(),
                 live: call.status == "Connected",
                 status: call.status.clone(),
@@ -852,6 +855,7 @@ impl State {
                 sharing: call.share.is_some(),
                 share_error: call.share_error.clone(),
                 spatial: call.spatial.clone(),
+                room: call.room.clone().unwrap_or_default(),
             },
             None => VoiceView {
                 muted: prefs.muted,
@@ -1753,6 +1757,7 @@ impl State {
             Command::SetGameActivity(activity) => self.set_game_activity(activity.map(|a| *a)),
             Command::SaveTheme { theme, sync } => self.save_theme(fx, theme, sync),
             Command::JoinVoice(id) => self.join_voice(fx, id),
+            Command::JoinRoom { slug, name } => self.join_room(fx, &slug, &name),
             Command::WatchStream {
                 participant_id,
                 watch,
@@ -4440,6 +4445,7 @@ impl State {
             dm,
             move_grant,
             spatial: String::new(),
+            room: None,
         });
         self.emit_voice(fx);
     }
@@ -4474,10 +4480,91 @@ impl State {
                 call: call.id,
                 command: VoiceCommand::Leave,
             });
-            if call.joined {
+            if call.joined && call.room.is_none() {
                 self.gateway_send(fx, Self::voice_leave_frame(&call.channel_id));
             }
         }
+        self.emit_voice(fx);
+    }
+
+    /// Joins a meeting room (RoomPageClient.tsx): signed in or not, under
+    /// the name given, as the server's public room guest. Not a channel:
+    /// no presence on the gateway, no standby, no apps.
+    fn join_room(&mut self, fx: &mut Effects, slug: &str, name: &str) {
+        let (Some(name), true) = (
+            crate::rooms::guest_name(name),
+            crate::rooms::is_room_slug(slug),
+        ) else {
+            return;
+        };
+        if self
+            .voice
+            .as_ref()
+            .is_some_and(|c| c.room.as_deref() == Some(slug))
+        {
+            return;
+        }
+        self.leave_call(fx);
+        if let Some(stale) = self.standby.take() {
+            fx.push(Effect::Voice {
+                call: stale.id,
+                command: VoiceCommand::Leave,
+            });
+        }
+        // A guest's admission carries no session; a signed-in user's room
+        // admission does not use it either (the server admits both alike).
+        let token = self
+            .signed_in()
+            .map_or_else(|| Token::new(""), |(session, _)| session.token.clone());
+        let target = VoiceTarget {
+            me_name: name.clone(),
+            me_username: name,
+            room_slug: Some(slug.to_owned()),
+            ..VoiceTarget::default()
+        };
+        self.voice_error.clear();
+        let call = CallId(self.next_id());
+        fx.push(Effect::VoiceStart {
+            call,
+            token,
+            target,
+        });
+        let prefs = self.voice_prefs;
+        if prefs.muted {
+            fx.push(Effect::Voice {
+                call,
+                command: VoiceCommand::SetMuted(true),
+            });
+        }
+        if prefs.deafened {
+            fx.push(Effect::Voice {
+                call,
+                command: VoiceCommand::SetDeafened(true),
+            });
+        }
+        self.voice = Some(VoiceCall {
+            id: call,
+            server_id: String::new(),
+            channel_id: super::state::room_channel(slug),
+            status: "Connecting".into(),
+            roster: Vec::new(),
+            muted: prefs.muted,
+            deafened: prefs.deafened,
+            joined: false,
+            watched: Default::default(),
+            camera_wanted: false,
+            camera: false,
+            camera_error: String::new(),
+            share_wanted: None,
+            share: None,
+            share_error: String::new(),
+            share_preview: None,
+            share_preview_clear: false,
+            dm: false,
+            move_grant: None,
+            spatial: String::new(),
+            room: Some(slug.to_owned()),
+        });
         self.emit_voice(fx);
     }
 
@@ -4587,7 +4674,9 @@ impl State {
 
     fn send_share_preview(&mut self, fx: &mut Effects, url: Option<String>) {
         let ready = self.session.as_ref().is_some_and(|s| s.gateway.ready);
-        let Some(call) = self.voice.as_mut() else {
+        // A meeting room's share is not the account's: no still on the
+        // gateway (the room refuses it on its own socket too).
+        let Some(call) = self.voice.as_mut().filter(|c| c.room.is_none()) else {
             return;
         };
         let url = url.filter(|url| call.joined && call.share.is_some() && view::is_still_url(url));
@@ -4657,7 +4746,7 @@ impl State {
                     fx.view(ViewUpdate::Sound(Sound::Connect));
                 }
                 let dm = current.dm;
-                let join = Self::voice_join_frame(current);
+                let join = Self::voice_join_frame(current).filter(|_| current.room.is_none());
                 // The grant did its job (both tickets and this join).
                 current.move_grant = None;
                 self.gateway_send(fx, join);
@@ -4666,7 +4755,7 @@ impl State {
                 }
             }
             VoiceUpdate::Rejoined => {
-                let join = Self::voice_join_frame(current);
+                let join = Self::voice_join_frame(current).filter(|_| current.room.is_none());
                 self.gateway_send(fx, join);
             }
             VoiceUpdate::VoiceReady { participant_id } => {
@@ -4690,7 +4779,7 @@ impl State {
                 // channel: no leave sound, no presence leave, and the room
                 // hands the seat over (one session per user). A DM call or
                 // one never joined just ends.
-                if !current.joined || current.dm {
+                if !current.joined || current.dm || current.room.is_some() {
                     let reason = super::CALL_RESET.to_owned();
                     return self.on_voice(fx, call, VoiceUpdate::Ended(Some(reason)));
                 }
@@ -4703,6 +4792,7 @@ impl State {
                 return self.start_voice(fx, ended.server_id, ended.channel_id, None, None);
             }
             VoiceUpdate::Ended(error) => {
+                let ended_room = current.room.is_some();
                 // A forced end: the leave sound and presence leave only if
                 // the room had said Ready.
                 if let Some(ended) = self.voice.take() {
@@ -4712,7 +4802,9 @@ impl State {
                         if !ended.dm {
                             fx.view(ViewUpdate::Sound(Sound::Disconnect));
                         }
-                        self.gateway_send(fx, Self::voice_leave_frame(&ended.channel_id));
+                        if ended.room.is_none() {
+                            self.gateway_send(fx, Self::voice_leave_frame(&ended.channel_id));
+                        }
                     }
                     fx.push(Effect::VoiceForget(ended.id));
                     if ended.dm {
@@ -4721,7 +4813,11 @@ impl State {
                     self.sync_standby(fx);
                 }
                 if let Some(error) = error {
-                    self.voice_error = join_error_copy(&error);
+                    self.voice_error = if ended_room {
+                        room_error_copy(&error)
+                    } else {
+                        join_error_copy(&error)
+                    };
                     self.set_status(fx, format!("Left the call: {error}"));
                 }
             }
@@ -4770,6 +4866,25 @@ fn join_error_copy(error: &str) -> String {
         return "Couldn't reach Yap. Check your connection and try again.".to_owned();
     }
     "Couldn't join the call. Try again.".to_owned()
+}
+
+/// [`join_error_copy`] for a meeting room (`crate::rooms`).
+fn room_error_copy(error: &str) -> String {
+    let lower = error.to_ascii_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|n| lower.contains(n));
+    if has(&["429", "rate limit"]) {
+        // The server admits 12 room joins an hour per network.
+        return "Too many meeting joins from this network. Wait a while, then try again."
+            .to_owned();
+    }
+    if has(&["403", "forbidden"]) {
+        return "You can't join this meeting.".to_owned();
+    }
+    match join_error_copy(error).as_str() {
+        "Couldn't join the call. Try again." => "Couldn't join the meeting. Try again.".to_owned(),
+        "Couldn't reconnect to the call." => "Lost the connection to the meeting.".to_owned(),
+        other => other.to_owned(),
+    }
 }
 
 fn unexpected(response: &ApiResponse) -> ApiError {

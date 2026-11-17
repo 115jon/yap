@@ -23,7 +23,25 @@ pub mod qobject {
         /// jumpChannelId, jumpMessageId, jumpSeq, settingsPanel,
         /// settingsRow, settingsSeq, navSeq}`.
         #[qproperty(QString, state)]
+        /// A meeting room a link asked to join (`yap_core::rooms`), until
+        /// the join prompt takes it (`clearRoomRequest`); empty otherwise.
+        /// Signed in or not: the prompt shows wherever the app is.
+        #[qproperty(QString, room_request, cxx_name = "roomRequest")]
+        /// The app has a join prompt for meeting rooms: room links are
+        /// ours. Off (an app without one), they are not links into the
+        /// app and open in the browser as before.
+        #[qproperty(bool, rooms)]
         type Invites = super::InvitesRust;
+
+        /// A link asked to join the meeting room in `roomRequest`.
+        #[qsignal]
+        #[cxx_name = "roomRequested"]
+        fn room_requested(self: Pin<&mut Invites>);
+
+        /// The join prompt took `roomRequest`.
+        #[qinvokable]
+        #[cxx_name = "clearRoomRequest"]
+        fn clear_room_request(self: Pin<&mut Invites>);
 
         /// A link opened the invite landing.
         #[qsignal]
@@ -69,7 +87,7 @@ pub mod qobject {
         /// then opens here; false leaves it to the browser.
         #[qinvokable]
         #[cxx_name = "openLink"]
-        fn open_link(self: &Invites, url: &QString) -> bool;
+        fn open_link(self: Pin<&mut Invites>, url: &QString) -> bool;
 
         /// The channel (or DM) a link opens, or empty when it opens none:
         /// for a shell that shows the conversation once it is the open one.
@@ -81,7 +99,7 @@ pub mod qobject {
         /// only `yap://` and `yap-native://` links count.
         #[qinvokable]
         #[cxx_name = "openArg"]
-        fn open_arg(self: &Invites, arg: &QString) -> bool;
+        fn open_arg(self: Pin<&mut Invites>, arg: &QString) -> bool;
 
         /// A bare code or an invite link.
         #[qinvokable]
@@ -128,6 +146,8 @@ use crate::gui;
 #[derive(Default)]
 pub struct InvitesRust {
     state: QString,
+    room_request: QString,
+    rooms: bool,
 }
 
 thread_local! {
@@ -256,8 +276,27 @@ impl qobject::Invites {
         });
     }
 
-    pub fn open_link(&self, url: &QString) -> bool {
-        open(links::parse_link(&url.to_string(), web_origin()))
+    pub fn open_link(self: Pin<&mut Self>, url: &QString) -> bool {
+        let link = links::parse_link(&url.to_string(), web_origin());
+        self.follow(link)
+    }
+
+    /// A room link goes to the join prompt; any other to the store.
+    fn follow(self: Pin<&mut Self>, link: Option<Link>) -> bool {
+        match link {
+            Some(Link::Room(_)) if !*self.rooms() => false,
+            Some(Link::Room(slug)) => {
+                let mut this = self;
+                this.as_mut().set_room_request(q(&slug));
+                this.room_requested();
+                true
+            }
+            other => open(other),
+        }
+    }
+
+    pub fn clear_room_request(self: Pin<&mut Self>) {
+        self.set_room_request(QString::default());
     }
 
     pub fn link_channel(&self, url: &QString) -> QString {
@@ -267,16 +306,20 @@ impl qobject::Invites {
         }
     }
 
-    pub fn open_arg(&self, arg: &QString) -> bool {
+    pub fn open_arg(self: Pin<&mut Self>, arg: &QString) -> bool {
         let arg = arg.to_string();
-        let link = links::deep_link_arg_with(&arg, test_scheme());
+        // A room's https link handed to the app opens it too; no other
+        // site link does from the command line.
+        let link = links::deep_link_arg_with(&arg, test_scheme()).or_else(|| {
+            links::parse_link(&arg, web_origin()).filter(|l| matches!(l, Link::Room(_)))
+        });
         match &link {
             Some(link) => eprintln!("[link] deep link: {}", link.kind()),
             // A flag or a path says nothing; a URL we refused does.
             None if arg.contains("://") => eprintln!("[link] deep link refused"),
             None => {}
         }
-        open(link)
+        self.follow(link)
     }
 
     pub fn open_invite(&self, text: &QString) -> bool {
