@@ -258,6 +258,14 @@ pub struct CallsView {
     pub voice_channels: Vec<MoveChannel>,
     /// Why the last move was refused, until the next one.
     pub move_error: String,
+    /// A move is waiting on the server's answer.
+    pub move_pending: bool,
+    /// The joined voice channel's status as the tree shows it (text, and
+    /// the picture as `<url>#<type>;<w>x<h>`), and whether we may change
+    /// it; empty in a DM call.
+    pub channel_status: String,
+    pub channel_status_media: String,
+    pub channel_status_editable: bool,
 }
 
 /// The calls' state in the store.

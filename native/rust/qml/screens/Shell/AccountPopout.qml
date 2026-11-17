@@ -9,7 +9,8 @@ import Yap.Ui
 // the account row, 8 px above it. The status line under your name edits the
 // custom status (Enter or leaving the field saves, Esc cancels). The rows:
 // your status (a submenu of Online, Idle, Do not disturb and Invisible),
-// Copy user ID (Sign out is in Settings > Account, as on the web). Status
+// Start a meeting and Join a meeting (a native addition: the web's home
+// page starts and joins rooms), Copy user ID (Sign out is in Settings > Account, as on the web). Status
 // changes are stored and broadcast.
 T.Popup {
     id: popup
@@ -113,6 +114,29 @@ T.Popup {
                     text: Theme.ownPresenceWord(popup.status)
                     trailingGlyph: "chevronRight"
                     onTriggered: popup.statusView = true
+                }
+                Rectangle {
+                    x: 4
+                    width: parent.width - 8
+                    height: 9
+                    color: "transparent"
+                    Rectangle { anchors.centerIn: parent; width: parent.width; height: 1; color: Theme.line }
+                }
+                AccountRowKey {
+                    glyph: "camera"
+                    text: qsTr("Start a meeting")
+                    onTriggered: {
+                        popup.close()
+                        ShellState.meetingRequested(true)
+                    }
+                }
+                AccountRowKey {
+                    glyph: "link"
+                    text: qsTr("Join a meeting")
+                    onTriggered: {
+                        popup.close()
+                        ShellState.meetingRequested(false)
+                    }
                 }
                 Rectangle {
                     x: 4
