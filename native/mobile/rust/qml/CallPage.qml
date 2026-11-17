@@ -226,6 +226,108 @@ Rectangle {
         }
     }
 
+    // The voice channel's status and vibe, ours to change while we are in
+    // it (the drawer's status line, at the call): the vibe's thumbnail (or
+    // the sparkle) opens the vibe, the line the status (VoiceStatusSheet).
+    Item {
+        id: channelStatus
+        readonly property bool shown: root.inCall && !root.dmCallOn && root.calls.channelStatusEditable === true
+        readonly property string text: root.calls.channelStatus ?? ""
+        readonly property string media: root.calls.channelStatusMedia ?? ""
+        function edit(media) {
+            Native.haptic(Native.Tick)
+            ShellState.voiceStatusRequested(Voice.channelId, Voice.channelName, media, channelStatus.text)
+        }
+        VoiceStatusMedia {
+            id: callVibe
+            media: channelStatus.media
+        }
+        anchors.top: statusRow.bottom
+        x: root.leftInset
+        width: parent.width - root.leftInset - root.rightInset
+        height: shown ? 56 : 0
+        visible: shown
+
+        Rectangle {
+            anchors.fill: parent
+            color: statusTap.pressed ? Theme.tint1 : "transparent"
+            Behavior on color { ColorAnimation { duration: Theme.dur1 } }
+        }
+        Rectangle {
+            id: vibeThumb
+            x: 16
+            anchors.verticalCenter: parent.verticalCenter
+            width: 40
+            height: 40
+            radius: Theme.radius
+            color: vibeTap.pressed ? Theme.tint3 : Theme.tint1
+            border.width: 1
+            border.color: Theme.line
+            clip: true
+            Accessible.role: Accessible.Button
+            Accessible.name: callVibe.info.url.length > 0 ? qsTr("Change the vibe") : qsTr("Set the vibe")
+            Accessible.onPressAction: channelStatus.edit(true)
+            Icon {
+                visible: callVibe.info.url.length === 0
+                anchors.centerIn: parent
+                name: "sparkle"
+                size: Theme.iconMd
+                color: Theme.ink2
+            }
+            VibePicture {
+                visible: callVibe.info.url.length > 0
+                anchors.fill: parent
+                anchors.margins: 1
+                url: callVibe.info.url
+                video: callVibe.info.video
+                playing: root.visible && Qt.application.state === Qt.ApplicationActive
+            }
+            TapHandler {
+                id: vibeTap
+                onTapped: channelStatus.edit(true)
+            }
+        }
+        Item {
+            anchors.left: vibeThumb.right
+            anchors.right: parent.right
+            height: parent.height
+            Accessible.role: Accessible.Button
+            Accessible.name: channelStatus.text.length > 0 ? qsTr("Edit status: %1").arg(channelStatus.text) : qsTr("Set a channel status")
+            Accessible.onPressAction: channelStatus.edit(false)
+            Text {
+                anchors.left: parent.left
+                anchors.leftMargin: 12
+                anchors.right: editGlyph.left
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                text: channelStatus.text.length > 0 ? channelStatus.text : qsTr("Set a channel status")
+                color: channelStatus.text.length > 0 ? Theme.ink1 : Theme.ink3
+                font: Theme.type.setting
+            }
+            Icon {
+                id: editGlyph
+                anchors.right: parent.right
+                anchors.rightMargin: 20
+                anchors.verticalCenter: parent.verticalCenter
+                name: "edit"
+                size: Theme.iconMd
+                color: Theme.ink3
+            }
+            TapHandler {
+                id: statusTap
+                onTapped: channelStatus.edit(false)
+            }
+        }
+        Rectangle {
+            anchors.bottom: parent.bottom
+            width: parent.width
+            height: 1
+            color: Theme.line
+        }
+    }
+
     // What is wrong, when something is (CallHealth, shared with the
     // desktop): a failed call's reason, a camera or a screen share that
     // would not start,
@@ -233,7 +335,7 @@ Rectangle {
     // link.
     CallHealth {
         id: trouble
-        anchors.top: statusRow.bottom
+        anchors.top: channelStatus.bottom
         width: parent.width
         wrap: true
         textFont: Theme.type.description
@@ -634,8 +736,8 @@ Rectangle {
 
     // Someone's volume (0-200 %, a tick at 100 %) and our local mute for
     // them, both kept for later calls (the desktop's peer menu: "User
-    // volume", "Mute"). The slider is heard as it moves and saved on
-    // release.
+    // volume", "Mute"), and for a moderator "Move to" (MoveTargetRows).
+    // The slider is heard as it moves and saved on release.
     BottomSheet {
         id: peerSheet
         property string userId: ""
@@ -793,6 +895,13 @@ Rectangle {
                         root.peersRevision += 1
                     }
                 }
+            }
+            // A moderator moves them to another voice channel.
+            MoveTargetRows {
+                userId: peerSheet.userId
+                channelId: Voice.channelId
+                shown: peerSheet.up
+                onMoved: peerSheet.close()
             }
         }
     }

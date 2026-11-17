@@ -505,6 +505,7 @@ fn set_voice(mut voice: Pin<&mut Voice>, view: &VoiceView) {
     voice.as_mut().set_share_error(q(&view.share_error));
     voice.as_mut().set_sharing(view.sharing);
     voice.as_mut().set_spatial(q(&view.spatial));
+    voice.as_mut().set_room(q(&view.room));
     voice.set_channel_id(q(&view.channel_id));
 }
 

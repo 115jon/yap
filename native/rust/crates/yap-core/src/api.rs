@@ -1,15 +1,25 @@
 //! Yap REST: JSON over HTTPS with the Kova session as a Bearer token.
+//!
+//! The session, the error type and the URL rules build without the
+//! `runtime` feature; the client (`Api`) needs it.
 
+#[cfg(feature = "runtime")]
 use std::error::Error as _;
 use std::fmt;
+#[cfg(feature = "runtime")]
 use std::path::Path;
 use std::sync::Arc;
 
+#[cfg(feature = "runtime")]
 use futures_util::StreamExt as _;
+#[cfg(feature = "runtime")]
 use reqwest::{Client, Method, RequestBuilder, StatusCode};
+#[cfg(feature = "runtime")]
 use serde_json::Value;
+#[cfg(feature = "runtime")]
 use tokio::io::AsyncWriteExt as _;
 
+#[cfg(feature = "runtime")]
 use crate::config;
 
 /// A Kova session token. `Debug` never prints it.
@@ -126,10 +136,12 @@ impl ApiError {
     }
 
     /// [`ApiError::network`] for the crate's own request paths.
+    #[cfg(feature = "runtime")]
     pub(crate) fn from_reqwest(error: &reqwest::Error) -> Self {
         Self::network(error)
     }
 
+    #[cfg(feature = "runtime")]
     /// Keeps the whole cause chain, like `anyhow`'s `{:#}` did.
     fn network(error: &reqwest::Error) -> Self {
         let mut text = error.to_string();
@@ -143,6 +155,7 @@ impl ApiError {
     }
 }
 
+#[cfg(feature = "runtime")]
 /// How long an upload or a download may take (the client default is 30 s).
 const UPLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
@@ -150,10 +163,12 @@ const UPLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 /// may send (500 MB with `bigUploads`).
 pub const MAX_DOWNLOAD_BYTES: u64 = crate::limits::MAX_ATTACHMENT_BYTES;
 
+#[cfg(feature = "runtime")]
 fn too_large() -> ApiError {
     ApiError::Decode("file is too large to download (over 500 MB)".into())
 }
 
+#[cfg(feature = "runtime")]
 /// Writes the response body to `dest` chunk by chunk, refusing more than
 /// `cap` bytes (a missing or wrong Content-Length does not get past this).
 async fn write_body(response: reqwest::Response, dest: &Path, cap: u64) -> Result<(), ApiError> {
@@ -232,6 +247,7 @@ fn unsigned_proxy_media(path_and_query: &str) -> bool {
     })
 }
 
+#[cfg(feature = "runtime")]
 /// The shared HTTP client. Fails only if the TLS backend cannot start.
 pub fn http_client() -> reqwest::Result<Client> {
     Client::builder()
@@ -241,12 +257,14 @@ pub fn http_client() -> reqwest::Result<Client> {
         .build()
 }
 
+#[cfg(feature = "runtime")]
 #[derive(Clone)]
 pub struct Api {
     http: Client,
     token: Token,
 }
 
+#[cfg(feature = "runtime")]
 impl Api {
     pub fn new(http: Client, token: Token) -> Self {
         Self { http, token }
@@ -262,13 +280,68 @@ impl Api {
         self.request(method, path)
     }
 
-    /// A request to `base` (the API, or Kova's auth server) with the session.
+    /// A request to `base` (the API, or Kova's auth server) with the session
+    /// (none for an empty token: a meeting room's guest).
     fn request_at(&self, method: Method, base: &str, path: &str) -> RequestBuilder {
         let cfg = config::get();
-        self.http
+        let builder = self
+            .http
             .request(method, format!("{base}{path}"))
-            .bearer_auth(self.token.as_str())
-            .header("X-Publishable-Key", &cfg.publishable_key)
+            .header("X-Publishable-Key", &cfg.publishable_key);
+        if self.token.as_str().is_empty() {
+            builder
+        } else {
+            builder.bearer_auth(self.token.as_str())
+        }
+    }
+
+    /// `POST path` with extra headers, answering the body and the
+    /// response's `Set-Cookie` values (a meeting room's admission keeps
+    /// the server's guest session that way).
+    pub async fn post_with_cookies(
+        &self,
+        path: &str,
+        body: &Value,
+        headers: &[(&'static str, String)],
+    ) -> Result<(Value, Vec<String>), ApiError> {
+        let builder = headers.iter().fold(
+            self.request(Method::POST, path).json(body),
+            |b, (name, value)| b.header(*name, value),
+        );
+        let (client, request) = builder.build_split();
+        let request = request.map_err(|error| ApiError::network(&error))?;
+        if let Some(error) =
+            crate::faults::intercept(request.method().as_str(), request.url().as_str())
+        {
+            return Err(error);
+        }
+        let response = client
+            .execute(request)
+            .await
+            .map_err(|error| ApiError::network(&error))?;
+        let cookies = response
+            .headers()
+            .get_all(reqwest::header::SET_COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok().map(str::to_owned))
+            .collect();
+        let status = response.status();
+        if status == StatusCode::UNAUTHORIZED {
+            return Err(ApiError::Unauthorized);
+        }
+        let body: Value = response.json().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            let message = body
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or(NO_SERVER_MESSAGE)
+                .to_owned();
+            return Err(ApiError::Http {
+                status: status.as_u16(),
+                message,
+            });
+        }
+        Ok((body, cookies))
     }
 
     async fn send(&self, builder: RequestBuilder) -> Result<Value, ApiError> {

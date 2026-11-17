@@ -10,6 +10,8 @@
 //!   `inviteCodeFromDeepLink`, which ignores its query and fragment). It is
 //!   read the same way here when the strict form below does not match, so
 //!   the Tauri app's links keep working;
+//! - a meeting room: `<site>/room/<slug>` (`room.$slug.tsx`,
+//!   [`crate::rooms`]);
 //! - `<site>/chat/<server>[/<channel>]` (ChannelSidebar.tsx "Copy link"),
 //!   with `?message=<id>` for a message (MessageItem.tsx `buildMessageLink`);
 //!   `@me` is Home and its DMs. The web reads the path as
@@ -27,6 +29,7 @@
 //! | `yap://chat/<server>`                          | a server, on its last channel       |
 //! | `yap://chat/<server>/<channel>[?message=<id>]` | a channel (voice: its panel, no join), at a message |
 //! | `yap://settings[/<panel>][?row=<row>]`         | Settings, on a panel and row        |
+//! | `yap://room/<slug>`                            | the meeting room's join prompt      |
 //! | `yap://signin[?code=XXXX-XXXX]`                | the window; polls a waiting sign-in |
 //! | `yap://connection?provider=<p>&(code=<c>\|status=<s>)` | Connections, claiming a verified link or saying how it ended |
 //!
@@ -66,6 +69,8 @@ pub enum Link {
     /// The settings dialog on `panel`; `row` (or empty) is the row it lands
     /// on. Both are ids from `settings::PANELS`.
     Settings { panel: String, row: String },
+    /// A meeting room (`crate::rooms`): its join prompt, signed in or not.
+    Room(String),
     /// A device sign-in was approved in the browser: show the window, and
     /// poll now if `user_code` is the code this app is waiting on.
     SignIn { user_code: Option<String> },
@@ -101,6 +106,7 @@ impl Link {
             Link::Channel { .. } => "channel",
             Link::Settings { .. } => "settings",
             Link::SignIn { .. } => "signin",
+            Link::Room(_) => "room",
             Link::Connection { .. } => "connection",
         }
     }
@@ -246,6 +252,7 @@ fn from_site_path(path: &str, query: &str) -> Option<Link> {
             let code = decode(code)?;
             is_code(&code).then_some(Link::Invite(code))
         }
+        ["room", slug] => room(slug),
         ["chat", server] => chat_link(server, None, None),
         ["chat", server, channel, ..] => chat_link(server, Some(channel), message()),
         _ => None,
@@ -270,6 +277,10 @@ fn from_native(rest: &str) -> Option<Link> {
             strict_query(query, &[])?;
             let code = decode(code)?;
             is_code(&code).then_some(Link::Invite(code))
+        }
+        ("room", [slug]) => {
+            strict_query(query, &[])?;
+            room(slug)
         }
         ("chat", [server]) => {
             strict_query(query, &[])?;
@@ -312,6 +323,12 @@ fn from_native(rest: &str) -> Option<Link> {
         }
         _ => None,
     }
+}
+
+/// A room link's slug, if the server would admit it.
+fn room(slug: &str) -> Option<Link> {
+    let slug = decode(slug)?;
+    crate::rooms::is_room_slug(&slug).then_some(Link::Room(slug))
 }
 
 /// A one-time code as the server makes them: 43 base64url characters.

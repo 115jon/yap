@@ -507,6 +507,8 @@ impl State {
         if let Some(id) = self.http(fx, request) {
             self.pending.moves.insert(id);
         }
+        // The cleared error and the pending move show at once.
+        self.sync_calls(fx);
     }
 
     pub(super) fn route_calls_http(
@@ -530,8 +532,8 @@ impl State {
             .unwrap_or_else(|| describe_api_error(&error, "move them"));
             fx.view(ViewUpdate::Notice(copy.clone()));
             self.calls.move_error = copy;
-            self.sync_calls(fx);
         }
+        self.sync_calls(fx);
         true
     }
 
@@ -674,6 +676,12 @@ impl State {
                     .collect()
             })
             .unwrap_or_default();
+        let (channel_status, channel_status_media, channel_status_editable) = self
+            .voice
+            .as_ref()
+            .filter(|call| !call.dm)
+            .map(|call| self.voice_status_shown(&call.channel_id))
+            .unwrap_or_default();
         CallsView {
             status: ring.map_or(RingStatus::Idle, |r| r.status),
             call_id: ring.and_then(|r| r.call_id.clone()).unwrap_or_default(),
@@ -695,6 +703,10 @@ impl State {
             stickers: self.calls.stickers.clone(),
             voice_channels,
             move_error: self.calls.move_error.clone(),
+            move_pending: !self.pending.moves.is_empty(),
+            channel_status,
+            channel_status_media,
+            channel_status_editable,
         }
     }
 

@@ -6,7 +6,7 @@
 //! system-wide is touched (no proxy, hosts file, firewall or adapter).
 //!
 //! Unset (the default) every check here answers "no fault" and nothing
-//! changes. The API client ([`crate::api::Api`]) asks [`intercept`] before
+//! changes. The API client (`crate::api::Api`) asks [`intercept`] before
 //! it sends anything. The chat gateway and both call sockets get their
 //! tickets through that client, so they fail to connect too, and the call
 //! admission is a request like any other.

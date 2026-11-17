@@ -3,14 +3,22 @@
 # after its toolchain step. These crates reach the native crates by path, so
 # a plain checkout with stable Rust builds them (CI's `rust-shared` job).
 #
-# No Cargo.lock is committed: release-please bumps the native crates'
-# versions, and a lock here would go stale on every release. Versions that
-# must match a tool (ts-rs, wasm-bindgen) are pinned exactly instead.
+# Cargo.lock is committed and every build passes --locked: the wasm the web
+# ships comes from these exact crates. release-please bumps the native
+# crates' versions, so native/tools/sync-cargo-lock-version.mjs syncs this
+# lock too (`--also`, in ci.yml and release-please.yml). rust-toolchain.toml
+# pins the compiler; run cargo from this directory.
 [workspace]
 resolver = "2"
-members = ["protocol-ts"]
+members = ["protocol-ts", "yap-core-wasm"]
 
 [workspace.package]
 edition = "2021"
 license = "GPL-3.0-only"
 publish = false
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

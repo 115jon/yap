@@ -134,7 +134,8 @@ impl State {
 
     /// (server id, channel id) of the call.
     fn apps_call(&self) -> Option<(String, String)> {
-        let call = self.voice.as_ref()?;
+        // A meeting room has no apps (the server refuses them there).
+        let call = self.voice.as_ref().filter(|c| c.room.is_none())?;
         Some((call.server_id.clone(), call.channel_id.clone()))
     }
 

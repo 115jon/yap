@@ -5,12 +5,13 @@
 //! variable is set.
 //!
 //! `YAP_FIXTURE=soak` is the long-run memory fixture (docs/PERFORMANCE.md,
-//! pass 4): four text channels of 400 messages, and a driver ([`soak`])
+//! pass 4): four text channels of 400 messages, and a driver (`soak`)
 //! that replays gateway traffic at speed (messages with GIFs, pictures and
 //! embeds, edits, deletes, reactions, typing, presence, voice rosters) and
 //! switches channels. `YAP_FIXTURE_MEDIA=<http base>` serves the avatars
 //! and media from a local server (`tools/p4/media-server.mjs`).
 
+#[cfg(feature = "runtime")]
 pub mod soak;
 
 use yap_protocol::rest::{

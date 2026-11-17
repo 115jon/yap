@@ -1,0 +1,48 @@
+name: Build yap-core-wasm
+description: >-
+  Add Rust's wasm32-unknown-unknown target, install wasm-bindgen-cli at the
+  version packages/rust/yap-core-wasm pins (the release binary, checked
+  against its SHA-256), and build src/lib/yap-core-wasm/pkg's .wasm with
+  scripts/build-core-wasm.mjs. Run setup-pnpm first. The app's search text
+  rules load this module, so tests, builds and deploys need it.
+
+inputs:
+  check:
+    description: Also fail when the committed JS glue differs from the build.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Rust toolchain
+      # packages/rust/rust-toolchain.toml: the pinned compiler and the
+      # wasm32-unknown-unknown target.
+      shell: bash
+      working-directory: packages/rust
+      run: rustup toolchain install
+
+    - name: wasm-bindgen-cli
+      shell: bash
+      env:
+        # Must equal the `wasm-bindgen` crate pin and WASM_BINDGEN_VERSION
+        # in scripts/build-core-wasm.mjs.
+        VERSION: "0.2.130"
+        SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
+      run: |
+        name="wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl"
+        curl -sSLf -o "$RUNNER_TEMP/wasm-bindgen.tgz" \
+          "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${VERSION}/${name}.tar.gz"
+        echo "${SHA256}  $RUNNER_TEMP/wasm-bindgen.tgz" | sha256sum -c -
+        tar -xzf "$RUNNER_TEMP/wasm-bindgen.tgz" -C "$RUNNER_TEMP"
+        echo "$RUNNER_TEMP/${name}" >> "$GITHUB_PATH"
+
+    - name: Build
+      shell: bash
+      env:
+        CHECK: ${{ inputs.check }}
+      run: |
+        if [ "$CHECK" = "true" ]; then
+          node scripts/build-core-wasm.mjs --check
+        fi
+        node scripts/build-core-wasm.mjs

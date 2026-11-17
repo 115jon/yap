@@ -8,7 +8,13 @@ import { afterLoadIdle } from "@/lib/idle";
 // them in at idle after load, so the first click does not wait on the network.
 const loadChannelSettingsModal = () => import("./ChannelSettingsModal");
 const loadGifPickerModal = () => import("./GifPickerModal");
-const loadSearchPanel = () => import("./SearchPanel");
+// Search also needs yap-core-wasm (its terms, highlights and excerpts), so
+// the panel's chunk and the module load together.
+const loadSearchPanel = () =>
+  Promise.all([
+    import("./SearchPanel"),
+    import("@/lib/yap-core-wasm/load").then((m) => m.loadYapCore()),
+  ]).then(([panel]) => panel);
 
 export const LazyChannelSettingsModal = lazy(loadChannelSettingsModal);
 export const LazyGifPickerModal = lazy(loadGifPickerModal);

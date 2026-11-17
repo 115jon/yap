@@ -226,6 +226,12 @@ impl CallTarget {
             .clone()
             .unwrap_or_else(|| format!("voice-{}-{}", self.server_id, self.channel_id))
     }
+
+    /// A meeting room (`yap_core::rooms`): no channel. The server admits
+    /// it as a public room, which takes no spatial audio.
+    pub fn is_room(&self) -> bool {
+        self.room_slug.is_some() && self.channel_id.is_empty()
+    }
 }
 
 /// The two call sockets.
@@ -1159,7 +1165,7 @@ impl CallMachine {
     /// `enabled` when `ours`, as `useSpatialAudioSync` sends it), once the
     /// room knows us.
     fn send_spatial(&mut self, fx: &mut Vec<Effect>, ours: bool) {
-        if !self.sockets_open || !self.room_identified || self.standby {
+        if !self.sockets_open || !self.room_identified || self.standby || self.target.is_room() {
             return;
         }
         if ours {

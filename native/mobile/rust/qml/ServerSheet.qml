@@ -5,7 +5,8 @@ import Yap.Ui
 // The open server's menu (a tap on its name over the tree), or a channel's
 // (a long press on its row), as the Expo app's ServerSheet: Invite people
 // makes a link (a week, no use limit, for the server; the channel's 7-day
-// link for a channel) and hands it to the system share sheet; Mark as read;
+// link for a channel) and hands it to the system share sheet; for the
+// voice channel we are in, Set channel status; Mark as read;
 // and a channel's Copy link. A link that could not be made says why under
 // its row and the sheet stays up. The server's menu also has Create
 // channel (with Manage channels: CreateChannelPage) and, for members but
@@ -107,6 +108,20 @@ BottomSheet {
             wrapMode: Text.Wrap
             color: Theme.dangerInk
             font: Theme.type.caption
+        }
+        // The voice channel we are in: its status and vibe
+        // (VoiceStatusSheet).
+        SheetRow {
+            readonly property var calls: sheet.onChannel && sheet.voice ? JSON.parse(Calls.view) : ({})
+            // Once our voice session is up there (the core's `editable`).
+            visible: sheet.onChannel && sheet.voice && Voice.channelId === sheet.channelId
+                && calls.channelStatusEditable === true
+            iconName: "edit"
+            text: qsTr("Set channel status")
+            onTriggered: {
+                sheet.close()
+                ShellState.voiceStatusRequested(sheet.channelId, sheet.channelName, false, calls.channelStatus ?? "")
+            }
         }
         SheetRow {
             visible: !sheet.leaving
