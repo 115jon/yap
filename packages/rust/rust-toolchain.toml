@@ -1,0 +1,8 @@
+# One compiler for every build of these crates (local, CI, deploy), so the
+# wasm the web ships is built the same way the PR's checks built it.
+# rustup reads this from the current directory: run cargo from here.
+[toolchain]
+channel = "1.97.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-unknown-unknown"]

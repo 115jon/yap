@@ -1,7 +1,6 @@
 import { lazy } from "react";
 
 import { afterLoadIdle } from "@/lib/idle";
-import { loadYapCore } from "@/lib/yap-core-wasm/load";
 
 // Panels and dialogs the chat shell only draws after a click. Each is its own
 // chunk, so the shell does not carry them (the GIF picker, message search and
@@ -12,9 +11,10 @@ const loadGifPickerModal = () => import("./GifPickerModal");
 // Search also needs yap-core-wasm (its terms, highlights and excerpts), so
 // the panel's chunk and the module load together.
 const loadSearchPanel = () =>
-  Promise.all([import("./SearchPanel"), loadYapCore()]).then(
-    ([panel]) => panel,
-  );
+  Promise.all([
+    import("./SearchPanel"),
+    import("@/lib/yap-core-wasm/load").then((m) => m.loadYapCore()),
+  ]).then(([panel]) => panel);
 
 export const LazyChannelSettingsModal = lazy(loadChannelSettingsModal);
 export const LazyGifPickerModal = lazy(loadGifPickerModal);

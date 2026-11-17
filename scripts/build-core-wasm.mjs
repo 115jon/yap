@@ -8,8 +8,9 @@
 // test run or `vite dev` needs this first. `--check` builds into a temp
 // dir and fails when the committed glue differs (CI's rust-shared job).
 //
-// Needs rustup's wasm32-unknown-unknown target and wasm-bindgen-cli at
-// exactly the crate's wasm-bindgen version (WASM_BINDGEN_VERSION).
+// Needs rustup (packages/rust/rust-toolchain.toml brings the compiler and
+// the wasm32-unknown-unknown target) and wasm-bindgen-cli at exactly the
+// crate's wasm-bindgen version (WASM_BINDGEN_VERSION).
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -21,13 +22,13 @@ const WASM_BINDGEN_VERSION = "0.2.130";
 const GLUE = ["yap_core_wasm.js", "yap_core_wasm.d.ts"];
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const manifest = path.join(root, "packages/rust/Cargo.toml");
+const rustDir = path.join(root, "packages/rust");
 const pkg = path.join(root, "src/lib/yap-core-wasm/pkg");
 const check = process.argv.includes("--check");
 
-function run(cmd, args) {
+function run(cmd, args, cwd = root) {
   return execFileSync(cmd, args, {
-    cwd: root,
+    cwd,
     stdio: ["ignore", "pipe", "inherit"],
   }).toString();
 }
@@ -49,19 +50,22 @@ if (version !== `wasm-bindgen ${WASM_BINDGEN_VERSION}`) {
   process.exit(1);
 }
 
-run("cargo", [
-  "build",
-  "--quiet",
-  "--release",
-  "--manifest-path",
-  manifest,
-  "-p",
-  "yap-core-wasm",
-  "--target",
-  "wasm32-unknown-unknown",
-]);
-const targetDir =
-  process.env.CARGO_TARGET_DIR ?? path.join(root, "packages/rust/target");
+// From packages/rust, so rustup picks its rust-toolchain.toml.
+run(
+  "cargo",
+  [
+    "build",
+    "--quiet",
+    "--locked",
+    "--release",
+    "-p",
+    "yap-core-wasm",
+    "--target",
+    "wasm32-unknown-unknown",
+  ],
+  rustDir,
+);
+const targetDir = process.env.CARGO_TARGET_DIR ?? path.join(rustDir, "target");
 const wasm = path.join(
   targetDir,
   "wasm32-unknown-unknown/release/yap_core_wasm.wasm",

@@ -443,6 +443,12 @@ fn js_trim(text: &str) -> &str {
 /// One char, lower-cased when that keeps it one char (so offsets map back
 /// onto the original text).
 fn fold(c: char) -> char {
+    // Final sigma is a lowercase sigma: JavaScript's whole-string
+    // `toLowerCase` turns a word-final Σ into ς, so the web matched
+    // "ΟΔΟΣ" with "οδος" ("ς"); folding both to σ keeps that.
+    if c == 'ς' {
+        return 'σ';
+    }
     let mut lower = c.to_lowercase();
     match (lower.next(), lower.next()) {
         (Some(l), None) => l,

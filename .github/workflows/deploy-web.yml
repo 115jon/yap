@@ -123,6 +123,9 @@ jobs:
       # The search text rules are yap-core compiled to wasm; the .wasm is
       # built, not committed.
       - name: Build yap-core-wasm
+        # Refs from before yap-core-wasm have neither the action nor the
+        # script, and redeploying them must keep working.
+        if: ${{ hashFiles('scripts/build-core-wasm.mjs') != '' }}
         uses: ./.github/actions/setup-core-wasm
 
       - name: Build

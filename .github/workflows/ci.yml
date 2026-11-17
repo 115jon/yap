@@ -71,6 +71,13 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
+              # yap-core's search rules run in the web and the Worker
+              # through yap-core-wasm, so their changes need the web's tests.
+              - 'native/rust/Cargo.toml'
+              - 'native/rust/crates/yap-protocol/**'
+              - 'native/rust/crates/yap-core/**'
+              - 'native/rust/crates/yap-cache/**'
+              - 'packages/rust/**'
             rust:
               - 'native/rust/Cargo.toml'
               - 'native/rust/crates/yap-protocol/**'
@@ -97,9 +104,9 @@ jobs:
         uses: ./.github/actions/setup-pnpm
 
       - name: Setup Rust
-        run: |
-          rustup toolchain install stable --profile minimal --component clippy --target wasm32-unknown-unknown
-          rustup default stable
+        # The toolchain packages/rust/rust-toolchain.toml pins.
+        working-directory: packages/rust
+        run: rustup toolchain install
 
       # packages/protocol/src/generated is written from yap-protocol's Rust
       # types (packages/rust/protocol-ts). Regenerate and fail on any change,
@@ -121,10 +128,12 @@ jobs:
           check: "true"
 
       - name: Test yap-core-wasm against the search text fixtures
-        run: cargo test --manifest-path packages/rust/Cargo.toml -p yap-core-wasm
+        working-directory: packages/rust
+        run: cargo test --locked -p yap-core-wasm
 
       - name: Clippy
-        run: cargo clippy --manifest-path packages/rust/Cargo.toml --all-targets -- -D warnings
+        working-directory: packages/rust
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       # yap-core without its `runtime` feature (the store and the rules
       # modules) must build for the browser: no tokio, reqwest, keyring or
@@ -133,9 +142,10 @@ jobs:
       # native crates are path dependencies here. RUSTFLAGS turns their
       # rustc warnings (dead code once I/O is gone, say) into errors.
       - name: Check yap-core's pure half builds for wasm
+        working-directory: packages/rust
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check --manifest-path packages/rust/Cargo.toml -p yap-core-wasm --target wasm32-unknown-unknown
+        run: cargo check --locked -p yap-core-wasm --target wasm32-unknown-unknown
 
   quality:
     name: quality
@@ -159,7 +169,7 @@ jobs:
       # bumps native/rust/Cargo.toml without Cargo.lock: a release PR
       # whose lock sync (release-please.yml) has not landed fails here.
       - name: Check native Cargo.lock
-        run: node native/tools/sync-cargo-lock-version.mjs --check --also native/mobile/rust/Cargo.lock
+        run: node native/tools/sync-cargo-lock-version.mjs --check --also native/mobile/rust/Cargo.lock --also packages/rust/Cargo.lock
 
       - name: Check formatting
         run: pnpm run format:check
