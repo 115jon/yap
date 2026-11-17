@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.6.0](https://github.com/115jon/yap/compare/v4.5.0...v4.6.0) (2026-11-17)
+
+
+### Features
+
+* **native:** add channel media, links and files to the phone ([#375](https://github.com/115jon/yap/issues/375)) ([b4dab2e](https://github.com/115jon/yap/commit/b4dab2e55c57e3dd19d19805b83646ee1cecbe92))
+* **native:** import custom ui sounds on the phone ([#382](https://github.com/115jon/yap/issues/382)) ([f8df383](https://github.com/115jon/yap/commit/f8df383e8d133175c1f466e43ac6999d4b6734ee))
+* **native:** move people between voice channels and set the channel status on the phone ([#378](https://github.com/115jon/yap/issues/378)) ([c4f94ac](https://github.com/115jon/yap/commit/c4f94acfa116fb7aa65c361d42ab43993d736620))
+* **native:** set join and leave sounds on the phone ([#376](https://github.com/115jon/yap/issues/376)) ([c459055](https://github.com/115jon/yap/commit/c4590550b97ea258c7ad49f54a73fc1a2ac3b68f))
+* **native:** show sign-in methods, change the username and manage shared links on the phone ([#380](https://github.com/115jon/yap/issues/380)) ([f57a7d0](https://github.com/115jon/yap/commit/f57a7d0cdbc7ba154e279e25dea6c38f6407afff))
+* **native:** show the server audit log on the phone, with type and member filters and older pages ([#373](https://github.com/115jon/yap/issues/373)) ([cb70af2](https://github.com/115jon/yap/commit/cb70af2c1d147e4e4bb7d55d4a9afb8dd14a7748))
+* **native:** start and join guest meeting rooms on the desktop ([#379](https://github.com/115jon/yap/issues/379)) ([aee5810](https://github.com/115jon/yap/commit/aee581070059d7f105a41ac4c37714df61f9a611))
+
 ## [4.5.0](https://github.com/115jon/yap/compare/v4.4.1...v4.5.0) (2026-11-16)
 
 
