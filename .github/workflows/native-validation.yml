@@ -124,8 +124,14 @@ jobs:
           Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64" | Out-Null
           Write-Host "==> QMAKE $env:QMAKE"
           Push-Location native/rust
-          cargo test --workspace --locked --exclude yap-audio --target-dir ../build/test-target
+          cargo test --workspace --locked --exclude yap-audio --exclude yap-ui --target-dir ../build/test-target
           $code = $LASTEXITCODE
+          # yap-ui on its own: in the workspace run it would take yap-audio's
+          # libopus from yap_native, and its test exe does not link webrtc.lib.
+          if (-not $code) {
+            cargo test -p yap-ui --locked --target-dir ../build/test-target
+            $code = $LASTEXITCODE
+          }
           # yap-audio's app side (the clip player, the UI sounds), which the
           # desktop and the phone share: its own tests need no device.
           if (-not $code) {
